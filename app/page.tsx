@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { Press_Start_2P } from "next/font/google";
 
 const pixelFont = Press_Start_2P({
@@ -14,6 +15,22 @@ const GLYPH_IMAGES = [
   "/glyphs/sparkle.gif",
 ];
 
+// Map each menu item to its own icon/gif, shown when that row is selected.
+// Add your own files to public/icons/ and update the paths below.
+const ITEM_ICONS: Record<string, string> = {
+  Music: "/icons/music.gif",
+  Socials: "/icons/socials.gif",
+  Merch: "/icons/merch.gif",
+  Releases: "/icons/releases.gif",
+  SoundCloud: "/icons/soundcloud.gif",
+  Spotify: "/icons/spotify.gif",
+  "Apple Music": "/icons/apple-music.gif",
+  Instagram: "/icons/instagram.gif",
+  Twitch: "/icons/twitch.gif",
+  TOPSHELF: "/icons/topshelf.gif",
+  Back:"/icons/arrow.gif",
+};
+
 type Glyph = {
   id: number;
   src: string;
@@ -21,6 +38,7 @@ type Glyph = {
   duration: number;
   delay: number;
   size: number;
+  wobble: number;
 };
 
 const ArrowIcon = ({ direction }: { direction: "left" | "right" }) => (
@@ -43,6 +61,7 @@ const PauseIcon = () => (
 );
 
 export default function Home() {
+  const router = useRouter();
   const [menu, setMenu] = useState("main");
   const [selected, setSelected] = useState(0);
   const [glyphs, setGlyphs] = useState<Glyph[]>([]);
@@ -53,9 +72,9 @@ export default function Home() {
   const hasStartedSong = useRef(false);
 
   const menus = {
-    main: ["Music", "Socials", "Twitch", "Releases"],
+    main: ["Music", "Socials", "Merch", "Releases"],
     music: ["SoundCloud", "Spotify", "Apple Music", "Back"],
-    socials: ["Instagram", "Back"],
+    socials: ["Instagram", "Twitch", "Back"],
     releases: ["TOPSHELF", "Back"],
   };
 
@@ -111,8 +130,8 @@ export default function Home() {
         setSelected(0);
       }
 
-      if (item === "Twitch") {
-        window.open("https://www.twitch.tv/pinkmanee", "_blank");
+      if (item === "Merch") {
+        router.push("/merch");
       }
     }
 
@@ -143,6 +162,10 @@ export default function Home() {
     if (menu === "socials") {
       if (item === "Instagram") {
         window.open("https://www.instagram.com/pinkmanee/", "_blank");
+      }
+
+      if (item === "Twitch") {
+        window.open("https://www.twitch.tv/pinkmanee", "_blank");
       }
 
       if (item === "Back") {
@@ -188,6 +211,7 @@ export default function Home() {
       duration: 10 + Math.random() * 12,
       delay: Math.random() * 12,
       size: 26 + Math.random() * 28,
+      wobble: 15 + Math.random() * 35,
     }));
     setGlyphs(generated);
   }, []);
@@ -245,7 +269,7 @@ export default function Home() {
         backgroundSize: "cover",
         backgroundPosition: "center",
         backgroundRepeat: "no-repeat",
-        minHeight: "100vh",
+        minHeight: "100dvh",
         width: "100%",
         display: "flex",
         justifyContent: "center",
@@ -272,13 +296,16 @@ export default function Home() {
             src={g.src}
             alt=""
             className="floating-glyph"
-            style={{
-              left: `${g.left}%`,
-              width: `${g.size}px`,
-              height: `${g.size}px`,
-              animationDuration: `${g.duration}s`,
-              animationDelay: `${g.delay}s`,
-            }}
+            style={
+              {
+                left: `${g.left}%`,
+                width: `${g.size}px`,
+                height: `${g.size}px`,
+                animationDuration: `${g.duration}s`,
+                animationDelay: `${g.delay}s`,
+                "--wobble": `${g.wobble}px`,
+              } as React.CSSProperties
+            }
           />
         ))}
       </div>
@@ -380,17 +407,39 @@ export default function Home() {
                 <div
                   key={item}
                   style={{
+                    position: "relative",
                     padding: "10px",
-                    marginBottom: "8px",
                     fontSize: "clamp(11px, 3.2vw, 14px)",
                     lineHeight: "1.6",
                     background:
                       selected === index ? "black" : "transparent",
                     color: selected === index ? "white" : "black",
+                    borderBottom:
+                      index !== items.length - 1
+                        ? selected === index || selected === index + 1
+                          ? "1px solid transparent"
+                          : "1px solid rgba(0,0,0,0.15)"
+                        : "none",
                   }}
                 >
                   {selected === index ? "> " : ""}
                   {item}
+
+                  {selected === index && ITEM_ICONS[item] && (
+                    <img
+                      src={ITEM_ICONS[item]}
+                      alt=""
+                      style={{
+                        position: "absolute",
+                        right: "10px",
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        height: "70%",
+                        maxHeight: "28px",
+                        width: "auto",
+                      }}
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -524,24 +573,34 @@ export default function Home() {
           position: absolute;
           bottom: -10%;
           filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.4));
-          animation-name: floatUp;
-          animation-timing-function: linear;
+          animation-name: floatWobble;
+          animation-timing-function: ease-in-out;
           animation-iteration-count: infinite;
         }
 
-        @keyframes floatUp {
+        @keyframes floatWobble {
           0% {
-            transform: translateY(0) rotate(0deg);
+            transform: translate(0, 0) rotate(0deg);
             opacity: 0;
           }
           10% {
             opacity: 1;
           }
+          25% {
+            transform: translate(var(--wobble), -25vh) rotate(8deg);
+          }
+          50% {
+            transform: translate(calc(var(--wobble) * -1), -55vh)
+              rotate(-8deg);
+          }
+          75% {
+            transform: translate(var(--wobble), -85vh) rotate(8deg);
+          }
           90% {
             opacity: 1;
           }
           100% {
-            transform: translateY(-115vh) rotate(25deg);
+            transform: translate(0, -115vh) rotate(0deg);
             opacity: 0;
           }
         }
