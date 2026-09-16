@@ -28,7 +28,7 @@ const ITEM_ICONS: Record<string, string> = {
   Instagram: "/icons/instagram.gif",
   Twitch: "/icons/twitch.gif",
   TOPSHELF: "/icons/topshelf.gif",
-  Back:"/icons/arrow.gif",
+  Back: "/icons/arrow.gif",
 };
 
 type Glyph = {
@@ -60,11 +60,34 @@ const PauseIcon = () => (
   </svg>
 );
 
+const SpeakerIcon = ({ muted }: { muted: boolean }) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <path d="M4 9v6h4l5 5V4L8 9H4z" fill="currentColor" />
+    {muted ? (
+      <path
+        d="M16 9l5 6M21 9l-5 6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    ) : (
+      <path
+        d="M16.5 8.5a5 5 0 010 7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        fill="none"
+      />
+    )}
+  </svg>
+);
+
 export default function Home() {
   const router = useRouter();
   const [menu, setMenu] = useState("main");
   const [selected, setSelected] = useState(0);
   const [glyphs, setGlyphs] = useState<Glyph[]>([]);
+  const [isMuted, setIsMuted] = useState(false);
 
   const songRef = useRef<HTMLAudioElement | null>(null);
   const scrollSoundRef = useRef<HTMLAudioElement | null>(null);
@@ -178,6 +201,16 @@ export default function Home() {
         goBack();
       }
     }
+  };
+
+  const toggleMute = () => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      if (songRef.current) {
+        songRef.current.muted = next;
+      }
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -322,6 +355,26 @@ export default function Home() {
           boxSizing: "border-box",
         }}
       >
+        <button
+          onClick={toggleMute}
+          aria-label={isMuted ? "Unmute music" : "Mute music"}
+          style={{
+            position: "absolute",
+            top: "14px",
+            right: "18px",
+            border: "none",
+            background: "transparent",
+            color: "rgba(0,0,0,0.25)",
+            cursor: "pointer",
+            padding: "4px",
+            display: "flex",
+            alignItems: "center",
+            zIndex: 2,
+          }}
+        >
+          <SpeakerIcon muted={isMuted} />
+        </button>
+
         <div
           className={pixelFont.className}
           style={{
