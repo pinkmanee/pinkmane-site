@@ -29,7 +29,118 @@ const SpeakerIcon = ({ muted }: { muted: boolean }) => (
     <path d="M4 9v6h4l5 5V4L8 9H4z" fill="currentColor" />
     {muted ? (
       <path
-   
+        d="M16 9l5 6M21 9l-5 6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    ) : (
+      <path
+        d="M16.5 8.5a5 5 0 010 7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        fill="none"
+      />
+    )}
+  </svg>
+);
+
+const SegmentedBar = ({
+  duration,
+  active,
+}: {
+  duration: number;
+  active: boolean;
+}) => {
+  const segmentCount = 10;
+  const [filled, setFilled] = useState(0);
+
+  useEffect(() => {
+    if (!active) return;
+    setFilled(0);
+    const stepTime = (duration * 1000) / segmentCount;
+    let count = 0;
+    const interval = setInterval(() => {
+      count += 1;
+      setFilled(count);
+      if (count >= segmentCount) clearInterval(interval);
+    }, stepTime);
+    return () => clearInterval(interval);
+  }, [duration, active]);
+
+  return (
+    <div className="segmented-bar">
+      {Array.from({ length: segmentCount }).map((_, i) => (
+        <span
+          key={i}
+          className={`segment ${i < filled ? "segment-filled" : ""}`}
+        />
+      ))}
+    </div>
+  );
+};
+
+type MenuKey = "main" | "clothes";
+
+export default function Shop() {
+  const router = useRouter();
+  const [menu, setMenu] = useState<MenuKey>("main");
+  const [selected, setSelected] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+
+  const [showBoot, setShowBoot] = useState(true);
+  const [bootFadeOut, setBootFadeOut] = useState(false);
+  const [exiting, setExiting] = useState(false);
+
+  const songRef = useRef<HTMLAudioElement | null>(null);
+  const scrollSoundRef = useRef<HTMLAudioElement | null>(null);
+  const selectSoundRef = useRef<HTMLAudioElement | null>(null);
+  const hasStartedSong = useRef(false);
+
+  const menus: Record<MenuKey, string[]> = {
+    main: ["Merch", "Plugins", "Serum Banks", "iPods", "Home"],
+    clothes: ["Hats", "Hoodies", "Shirts", "Jeans", "Back"],
+  };
+
+  const items = menus[menu];
+
+
+  const playScrollSound = () => {
+    if (scrollSoundRef.current) {
+      scrollSoundRef.current.currentTime = 0;
+      scrollSoundRef.current.play().catch(() => {});
+    }
+  };
+
+  const playSelectSound = () => {
+    if (selectSoundRef.current) {
+      selectSoundRef.current.currentTime = 0;
+      selectSoundRef.current.play().catch(() => {});
+    }
+  };
+
+  const goUp = () => {
+    playScrollSound();
+    setSelected((prev) => (prev === 0 ? items.length - 1 : prev - 1));
+  };
+
+  const goDown = () => {
+    playScrollSound();
+    setSelected((prev) => (prev + 1) % items.length);
+  };
+
+  const goBack = () => {
+    playSelectSound();
+    if (activeCategory) {
+      setActiveCategory(null);
+      return;
+    }
+    if (menu === "clothes") {
+      setMenu("main");
+      setSelected(0);
+      return;
     }
     // On main menu, Back exits to the iPod home page
     setExiting(true);
@@ -144,8 +255,8 @@ const SpeakerIcon = ({ muted }: { muted: boolean }) => (
     <main
       style={{
         backgroundImage: "url('/shop-bg.png')",
-        backgroundSize: "contain",
-        backgroundPosition: "50% 0%",
+        backgroundSize: "cover",
+        backgroundPosition: "center 70",
         backgroundRepeat: "no-repeat",
         minHeight: "100dvh",
         width: "100%",
