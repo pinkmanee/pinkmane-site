@@ -37,6 +37,7 @@ const ARTIST_LINKS = [
   { label: "PINKMANE on Spotify", url: "https://open.spotify.com/artist/1fH0OQSGa851zXYDKeWvnb" },
   { label: "PINKMANE on Apple Music", url: "https://music.apple.com/us/artist/pinkmane/1879203655" },
   { label: "PINKMANE on SoundCloud", url: "https://soundcloud.com/pinkmanee" },
+  { label: "PINKMANE on Bandcamp", url: "https://pinkmane.bandcamp.com/" },
   { label: "PINKMANE on Instagram", url: "https://www.instagram.com/pinkmanee/" },
   { label: "PINKMANE on Twitch", url: "https://www.twitch.tv/pinkmanee" },
 ];
@@ -49,7 +50,7 @@ const STRUCTURED_DATA = {
   url: "https://pinkmane.site",
   genre: ["Cloud rap", "Trap"],
   description:
-    "PINKMANE is a cloud rap and trap artist. Music on Spotify, Apple Music and SoundCloud.",
+    "PINKMANE is a cloud rap and trap artist. Music on Spotify, Apple Music, SoundCloud and Bandcamp.",
   sameAs: ARTIST_LINKS.map((link) => link.url),
 };
 
@@ -207,7 +208,7 @@ export default function Home() {
 
   const menus = {
     main: ["Music", "Socials", "Merch", "Releases"],
-    music: ["SoundCloud", "Spotify", "Apple Music", "Back"],
+    music: ["SoundCloud", "Spotify", "Apple Music", "Bandcamp", "Back"],
     socials: ["Instagram", "Twitch", "Back"],
     releases: ["TOPSHELF", "Back"],
   };
@@ -292,6 +293,9 @@ export default function Home() {
           "https://music.apple.com/us/artist/pinkmane/1879203655",
           "_blank"
         );
+      }
+      if (item === "Bandcamp") {
+        window.open("https://pinkmane.bandcamp.com/", "_blank");
       }
       if (item === "Back") goBack();
     }
@@ -489,8 +493,8 @@ export default function Home() {
         <h1>PINKMANE</h1>
         <p>
           PINKMANE is a cloud rap and trap artist. Releases include TOPSHELF.
-          Stream PINKMANE on Spotify, Apple Music and SoundCloud, follow on
-          Instagram and Twitch, and shop official merch.
+          Stream PINKMANE on Spotify, Apple Music and SoundCloud, get the music
+          on Bandcamp, follow on Instagram and Twitch, and shop official merch.
         </p>
         <nav aria-label="PINKMANE links">
           <ul>
