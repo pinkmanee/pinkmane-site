@@ -32,6 +32,27 @@ const BEAT_SECONDS = 60 / BPM; // ~0.429s per beat
 
 const TICKER_TEXT = "NOW PLAYING: PINKMANE'S RANDOM ASS BEAT ✦   ";
 
+// SEO: official profile links, readable by search engines
+const ARTIST_LINKS = [
+  { label: "PINKMANE on Spotify", url: "https://open.spotify.com/artist/1fH0OQSGa851zXYDKeWvnb" },
+  { label: "PINKMANE on Apple Music", url: "https://music.apple.com/us/artist/pinkmane/1879203655" },
+  { label: "PINKMANE on SoundCloud", url: "https://soundcloud.com/pinkmanee" },
+  { label: "PINKMANE on Instagram", url: "https://www.instagram.com/pinkmanee/" },
+  { label: "PINKMANE on Twitch", url: "https://www.twitch.tv/pinkmanee" },
+];
+
+// SEO: tells Google this site belongs to the music artist PINKMANE
+const STRUCTURED_DATA = {
+  "@context": "https://schema.org",
+  "@type": "MusicGroup",
+  name: "PINKMANE",
+  url: "https://pinkmane.site",
+  genre: ["Cloud rap", "Trap"],
+  description:
+    "PINKMANE is a cloud rap and trap artist. Music on Spotify, Apple Music and SoundCloud.",
+  sameAs: ARTIST_LINKS.map((link) => link.url),
+};
+
 type Glyph = {
   id: number;
   src: string;
@@ -457,6 +478,41 @@ export default function Home() {
         "--beat": `${BEAT_SECONDS}s`,
       } as React.CSSProperties}
     >
+      {/* SEO: "I'm a musician" label for Google (invisible) */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
+      />
+
+      {/* SEO: text and links for search engines and screen readers (visually hidden) */}
+      <div className="sr-only">
+        <h1>PINKMANE</h1>
+        <p>
+          PINKMANE is a cloud rap and trap artist. Releases include TOPSHELF.
+          Stream PINKMANE on Spotify, Apple Music and SoundCloud, follow on
+          Instagram and Twitch, and shop official merch.
+        </p>
+        <nav aria-label="PINKMANE links">
+          <ul>
+            {ARTIST_LINKS.map((link) => (
+              <li key={link.url}>
+                <a href={link.url} rel="me">
+                  {link.label}
+                </a>
+              </li>
+            ))}
+            <li>
+              <a href="https://soundcloud.com/pinkmanee/top-shelf">
+                TOPSHELF by PINKMANE
+              </a>
+            </li>
+            <li>
+              <a href="/shop">PINKMANE merch shop</a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+
       <div
         style={{
           position: "absolute",
@@ -794,6 +850,19 @@ export default function Home() {
         body {
           overflow-x: hidden;
           margin: 0;
+        }
+
+        /* SEO: hides content visually but keeps it readable for Google and screen readers */
+        .sr-only {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          white-space: nowrap;
+          border: 0;
         }
 
         .click-wheel {
