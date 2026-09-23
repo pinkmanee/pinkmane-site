@@ -16,14 +16,21 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://pinkmane.site"),
   title: "PINKMANE",
   description:
-    "PINKMANE is an independent music artist. Listen to music and new releases, shop merch, and find all socials.",
-  keywords: ["PINKMANE", "PINKMANE music", "PINKMANE artist", "PINKMANE soundcloud"],
+    "PINKMANE is a cloud rap and trap artist. Stream on Spotify, Apple Music and SoundCloud, shop merch, and find all socials.",
+  keywords: [
+    "PINKMANE",
+    "PINKMANE music",
+    "PINKMANE artist",
+    "PINKMANE soundcloud",
+    "PINKMANE cloud rap",
+    "PINKMANE trap",
+  ],
   alternates: {
     canonical: "/",
   },
   openGraph: {
     title: "PINKMANE",
-    description: "Music, releases, merch and socials from PINKMANE.",
+    description: "Cloud rap and trap from PINKMANE. Music, releases, merch and socials.",
     url: "https://pinkmane.site",
     siteName: "PINKMANE",
     type: "website",
@@ -31,7 +38,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "PINKMANE",
-    description: "Music, releases, merch and socials from PINKMANE.",
+    description: "Cloud rap and trap from PINKMANE. Music, releases, merch and socials.",
   },
 };
 
