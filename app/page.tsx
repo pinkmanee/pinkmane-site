@@ -20,6 +20,7 @@ const ITEM_ICONS: Record<string, string> = {
   SoundCloud: "/icons/soundcloud.gif",
   Spotify: "/icons/spotify.gif",
   "Apple Music": "/icons/apple-music.gif",
+  Bandcamp: "/icons/bandcamp.gif",
   Instagram: "/icons/instagram.gif",
   Twitch: "/icons/twitch.gif",
   TOPSHELF: "/icons/topshelf.gif",
