@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Press_Start_2P } from "next/font/google";
+import JumpGame from "./components/JumpGame";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -31,7 +32,22 @@ const ITEM_ICONS: Record<string, string> = {
 const BPM = 140;
 const BEAT_SECONDS = 60 / BPM; // ~0.429s per beat
 
-const TICKER_TEXT = "NOW PLAYING: PINKMANE'S RANDOM ASS BEAT ✦   ";
+// Your songs. Files go in public/music/ named 01.mp3, 02.mp3 ...
+const TRACKS = [
+  { title: "pinkmane's random ass beat", file: "/sounds/song.mp3" },
+  { title: "small pretty titties", file: "/music/01.mp3" },
+  { title: "top shelf", file: "/music/02.mp3" },
+  { title: "snehulienka", file: "/music/03.mp3" },
+  { title: "gaf (ft. TOMBFELL)", file: "/music/05.mp3" },
+  { title: "wet socks (w/ o1m4de)", file: "/music/06.mp3" },
+  { title: "hurricane of blades", file: "/music/07.mp3" },
+  { title: "vomit trap", file: "/music/08.mp3" },
+  { title: "gods psp (ft. TOMBFELL)", file: "/music/09.mp3" },
+  { title: "cat piss kenny", file: "/music/10.mp3" },
+];
+
+// How many menu rows fit on the screen at once
+const VISIBLE_ROWS = 5;
 
 // SEO: official profile links, readable by search engines
 const ARTIST_LINKS = [
@@ -65,20 +81,32 @@ type Glyph = {
   wobble: number;
 };
 
-const ArrowIcon = ({ direction }: { direction: "left" | "right" }) => (
-  <svg width="18" height="22" viewBox="0 0 20 24" fill="currentColor">
-    <path
-      d={
-        direction === "left" ? "M20 0 L0 12 L20 24 Z" : "M0 0 L20 12 L0 24 Z"
-      }
-    />
-  </svg>
-);
-
 const PauseIcon = () => (
   <svg width="16" height="18" viewBox="0 0 18 20" fill="currentColor">
     <rect x="0" y="0" width="6" height="20" />
     <rect x="12" y="0" width="6" height="20" />
+  </svg>
+);
+
+const PlayIcon = () => (
+  <svg width="16" height="18" viewBox="0 0 18 20" fill="currentColor">
+    <path d="M2 0 L18 10 L2 20 Z" />
+  </svg>
+);
+
+const PrevTrackIcon = () => (
+  <svg width="24" height="16" viewBox="0 0 24 16" fill="currentColor">
+    <rect x="0" y="0" width="3" height="16" />
+    <path d="M13 0 L3 8 L13 16 Z" />
+    <path d="M24 0 L14 8 L24 16 Z" />
+  </svg>
+);
+
+const NextTrackIcon = () => (
+  <svg width="24" height="16" viewBox="0 0 24 16" fill="currentColor">
+    <path d="M0 0 L10 8 L0 16 Z" />
+    <path d="M11 0 L21 8 L11 16 Z" />
+    <rect x="21" y="0" width="3" height="16" />
   </svg>
 );
 
@@ -189,9 +217,19 @@ export default function Home() {
   const [glyphs, setGlyphs] = useState<Glyph[]>([]);
   const [isMuted, setIsMuted] = useState(false);
 
+  // Music player
+  const [trackIndex, setTrackIndex] = useState(0);
+  const [isPaused, setIsPaused] = useState(true);
+  const trackRef = useRef(0);
+  const errorCountRef = useRef(0);
+
   const [showBoot, setShowBoot] = useState(true);
   const [bootFadeOut, setBootFadeOut] = useState(false);
   const [exiting, setExiting] = useState(false);
+
+  // Game: whether PINK RUN is open, and a counter that tells the game to jump
+  const [playing, setPlaying] = useState(false);
+  const [jumpSignal, setJumpSignal] = useState(0);
 
   // Glitch flicker on menu change
   const [glitch, setGlitch] = useState(false);
@@ -208,13 +246,60 @@ export default function Home() {
   const rotationAccum = useRef(0);
 
   const menus = {
-    main: ["Music", "Socials", "Merch", "Releases"],
+    main: ["Music", "Socials", "Merch", "Releases", "Extras"],
     music: ["SoundCloud", "Spotify", "Apple Music", "Bandcamp", "Back"],
     socials: ["Instagram", "Twitch", "Back"],
     releases: ["TOPSHELF", "Back"],
+    extras: ["Pink Run", "Back"],
   };
 
   const items = menus[menu as keyof typeof menus];
+
+  // Which part of a long menu is visible (keeps the selected row on screen)
+  const listStart = Math.max(0, Math.min(selected - 2, items.length - VISIBLE_ROWS));
+  const visibleItems = items.slice(listStart, listStart + VISIBLE_ROWS);
+
+  const loadAndPlay = (i: number) => {
+    const audio = songRef.current;
+    if (!audio) return;
+    const idx = (i + TRACKS.length) % TRACKS.length;
+    trackRef.current = idx;
+    setTrackIndex(idx);
+    audio.src = TRACKS[idx].file;
+    audio
+      .play()
+      .then(() => {
+        hasStartedSong.current = true;
+      })
+      .catch(() => {});
+  };
+
+  const nextTrack = () => loadAndPlay(trackRef.current + 1);
+
+  const prevTrack = () => {
+    const audio = songRef.current;
+    // Like a real iPod: restart the song if it's been playing a few seconds
+    if (audio && audio.currentTime > 3) {
+      audio.currentTime = 0;
+      return;
+    }
+    loadAndPlay(trackRef.current - 1);
+  };
+
+  const togglePlay = () => {
+    const audio = songRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      audio
+        .play()
+        .then(() => {
+          hasStartedSong.current = true;
+        })
+        .catch(() => {});
+    } else {
+      audio.pause();
+    }
+  };
 
   const playScrollSound = () => {
     if (scrollSoundRef.current) {
@@ -231,17 +316,25 @@ export default function Home() {
   };
 
   const goUp = () => {
+    if (playing) return;
     playScrollSound();
     setSelected((prev) => (prev === 0 ? items.length - 1 : prev - 1));
   };
 
   const goDown = () => {
+    if (playing) return;
     playScrollSound();
     setSelected((prev) => (prev + 1) % items.length);
   };
 
   const goBack = () => {
     playSelectSound();
+    if (playing) {
+      setPlaying(false);
+      setMenu("extras");
+      setSelected(0);
+      return;
+    }
     setMenu("main");
     setSelected(0);
   };
@@ -255,6 +348,12 @@ export default function Home() {
   };
 
   const selectItem = () => {
+    // Inside the game, OK means jump
+    if (playing) {
+      setJumpSignal((n) => n + 1);
+      return;
+    }
+
     const item = items[selected];
 
     if (menu === "main" && item === "Merch") {
@@ -275,6 +374,10 @@ export default function Home() {
       }
       if (item === "Releases") {
         setMenu("releases");
+        setSelected(0);
+      }
+      if (item === "Extras") {
+        setMenu("extras");
         setSelected(0);
       }
     }
@@ -314,6 +417,11 @@ export default function Home() {
     if (menu === "releases") {
       if (item === "Back") goBack();
     }
+
+    if (menu === "extras") {
+      if (item === "Pink Run") setPlaying(true);
+      if (item === "Back") goBack();
+    }
   };
 
   const toggleMute = () => {
@@ -345,10 +453,29 @@ export default function Home() {
     setGlitch(true);
     const t = setTimeout(() => setGlitch(false), 120);
     return () => clearTimeout(t);
-  }, [menu]);
+  }, [menu, playing]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore keys while someone is typing their name for the scoreboard
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+
+      // In the game, Space and Arrow Up also jump
+      if (playing && (e.key === " " || e.key === "ArrowUp")) {
+        e.preventDefault();
+        setJumpSignal((n) => n + 1);
+        return;
+      }
+      // Left / right arrows skip songs
+      if (e.key === "ArrowLeft") {
+        prevTrack();
+        return;
+      }
+      if (e.key === "ArrowRight") {
+        nextTrack();
+        return;
+      }
       if (e.key === "ArrowUp") goUp();
       if (e.key === "ArrowDown") goDown();
       if (e.key === "Enter") selectItem();
@@ -383,9 +510,27 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    songRef.current = new Audio("/sounds/song.mp3");
-    songRef.current.loop = true;
-    songRef.current.volume = 0.5;
+    const audio = new Audio(TRACKS[0].file);
+    audio.volume = 0.5;
+    const onEnded = () => loadAndPlay(trackRef.current + 1);
+    const onPlay = () => setIsPaused(false);
+    const onPause = () => setIsPaused(true);
+    const onPlaying = () => {
+      errorCountRef.current = 0;
+    };
+    // If a song file is missing, skip it (but don't loop forever)
+    const onError = () => {
+      if (errorCountRef.current < TRACKS.length) {
+        errorCountRef.current += 1;
+        loadAndPlay(trackRef.current + 1);
+      }
+    };
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("playing", onPlaying);
+    audio.addEventListener("error", onError);
+    songRef.current = audio;
 
     scrollSoundRef.current = new Audio("/sounds/scroll.mp3");
     selectSoundRef.current = new Audio("/sounds/select.mp3");
@@ -419,7 +564,12 @@ export default function Home() {
       window.removeEventListener("click", handleFirstInteraction);
       window.removeEventListener("keydown", handleFirstInteraction);
       window.removeEventListener("touchstart", handleFirstInteraction);
-      songRef.current?.pause();
+      audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("playing", onPlaying);
+      audio.removeEventListener("error", onError);
+      audio.pause();
     };
   }, []);
 
@@ -463,6 +613,8 @@ export default function Home() {
   const stopWheelDrag = (e: React.PointerEvent) => {
     e.stopPropagation();
   };
+
+  const tickerText = `${isPaused ? "PAUSED" : "NOW PLAYING"}: ${TRACKS[trackIndex].title.toUpperCase()} ✦   `;
 
   return (
     <main
@@ -561,7 +713,7 @@ export default function Home() {
       >
         <div className="top-controls">
           <BatteryIcon />
-          <VuBars active={!isMuted} />
+          <VuBars active={!isMuted && !isPaused} />
           <button
             onClick={toggleMute}
             aria-label={isMuted ? "Unmute music" : "Mute music"}
@@ -625,11 +777,31 @@ export default function Home() {
                 textShadow: "2px 2px 0 rgba(0,0,0,0.6)",
               }}
             >
-              {menu === "main" ? "PINKMANE" : menu.toUpperCase()}
+              {playing
+                ? "PINK RUN"
+                : menu === "main"
+                ? "PINKMANE"
+                : menu.toUpperCase()}
             </h2>
           </div>
 
-          {menu === "releases" && selected === 0 ? (
+          {playing ? (
+            <div
+              style={{
+                position: "relative",
+                flex: 1,
+                width: "100%",
+                overflow: "hidden",
+              }}
+            >
+              <JumpGame
+                jumpSignal={jumpSignal}
+                fontFamily={pixelFont.style.fontFamily}
+                muted={isMuted}
+                theme="light"
+              />
+            </div>
+          ) : menu === "releases" && selected === 0 ? (
             <div
               onClick={() =>
                 window.open(
@@ -669,20 +841,27 @@ export default function Home() {
                 padding: "clamp(14px, 4vw, 20px)",
                 overflow: "hidden",
                 flex: 1,
+                position: "relative",
               }}
             >
-              {items.map((item, index) => (
+              {visibleItems.map((item, i) => {
+                const index = listStart + i;
+                return (
                 <div
-                  key={item}
+                  key={`${menu}-${index}`}
                   style={{
                     position: "relative",
                     padding: "10px",
+                    paddingRight: "44px",
                     fontSize: "clamp(11px, 3.2vw, 14px)",
                     lineHeight: "1.6",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
                     background: selected === index ? "black" : "transparent",
                     color: selected === index ? "white" : "black",
                     borderBottom:
-                      index !== items.length - 1
+                      i !== visibleItems.length - 1
                         ? selected === index || selected === index + 1
                           ? "1px solid transparent"
                           : "1px solid rgba(0,0,0,0.15)"
@@ -708,15 +887,32 @@ export default function Home() {
                     />
                   )}
                 </div>
-              ))}
+                );
+              })}
+
+              {/* Little scrollbar on the right when the menu is longer than the screen */}
+              {items.length > VISIBLE_ROWS && (
+                <div className="list-scroll">
+                  <div
+                    className="list-thumb"
+                    style={{
+                      height: `${(VISIBLE_ROWS / items.length) * 100}%`,
+                      top: `${(listStart / items.length) * 100}%`,
+                    }}
+                  />
+                </div>
+              )}
             </div>
           )}
 
           {/* Now-playing ticker */}
           <div className="ticker-wrap">
-            <div className="ticker-track">
-              <span>{TICKER_TEXT}</span>
-              <span>{TICKER_TEXT}</span>
+            <div
+              className="ticker-track"
+              style={{ animationDuration: `${Math.max(8, tickerText.length * 0.28)}s` }}
+            >
+              <span>{tickerText}</span>
+              <span>{tickerText}</span>
             </div>
           </div>
         </div>
@@ -730,7 +926,7 @@ export default function Home() {
         >
           <div
             ref={wheelRef}
-            className={`click-wheel ${!isMuted ? "wheel-led-pulse" : ""}`}
+            className={`click-wheel ${!isMuted && !isPaused ? "wheel-led-pulse" : ""}`}
             onPointerDown={handleWheelPointerDown}
             onPointerMove={handleWheelPointerMove}
             onPointerUp={handleWheelPointerUp}
@@ -763,8 +959,9 @@ export default function Home() {
             </button>
 
             <button
-              onClick={goUp}
+              onClick={prevTrack}
               onPointerDown={stopWheelDrag}
+              aria-label="Previous song"
               style={{
                 position: "absolute",
                 left: "22px",
@@ -778,12 +975,13 @@ export default function Home() {
                 alignItems: "center",
               }}
             >
-              <ArrowIcon direction="left" />
+              <PrevTrackIcon />
             </button>
 
             <button
-              onClick={goDown}
+              onClick={nextTrack}
               onPointerDown={stopWheelDrag}
+              aria-label="Next song"
               style={{
                 position: "absolute",
                 right: "22px",
@@ -797,12 +995,13 @@ export default function Home() {
                 alignItems: "center",
               }}
             >
-              <ArrowIcon direction="right" />
+              <NextTrackIcon />
             </button>
 
             <button
-              onClick={goDown}
+              onClick={togglePlay}
               onPointerDown={stopWheelDrag}
+              aria-label={isPaused ? "Play music" : "Pause music"}
               style={{
                 position: "absolute",
                 bottom: "15px",
@@ -816,7 +1015,7 @@ export default function Home() {
                 alignItems: "center",
               }}
             >
-              <PauseIcon />
+              {isPaused ? <PlayIcon /> : <PauseIcon />}
             </button>
 
             <button
@@ -843,9 +1042,13 @@ export default function Home() {
         </div>
 
         <div className={`${pixelFont.className} controls-hint`}>
-          <span className="hint-touch">swipe wheel to scroll</span>
+          <span className="hint-touch">
+            {playing ? "tap screen or OK to jump · ◀▶ songs" : "swipe wheel to scroll · ◀▶ songs"}
+          </span>
           <span className="hint-keys">
-            ↑↓ scroll · enter select · backspace back
+            {playing
+              ? "space jump · ◀▶ songs · backspace exit"
+              : "scroll or drag wheel · enter select · ◀▶ songs · backspace back"}
           </span>
         </div>
       </div>
@@ -1010,6 +1213,22 @@ export default function Home() {
           z-index: 2;
         }
 
+        .list-scroll {
+          position: absolute;
+          top: clamp(14px, 4vw, 20px);
+          bottom: clamp(14px, 4vw, 20px);
+          right: 5px;
+          width: 4px;
+          background: rgba(0, 0, 0, 0.1);
+        }
+
+        .list-thumb {
+          position: absolute;
+          left: 0;
+          width: 100%;
+          background: rgba(0, 0, 0, 0.45);
+        }
+
         .mute-btn {
           border: none;
           background: transparent;
@@ -1123,6 +1342,7 @@ export default function Home() {
         }
 
         .ticker-track span {
+          color: #d63cc8;
           font-size: 7.5px;
           letter-spacing: 0.5px;
           padding-right: 20px;
