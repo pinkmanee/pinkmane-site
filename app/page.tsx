@@ -25,6 +25,9 @@ const ITEM_ICONS: Record<string, string> = {
   Instagram: "/icons/instagram.gif",
   Twitch: "/icons/twitch.gif",
   TOPSHELF: "/icons/topshelf.gif",
+  Extras: "/icons/extras.gif",
+  Games: "/icons/games.gif",
+  "Pink Run": "/icons/pinkrun.gif",
   Back: "/icons/arrow.gif",
 };
 
