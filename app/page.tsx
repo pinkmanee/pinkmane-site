@@ -35,15 +35,14 @@ const BEAT_SECONDS = 60 / BPM; // ~0.429s per beat
 // Your songs. Files go in public/music/ named 01.mp3, 02.mp3 ...
 const TRACKS = [
   { title: "pinkmane's random ass beat", file: "/sounds/song.mp3" },
-  { title: "small pretty titties", file: "/music/01.mp3" },
-  { title: "top shelf", file: "/music/02.mp3" },
-  { title: "snehulienka", file: "/music/03.mp3" },
-  { title: "gaf (ft. TOMBFELL)", file: "/music/05.mp3" },
   { title: "wet socks (w/ o1m4de)", file: "/music/06.mp3" },
   { title: "hurricane of blades", file: "/music/07.mp3" },
+  { title: "cat piss kenny", file: "/music/10.mp3" },
+  { title: "gaf (ft. TOMBFELL)", file: "/music/05.mp3" },
+  { title: "snehulienka", file: "/music/03.mp3" },
+  { title: "small pretty titties", file: "/music/01.mp3" },
   { title: "vomit trap", file: "/music/08.mp3" },
   { title: "gods psp (ft. TOMBFELL)", file: "/music/09.mp3" },
-  { title: "cat piss kenny", file: "/music/10.mp3" },
 ];
 
 // How many menu rows fit on the screen at once
@@ -246,11 +245,12 @@ export default function Home() {
   const rotationAccum = useRef(0);
 
   const menus = {
-    main: ["Music", "Socials", "Merch", "Releases", "Extras"],
+    main: ["Music", "Socials", "Merch", "Extras"],
     music: ["SoundCloud", "Spotify", "Apple Music", "Bandcamp", "Back"],
     socials: ["Instagram", "Twitch", "Back"],
     releases: ["TOPSHELF", "Back"],
-    extras: ["Pink Run", "Back"],
+    extras: ["Releases", "Games", "Back"],
+    games: ["Pink Run", "Back"],
   };
 
   const items = menus[menu as keyof typeof menus];
@@ -331,6 +331,17 @@ export default function Home() {
     playSelectSound();
     if (playing) {
       setPlaying(false);
+      setMenu("games");
+      setSelected(0);
+      return;
+    }
+    // Games and Releases live inside Extras, so going back returns there
+    if (menu === "games") {
+      setMenu("extras");
+      setSelected(1);
+      return;
+    }
+    if (menu === "releases") {
       setMenu("extras");
       setSelected(0);
       return;
@@ -370,10 +381,6 @@ export default function Home() {
       }
       if (item === "Socials") {
         setMenu("socials");
-        setSelected(0);
-      }
-      if (item === "Releases") {
-        setMenu("releases");
         setSelected(0);
       }
       if (item === "Extras") {
@@ -419,6 +426,18 @@ export default function Home() {
     }
 
     if (menu === "extras") {
+      if (item === "Games") {
+        setMenu("games");
+        setSelected(0);
+      }
+      if (item === "Releases") {
+        setMenu("releases");
+        setSelected(0);
+      }
+      if (item === "Back") goBack();
+    }
+
+    if (menu === "games") {
       if (item === "Pink Run") setPlaying(true);
       if (item === "Back") goBack();
     }
