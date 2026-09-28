@@ -34,6 +34,12 @@ const ITEM_ICONS: Record<string, string> = {
   Extras: "/icons/extras.gif",
   Games: "/icons/games.gif",
   "Pink Run": "/icons/pinkrun.gif",
+  "Pink Hexagon": "/icons/pinkhex.gif",
+  "Pink Vortex": "/icons/pinkvortex.gif",
+  "Pink Maze": "/icons/pinkmaze.gif", 
+  "Pink Snake": "/icons/pinksnake.gif",  
+  "Pink Bird": "/icons/pinkbird.gif",
+  "Super Pinkmane": "/icons/superpinkmane.gif", 
   Back: "/icons/arrow.gif",
 };
 
