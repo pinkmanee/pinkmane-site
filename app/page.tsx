@@ -220,6 +220,7 @@ export default function Home() {
   const [isMuted, setIsMuted] = useState(false);
 
   // Music player
+  const [volume, setVolume] = useState(0.5);
   const [trackIndex, setTrackIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(true);
   const trackRef = useRef(0);
@@ -481,7 +482,17 @@ export default function Home() {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore keys while someone is typing their name for the scoreboard
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      const typing =
+        !!target &&
+        (target.tagName === "TEXTAREA" ||
+          (target.tagName === "INPUT" && (target as HTMLInputElement).type !== "range"));
+      if (typing) return;
+
+      // Enter / Space / arrows always control the iPod, never a focused button or the slider
+      if (["Enter", " ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+        e.preventDefault();
+        if (target && target !== document.body) target.blur();
+      }
 
       // In the game, Space and Arrow Up also jump
       if (playing && (e.key === " " || e.key === "ArrowUp")) {
@@ -533,7 +544,15 @@ export default function Home() {
 
   useEffect(() => {
     const audio = new Audio(TRACKS[0].file);
-    audio.volume = 0.5;
+    let startVolume = 0.5;
+    try {
+      const saved = Number(localStorage.getItem("pinkmane-volume"));
+      if (!Number.isNaN(saved) && saved >= 0 && saved <= 1 && localStorage.getItem("pinkmane-volume") !== null) {
+        startVolume = saved;
+      }
+    } catch {}
+    audio.volume = startVolume;
+    setVolume(startVolume);
     const onEnded = () => loadAndPlay(trackRef.current + 1);
     const onPlay = () => setIsPaused(false);
     const onPause = () => setIsPaused(true);
@@ -634,6 +653,20 @@ export default function Home() {
 
   const stopWheelDrag = (e: React.PointerEvent) => {
     e.stopPropagation();
+  };
+
+  // Clicking a button with the mouse shouldn't "focus" it,
+  // otherwise pressing Enter later would press that button again
+  const noFocus = (e: React.MouseEvent) => {
+    e.preventDefault();
+  };
+
+  const changeVolume = (value: number) => {
+    setVolume(value);
+    if (songRef.current) songRef.current.volume = value;
+    try {
+      localStorage.setItem("pinkmane-volume", String(value));
+    } catch {}
   };
 
   const tickerText = `${isPaused ? "PAUSED" : "NOW PLAYING"}: ${TRACKS[trackIndex].title.toUpperCase()} ✦   `;
@@ -738,11 +771,24 @@ export default function Home() {
           <VuBars active={!isMuted && !isPaused} />
           <button
             onClick={toggleMute}
+            onMouseDown={noFocus}
             aria-label={isMuted ? "Unmute music" : "Mute music"}
             className="mute-btn"
           >
             <SpeakerIcon muted={isMuted} />
           </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={volume}
+            aria-label="Music volume"
+            className="volume-slider"
+            onChange={(e) => changeVolume(Number(e.target.value))}
+            onPointerUp={(e) => e.currentTarget.blur()}
+            onTouchEnd={(e) => e.currentTarget.blur()}
+          />
         </div>
 
         <div
@@ -964,6 +1010,7 @@ export default function Home() {
             <button
               onClick={goBack}
               onPointerDown={stopWheelDrag}
+              onMouseDown={noFocus}
               style={{
                 position: "absolute",
                 top: "18px",
@@ -983,6 +1030,7 @@ export default function Home() {
             <button
               onClick={prevTrack}
               onPointerDown={stopWheelDrag}
+              onMouseDown={noFocus}
               aria-label="Previous song"
               style={{
                 position: "absolute",
@@ -1003,6 +1051,7 @@ export default function Home() {
             <button
               onClick={nextTrack}
               onPointerDown={stopWheelDrag}
+              onMouseDown={noFocus}
               aria-label="Next song"
               style={{
                 position: "absolute",
@@ -1023,6 +1072,7 @@ export default function Home() {
             <button
               onClick={togglePlay}
               onPointerDown={stopWheelDrag}
+              onMouseDown={noFocus}
               aria-label={isPaused ? "Play music" : "Pause music"}
               style={{
                 position: "absolute",
@@ -1043,6 +1093,7 @@ export default function Home() {
             <button
               onClick={selectItem}
               onPointerDown={stopWheelDrag}
+              onMouseDown={noFocus}
               style={{
                 width: "41%",
                 height: "41%",
@@ -1249,6 +1300,14 @@ export default function Home() {
           left: 0;
           width: 100%;
           background: rgba(0, 0, 0, 0.45);
+        }
+
+        .volume-slider {
+          width: 56px;
+          height: 12px;
+          margin: 0;
+          cursor: pointer;
+          accent-color: #d63cc8;
         }
 
         .mute-btn {
