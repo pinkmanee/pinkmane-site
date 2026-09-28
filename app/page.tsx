@@ -7,6 +7,10 @@ import { Press_Start_2P } from "next/font/google";
 import JumpGame from "./components/JumpGame";
 import VortexGame from "./components/VortexGame";
 import SnakeGame from "./components/SnakeGame";
+import BirdGame from "./components/BirdGame";
+import HexGame from "./components/HexGame";
+import MazeGame from "./components/MazeGame";
+import SuperGame from "./components/SuperGame";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -236,8 +240,11 @@ export default function Home() {
   const [playing, setPlaying] = useState(false);
   const [jumpSignal, setJumpSignal] = useState(0);
   // Which game is open, and how far the click wheel was turned (for Pink Vortex)
-  const [activeGame, setActiveGame] = useState<"pinkrun" | "vortex" | "snake">("pinkrun");
+  const [activeGame, setActiveGame] = useState<"pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super">("pinkrun");
   const spinRef = useRef(0);
+  // Pink Maze and Super Pinkmane play on a wide handheld instead of the iPod
+  const handheld = playing && (activeGame === "maze" || activeGame === "super");
+  const [handheldBoot, setHandheldBoot] = useState(false);
 
   // Glitch flicker on menu change
   const [glitch, setGlitch] = useState(false);
@@ -259,7 +266,16 @@ export default function Home() {
     socials: ["Instagram", "Twitch", "Back"],
     releases: ["TOPSHELF", "Back"],
     extras: ["Releases", "Games", "Back"],
-    games: ["Pink Run", "Pink Vortex", "Pink Snake", "Back"],
+    games: [
+      "Pink Hexagon",
+      "Pink Vortex",
+      "Pink Maze",
+      "Super Pinkmane",
+      "Pink Snake",
+      "Pink Bird",
+      "Pink Run",
+      "Back",
+    ],
   };
 
   const items = menus[menu as keyof typeof menus];
@@ -341,7 +357,7 @@ export default function Home() {
     if (playing) {
       setPlaying(false);
       setMenu("games");
-      setSelected(activeGame === "snake" ? 2 : activeGame === "vortex" ? 1 : 0);
+      setSelected({ hex: 0, vortex: 1, maze: 2, super: 3, snake: 4, bird: 5, pinkrun: 6 }[activeGame]);
       return;
     }
     // Games and Releases live inside Extras, so going back returns there
@@ -461,6 +477,25 @@ export default function Home() {
         setActiveGame("snake");
         setPlaying(true);
       }
+      if (item === "Pink Bird") {
+        setActiveGame("bird");
+        setPlaying(true);
+      }
+      if (item === "Pink Hexagon") {
+        spinRef.current = 0;
+        setActiveGame("hex");
+        setPlaying(true);
+      }
+      if (item === "Pink Maze") {
+        spinRef.current = 0;
+        setActiveGame("maze");
+        setPlaying(true);
+      }
+      if (item === "Super Pinkmane") {
+        spinRef.current = 0;
+        setActiveGame("super");
+        setPlaying(true);
+      }
       if (item === "Back") goBack();
     }
   };
@@ -513,13 +548,18 @@ export default function Home() {
       }
 
       // In the game, Space and Arrow Up also jump
-      if (playing && (e.key === " " || (e.key === "ArrowUp" && activeGame === "pinkrun"))) {
+      if (playing && (e.key === " " || (e.key === "ArrowUp" && (activeGame === "pinkrun" || activeGame === "bird")))) {
         e.preventDefault();
         setJumpSignal((n) => n + 1);
         return;
       }
       // In Pink Snake the arrow keys steer (the game handles them itself)
-      if (playing && activeGame === "snake" && e.key.startsWith("Arrow")) return;
+      if (
+        playing &&
+        (activeGame === "snake" || activeGame === "hex" || activeGame === "maze" || activeGame === "super") &&
+        e.key.startsWith("Arrow")
+      )
+        return;
 
       // Left / right arrows skip songs
       if (e.key === "ArrowLeft") {
@@ -542,8 +582,16 @@ export default function Home() {
         spinRef.current += e.deltaY > 0 ? 14 : -14;
         return;
       }
-      if (playing && activeGame === "snake") {
+      if (playing && (activeGame === "snake" || activeGame === "maze")) {
         spinRef.current += e.deltaY > 0 ? 45 : -45;
+        return;
+      }
+      if (playing && activeGame === "super") {
+        spinRef.current += e.deltaY > 0 ? 14 : -14;
+        return;
+      }
+      if (playing && activeGame === "hex") {
+        spinRef.current += e.deltaY > 0 ? 12 : -12;
         return;
       }
       if (e.deltaY > 0) goDown();
@@ -663,7 +711,14 @@ export default function Home() {
     lastAngle.current = angle;
 
     // In Pink Vortex / Pink Snake, turning the click wheel steers
-    if (playing && (activeGame === "vortex" || activeGame === "snake")) {
+    if (
+      playing &&
+      (activeGame === "vortex" ||
+        activeGame === "snake" ||
+        activeGame === "hex" ||
+        activeGame === "maze" ||
+        activeGame === "super")
+    ) {
       spinRef.current += delta;
       return;
     }
@@ -704,6 +759,95 @@ export default function Home() {
       localStorage.setItem("pinkmane-volume", String(value));
     } catch {}
   };
+
+  // The game that's open right now (shown on the iPod, or on the handheld for Maze / Super)
+  const gameElement = !playing ? null : (
+activeGame === "maze" ? (
+                <MazeGame
+                  actionSignal={jumpSignal}
+                  spinRef={spinRef}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                />
+              ) : activeGame === "super" ? (
+                <SuperGame
+                  actionSignal={jumpSignal}
+                  spinRef={spinRef}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                />
+              ) : activeGame === "hex" ? (
+                <HexGame
+                  actionSignal={jumpSignal}
+                  spinRef={spinRef}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                />
+              ) : activeGame === "bird" ? (
+                <BirdGame
+                  actionSignal={jumpSignal}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                />
+              ) : activeGame === "snake" ? (
+                <SnakeGame
+                  actionSignal={jumpSignal}
+                  spinRef={spinRef}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                />
+              ) : activeGame === "vortex" ? (
+                <VortexGame
+                  actionSignal={jumpSignal}
+                  spinRef={spinRef}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                />
+              ) : (
+                <JumpGame
+                  jumpSignal={jumpSignal}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                  theme="light"
+                />
+              )
+  );
+
+  // Turning the handheld on: show the PINKMANE boot screen for a moment
+  useEffect(() => {
+    if (!handheld) return;
+    setHandheldBoot(true);
+    const t = setTimeout(() => setHandheldBoot(false), 1700);
+    return () => clearTimeout(t);
+  }, [handheld]);
+
+  // HOME on the handheld: leave the game and go all the way back to the main menu
+  const goHome = () => {
+    playSelectSound();
+    setPlaying(false);
+    setMenu("main");
+    setSelected(0);
+  };
+
+  const stepVolume = (delta: number) => {
+    changeVolume(Math.round(Math.max(0, Math.min(1, volume + delta)) * 20) / 20);
+  };
+
+  // The handheld's D-pad presses the same keys as a keyboard would
+  const padKey = (key: string, type: "keydown" | "keyup") => {
+    document.body.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true }));
+  };
+  const padProps = (key: string) => ({
+    onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      padKey(key, "keydown");
+    },
+    onPointerUp: () => padKey(key, "keyup"),
+    onPointerCancel: () => padKey(key, "keyup"),
+    onLostPointerCapture: () => padKey(key, "keyup"),
+    onMouseDown: noFocus,
+  });
 
   const tickerText = `${isPaused ? "PAUSED" : "NOW PLAYING"}: ${TRACKS[trackIndex].title.toUpperCase()} ✦   `;
 
@@ -886,6 +1030,14 @@ export default function Home() {
                   ? "PINK VORTEX"
                   : activeGame === "snake"
                   ? "PINK SNAKE"
+                  : activeGame === "bird"
+                  ? "PINK BIRD"
+                  : activeGame === "hex"
+                  ? "PINK HEXAGON"
+                  : activeGame === "maze"
+                  ? "PINK MAZE"
+                  : activeGame === "super"
+                  ? "SUPER PINKMANE"
                   : "PINK RUN"
                 : menu === "main"
                 ? "PINKMANE"
@@ -902,27 +1054,10 @@ export default function Home() {
                 overflow: "hidden",
               }}
             >
-              {activeGame === "snake" ? (
-                <SnakeGame
-                  actionSignal={jumpSignal}
-                  spinRef={spinRef}
-                  fontFamily={pixelFont.style.fontFamily}
-                  muted={isMuted}
-                />
-              ) : activeGame === "vortex" ? (
-                <VortexGame
-                  actionSignal={jumpSignal}
-                  spinRef={spinRef}
-                  fontFamily={pixelFont.style.fontFamily}
-                  muted={isMuted}
-                />
+              {handheld ? (
+                <div className="hh-note">PLAYING ON THE PINKMANE HANDHELD</div>
               ) : (
-                <JumpGame
-                  jumpSignal={jumpSignal}
-                  fontFamily={pixelFont.style.fontFamily}
-                  muted={isMuted}
-                  theme="light"
-                />
+                gameElement
               )}
             </div>
           ) : menu === "releases" && selected === 0 ? (
@@ -1173,7 +1308,15 @@ export default function Home() {
         <div className={`${pixelFont.className} controls-hint`}>
           <span className="hint-touch">
             {playing
-              ? activeGame === "snake"
+              ? activeGame === "maze"
+                ? "swipe screen or turn wheel to steer · OK start"
+                : activeGame === "super"
+                ? "hold left/right side to walk · tap middle or OK to jump"
+                : activeGame === "hex"
+                ? "turn wheel or hold left/right side · OK start"
+                : activeGame === "bird"
+                ? "tap screen or OK to flap · tap speaker to mute"
+                : activeGame === "snake"
                 ? "swipe screen or turn wheel to steer · OK start"
                 : activeGame === "vortex"
                 ? "turn wheel or drag screen · OK launch · ◀▶ songs"
@@ -1182,7 +1325,15 @@ export default function Home() {
           </span>
           <span className="hint-keys">
             {playing
-              ? activeGame === "snake"
+              ? activeGame === "maze"
+                ? "arrows / WASD steer · space start · M mute · backspace exit"
+                : activeGame === "super"
+                ? "← → walk · space / ↑ jump · M mute · backspace exit"
+                : activeGame === "hex"
+                ? "← → / A D move · space start · M mute · backspace exit"
+                : activeGame === "bird"
+                ? "space / ↑ flap · M mute · backspace exit"
+                : activeGame === "snake"
                 ? "arrows / WASD steer · space start · backspace exit"
                 : activeGame === "vortex"
                 ? "scroll / ↑↓ spin · space launch · backspace exit"
@@ -1191,6 +1342,146 @@ export default function Home() {
           </span>
         </div>
       </div>
+
+      {/* The PINKMANE handheld: a wide screen for Pink Maze and Super Pinkmane */}
+      {handheld && (
+        <div className="hh-overlay">
+          {/* Same background as the main page, with the floating hearts and sparkles */}
+          <div className="hh-glyphs">
+            {glyphs.map((g) => (
+              <img
+                key={`hh-${g.id}`}
+                src={g.src}
+                alt=""
+                className="floating-glyph"
+                style={
+                  {
+                    left: `${g.left}%`,
+                    width: `${g.size}px`,
+                    height: `${g.size}px`,
+                    animationDuration: `${g.duration}s`,
+                    animationDelay: `${g.delay}s`,
+                    "--wobble": `${g.wobble}px`,
+                  } as React.CSSProperties
+                }
+              />
+            ))}
+          </div>
+
+          <div className={`hh-shell ${pixelFont.className}`}>
+            {/* Shoulder buttons: previous / next song */}
+            <button className="hh-shoulder hh-shoulder-l" onClick={prevTrack} onMouseDown={noFocus} aria-label="Previous song">
+              L
+            </button>
+            <button className="hh-shoulder hh-shoulder-r" onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song">
+              R
+            </button>
+
+            <div className="hh-body">
+              <div className="hh-side hh-left">
+                <div className="hh-dpad">
+                  <button className="hh-d hh-up" aria-label="Up" {...padProps("ArrowUp")}>
+                    ▲
+                  </button>
+                  <button className="hh-d hh-l" aria-label="Left" {...padProps("ArrowLeft")}>
+                    ◀
+                  </button>
+                  <div className="hh-d-center" />
+                  <button className="hh-d hh-r" aria-label="Right" {...padProps("ArrowRight")}>
+                    ▶
+                  </button>
+                  <button className="hh-d hh-down" aria-label="Down" {...padProps("ArrowDown")}>
+                    ▼
+                  </button>
+                </div>
+                <div className="hh-grill" />
+              </div>
+
+              <div className="hh-screen">
+                {gameElement}
+                {handheldBoot && (
+                  <div className="screen-overlay">
+                    <div className="hh-boot-dude" />
+                    <div className="screen-overlay-label">PINKMANE</div>
+                    <div className="screen-overlay-loading">LOADING...</div>
+                    <SegmentedBar duration={1.4} active={handheldBoot} />
+                  </div>
+                )}
+                <div className="crt-overlay" />
+              </div>
+
+              <div className="hh-side hh-right">
+                {/* Four buttons in a diamond, with our own symbols */}
+                <div className="hh-face">
+                  <button className="hh-btn hh-top" onClick={togglePlay} onMouseDown={noFocus} aria-label="Play or pause music">
+                    ♪
+                  </button>
+                  <button className="hh-btn hh-left-b" onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song">
+                    ✦
+                  </button>
+                  <button className="hh-btn hh-right-b hh-back" onClick={goBack} onMouseDown={noFocus} aria-label="Back">
+                    B
+                  </button>
+                  <button className="hh-btn hh-bottom-b hh-ok" onClick={selectItem} onMouseDown={noFocus} aria-label="A">
+                    A
+                  </button>
+                </div>
+                <div className={`hh-led ${!isPaused && !isMuted ? "hh-led-on" : ""}`} />
+              </div>
+            </div>
+
+            {/* Bottom row: volume, the PINKMANE wordmark, music and HOME */}
+            <div className="hh-bottom">
+              <div className="hh-bottom-group">
+                <button className="hh-small" onClick={() => stepVolume(-0.1)} onMouseDown={noFocus} aria-label="Volume down">
+                  −
+                </button>
+                <span className="hh-label">VOL</span>
+                <button className="hh-small" onClick={() => stepVolume(0.1)} onMouseDown={noFocus} aria-label="Volume up">
+                  +
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={volume}
+                  aria-label="Music volume"
+                  className="volume-slider hh-volume"
+                  onChange={(e) => changeVolume(Number(e.target.value))}
+                  onPointerUp={(e) => e.currentTarget.blur()}
+                  onTouchEnd={(e) => e.currentTarget.blur()}
+                />
+                <button className="hh-small" onClick={toggleMute} onMouseDown={noFocus} aria-label={isMuted ? "Unmute music" : "Mute music"}>
+                  <SpeakerIcon muted={isMuted} />
+                </button>
+              </div>
+
+              <div className="hh-wordmark">PINKMANE</div>
+
+              <div className="hh-bottom-group">
+                <button className="hh-small" onClick={prevTrack} onMouseDown={noFocus} aria-label="Previous song">
+                  <PrevTrackIcon />
+                </button>
+                <button className="hh-small" onClick={togglePlay} onMouseDown={noFocus} aria-label={isPaused ? "Play music" : "Pause music"}>
+                  {isPaused ? <PlayIcon /> : <PauseIcon />}
+                </button>
+                <button className="hh-small" onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song">
+                  <NextTrackIcon />
+                </button>
+                <button className="hh-small hh-home" onClick={goHome} onMouseDown={noFocus} aria-label="Home">
+                  home
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className={`hh-hint ${pixelFont.className}`}>
+            A = {activeGame === "super" ? "jump" : "start"} · B = back · home = main menu · L / R = songs
+            <span className="hh-rotate"> · turn your phone sideways for a bigger screen</span>
+          </div>
+        </div>
+      )}
 
       <style jsx global>{`
         html,
@@ -1350,6 +1641,364 @@ export default function Home() {
           gap: 8px;
           color: rgba(0, 0, 0, 0.28);
           z-index: 2;
+        }
+
+        /* ---------- PINKMANE handheld ---------- */
+        .hh-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 50;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 14px;
+          padding: 12px;
+          box-sizing: border-box;
+          overflow: hidden;
+          background-image: url("/topshelf.png");
+          background-size: cover;
+          background-position: center;
+          animation: hhFadeIn 0.25s ease-out;
+        }
+
+        .hh-glyphs {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          overflow: hidden;
+          z-index: 0;
+        }
+
+        @keyframes hhFadeIn {
+          from {
+            opacity: 0;
+            transform: scale(0.97);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+
+        /* Wide body with round ends */
+        .hh-shell {
+          position: relative;
+          z-index: 1;
+          width: min(96vw, 1250px, calc((100dvh - 80px) * 2.05));
+          padding: clamp(12px, 2vw, 26px) clamp(16px, 3vw, 44px) clamp(8px, 1.2vw, 16px);
+          box-sizing: border-box;
+          background: linear-gradient(180deg, #e9e3ec 0%, #cfc6d8 55%, #bdb3c8 100%);
+          border: 3px solid #111;
+          border-radius: clamp(40px, 10vw, 150px) / 50%;
+          box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.7), inset 0 -4px 0 rgba(0, 0, 0, 0.15),
+            0 18px 40px rgba(0, 0, 0, 0.55), 0 0 26px rgba(214, 60, 200, 0.35);
+        }
+
+        /* Shoulder buttons on top */
+        .hh-shoulder {
+          position: absolute;
+          top: -10px;
+          width: 18%;
+          height: 16px;
+          border: 3px solid #111;
+          border-bottom: none;
+          background: #e9e3ec;
+          color: #8a1f86;
+          font-family: inherit;
+          font-size: 8px;
+          cursor: pointer;
+        }
+        .hh-shoulder:active {
+          background: #d63cc8;
+          color: #fff;
+        }
+        .hh-shoulder-l {
+          left: 9%;
+          border-radius: 14px 6px 0 0;
+        }
+        .hh-shoulder-r {
+          right: 9%;
+          border-radius: 6px 14px 0 0;
+        }
+
+        .hh-body {
+          display: grid;
+          grid-template-columns: 15% 1fr 15%;
+          grid-template-areas: "left screen right";
+          align-items: center;
+          gap: 2.5%;
+        }
+        .hh-left {
+          grid-area: left;
+        }
+        .hh-right {
+          grid-area: right;
+        }
+        .hh-side {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: clamp(10px, 2vw, 26px);
+        }
+
+        .hh-screen {
+          grid-area: screen;
+          position: relative;
+          width: 100%;
+          aspect-ratio: 256 / 160;
+          background: #000;
+          border: clamp(5px, 1vw, 12px) solid #111;
+          border-radius: 6px;
+          overflow: hidden;
+          box-sizing: border-box;
+          box-shadow: 0 0 0 2px #6c6474;
+        }
+
+        .hh-note {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          height: 100%;
+          font-size: 9px;
+          text-align: center;
+          padding: 10px;
+        }
+
+        .hh-boot-dude {
+          width: 48px;
+          height: 70px;
+          background-image: url("/game/pinkdude.png");
+          background-size: 200% 100%;
+          background-position: left;
+          image-rendering: pixelated;
+          animation: bootPulse 1s ease-in-out infinite;
+        }
+
+        /* D-pad: four separate arrow buttons in a round dish */
+        .hh-dpad {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          grid-template-rows: repeat(3, 1fr);
+          gap: 3px;
+          width: clamp(70px, 11vw, 150px);
+          aspect-ratio: 1;
+          padding: 8%;
+          box-sizing: border-box;
+          border-radius: 50%;
+          background: #b3a9bf;
+          box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.35);
+        }
+        .hh-d {
+          border: 2px solid #111;
+          background: #efeaf2;
+          color: #8a1f86;
+          font-size: clamp(8px, 1.2vw, 14px);
+          cursor: pointer;
+          touch-action: none;
+          padding: 0;
+          border-radius: 5px;
+        }
+        .hh-d:active {
+          background: #d63cc8;
+          color: #fff;
+        }
+        .hh-up {
+          grid-column: 2;
+          grid-row: 1;
+        }
+        .hh-l {
+          grid-column: 1;
+          grid-row: 2;
+        }
+        .hh-d-center {
+          grid-column: 2;
+          grid-row: 2;
+        }
+        .hh-r {
+          grid-column: 3;
+          grid-row: 2;
+        }
+        .hh-down {
+          grid-column: 2;
+          grid-row: 3;
+        }
+
+        /* Four face buttons in a diamond */
+        .hh-face {
+          position: relative;
+          width: clamp(70px, 11vw, 150px);
+          aspect-ratio: 1;
+        }
+        .hh-btn {
+          position: absolute;
+          width: 32%;
+          aspect-ratio: 1;
+          border-radius: 50%;
+          border: 2px solid #111;
+          background: #efeaf2;
+          color: #8a1f86;
+          font-family: inherit;
+          font-size: clamp(8px, 1.2vw, 14px);
+          cursor: pointer;
+          box-shadow: 0 3px 0 #111;
+          touch-action: manipulation;
+          padding: 0;
+        }
+        .hh-btn:active {
+          transform: translateY(2px);
+          box-shadow: 0 1px 0 #111;
+        }
+        .hh-top {
+          left: 34%;
+          top: 0;
+        }
+        .hh-left-b {
+          left: 0;
+          top: 34%;
+        }
+        .hh-right-b {
+          right: 0;
+          top: 34%;
+        }
+        .hh-bottom-b {
+          left: 34%;
+          bottom: 0;
+        }
+        .hh-ok {
+          background: #d63cc8;
+          color: #fff;
+        }
+        .hh-back {
+          background: #8a1f86;
+          color: #fff;
+        }
+
+        .hh-led {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: #555;
+          box-shadow: 0 0 0 2px #111;
+        }
+        .hh-led-on {
+          background: #d63cc8;
+          box-shadow: 0 0 0 2px #111, 0 0 8px #d63cc8;
+          animation: wheelGlow var(--beat) ease-in-out infinite;
+        }
+
+        .hh-grill {
+          width: clamp(26px, 4vw, 52px);
+          aspect-ratio: 1;
+          border-radius: 50%;
+          background-color: #b3a9bf;
+          background-image: radial-gradient(#3d3644 32%, transparent 36%);
+          background-size: 5px 5px;
+          box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Bottom row */
+        .hh-bottom {
+          display: grid;
+          grid-template-columns: 1fr auto 1fr;
+          align-items: center;
+          gap: clamp(6px, 1.2vw, 18px);
+          margin-top: clamp(6px, 1vw, 12px);
+        }
+        .hh-bottom-group {
+          display: flex;
+          align-items: center;
+          gap: clamp(4px, 0.7vw, 10px);
+          justify-content: center;
+          flex-wrap: wrap;
+        }
+        .hh-small {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          height: clamp(16px, 2vw, 24px);
+          min-width: clamp(22px, 2.8vw, 36px);
+          padding: 0 6px;
+          border: 2px solid #111;
+          border-radius: 999px;
+          background: #efeaf2;
+          color: #8a1f86;
+          font-family: inherit;
+          font-size: clamp(8px, 1vw, 12px);
+          cursor: pointer;
+        }
+        .hh-small:active {
+          background: #d63cc8;
+          color: #fff;
+        }
+        .hh-home {
+          font-size: clamp(6px, 0.8vw, 9px);
+          letter-spacing: 0.5px;
+          text-transform: lowercase;
+        }
+        .hh-label {
+          color: #5a4f63;
+          font-size: clamp(6px, 0.7vw, 8px);
+        }
+        .hh-volume {
+          width: clamp(40px, 6vw, 80px);
+        }
+
+        /* PINKMANE wordmark, sleek and wide */
+        .hh-wordmark {
+          font-family: "Arial Black", "Helvetica Neue", Arial, sans-serif;
+          font-weight: 900;
+          font-style: italic;
+          font-size: clamp(12px, 2vw, 26px);
+          letter-spacing: 0.28em;
+          color: #2a2330;
+          text-shadow: 1px 1px 0 #ffffff, 0 0 10px rgba(214, 60, 200, 0.35);
+          transform: scaleX(1.15);
+          white-space: nowrap;
+        }
+
+        .hh-hint {
+          position: relative;
+          z-index: 1;
+          color: rgba(255, 255, 255, 0.85);
+          text-shadow: 1px 1px 0 #000;
+          font-size: 8px;
+          text-align: center;
+          line-height: 1.6;
+        }
+        .hh-rotate {
+          display: none;
+        }
+
+        /* Phones held upright: screen on top, controls underneath */
+        @media (orientation: portrait) {
+          .hh-shell {
+            width: min(96vw, 560px);
+            border-radius: 30px;
+          }
+          .hh-body {
+            grid-template-columns: 1fr 1fr;
+            grid-template-areas:
+              "screen screen"
+              "left right";
+            row-gap: 14px;
+          }
+          .hh-bottom {
+            grid-template-columns: 1fr;
+            justify-items: center;
+          }
+          /* Bigger D-pad and buttons for thumbs */
+          .hh-dpad,
+          .hh-face {
+            width: min(34vw, 150px);
+          }
+          .hh-d,
+          .hh-btn {
+            font-size: 12px;
+          }
+          .hh-rotate {
+            display: inline;
+          }
         }
 
         .list-scroll {

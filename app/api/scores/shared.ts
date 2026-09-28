@@ -12,6 +12,11 @@ export const GAMES: Record<string, { key: string; rate: number; base: number; ma
   pinkrun: { key: KEY, rate: 60, base: 100, max: 100000 },
   vortex: { key: "pinkvortex:scores", rate: 150, base: 1000, max: 1000000 },
   snake: { key: "pinksnake:scores", rate: 40, base: 200, max: 100000 },
+  bird: { key: "pinkbird:scores", rate: 4, base: 30, max: 10000 },
+  // Pink Hexagon scores are survival time in hundredths of a second
+  hex: { key: "pinkhex:scores", rate: 101, base: 50, max: 2000000 },
+  maze: { key: "pinkmaze:scores", rate: 150, base: 5000, max: 1000000 },
+  super: { key: "pinksuper:scores", rate: 60, base: 500, max: 1000000 },
 };
 
 export function gameConfig(game: unknown) {

@@ -5,8 +5,6 @@ import { useEffect, useRef, useState } from "react";
 type Props = {
   // Goes up by 1 every time the player presses OK / Enter / Space
   actionSignal: number;
-  // Degrees the click wheel was turned since the last frame (filled in by the page)
-  spinRef: React.MutableRefObject<number>;
   // The pixel font from the page, so the game text matches the iPod
   fontFamily: string;
   // Follows the iPod mute button
@@ -14,41 +12,33 @@ type Props = {
 };
 
 type Mode = "ready" | "running" | "dying" | "entry" | "board";
-type Cell = { x: number; y: number };
-type Particle = {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  color: string;
-  life: number;
-  maxLife: number;
-  size: number;
-};
+type Tower = { x: number; gapY: number; gap: number; passed: boolean };
+type Leaf = { x: number; y: number };
+type Particle = { x: number; y: number; vx: number; vy: number; color: string; life: number; size: number };
 type Entry = { name: string; score: number };
 type BoardStatus = "loading" | "ok" | "offline";
 
 // Game size in pixels. It gets scaled up to fill the iPod screen.
 const W = 256;
 const H = 160;
+const GROUND = 150;
+const BIRD_X = 60;
+const BIRD_W = 16;
+const BIRD_H = 12;
 
-// The play field: 30 x 17 squares of 8 pixels
-const CELL = 8;
-const COLS = 30;
-const ROWS = 17;
-const OX = 8;
-const OY = 18;
-
-// Speed: seconds per step (smaller = faster)
-const START_STEP = 0.15;
-const MIN_STEP = 0.065;
-const SPEEDUP = 0.0025; // per leaf eaten
-
-// Turning the click wheel this many degrees = one turn
-const WHEEL_TURN = 40;
+// Feel of the game
+const GRAVITY = 520;
+const FLAP = -165;
+const START_SPEED = 68;
+const MAX_SPEED = 115;
+const TOWER_W = 22;
+const TOWER_SPACING = 112;
+const START_GAP = 60;
+const MIN_GAP = 44;
 
 // Saved in the visitor's browser (name, device and owner code are shared with the other games)
-const BEST_KEY = "pinksnake-best";
+const BEST_KEY = "pinkbird-best";
+const SFX_KEY = "pinkbird-sfx"; // remembers if game sounds are on or off
 const NAME_KEY = "pinkrun-name";
 const DEVICE_KEY = "pinkrun-device";
 const OWNER_KEY = "pinkrun-owner";
@@ -62,10 +52,39 @@ const PINK = "#d63cc8";
 const DARK_PINK = "#8a1f86";
 const GREEN = "#2e9e3a";
 const DARK_GREEN = "#1b6b25";
-const PURPLE = "#b04ad8";
-const DARK_PURPLE = "#6a2a8a";
-const SMOKE = ["#8a8a8a", "#a5a5a5", "#bdbdbd", "#707070"];
-const BOOM = [PINK, DARK_PINK, "#ffc800", INK, "#ffffff"];
+const FEATHERS = [PINK, DARK_PINK, "#ffc800", "#ffffff", INK];
+
+// The bird: two frames (wing up, wing down)
+const BIRD_FRAMES = [
+  [
+    "...P..P..P......",
+    "...PP.PP.PP.....",
+    "....PPPPPPP.....",
+    "...KKKKKKKKK....",
+    "..KDDPPPPWWWK...",
+    ".KDDDDPPWWKWK...",
+    ".KPDDPPPPWWWKYY.",
+    "KPPPPPPPPPPPKYYY",
+    "KPPPPPPPPPPKYYY.",
+    ".KPPPPPPPPPPKK..",
+    "..KKPPPPPPPKK...",
+    "....KKKKKKK.....",
+  ],
+  [
+    "...P..P..P......",
+    "...PP.PP.PP.....",
+    "....PPPPPPP.....",
+    "...KKKKKKKKK....",
+    "..KPPPPPPWWWK...",
+    ".KPPPPPPWWKWK...",
+    ".KPPPPPPPWWWKYY.",
+    "KPPPPPPPPPPPKYYY",
+    "KDDDDDPPPPPKYYY.",
+    ".KDDDDPPPPPPKK..",
+    "..KDDPPPPPPKK...",
+    "....KKKKKKK.....",
+  ],
+];
 
 const LEAF_PIXELS = [
   "...G...",
@@ -77,6 +96,15 @@ const LEAF_PIXELS = [
   "...D...",
 ];
 
+const COLORS: Record<string, string> = {
+  P: PINK,
+  D: DARK_PINK,
+  K: INK,
+  W: "#ffffff",
+  Y: "#ffc800",
+  G: GREEN,
+};
+
 function rand(min: number, max: number) {
   return min + Math.random() * (max - min);
 }
@@ -85,13 +113,13 @@ function pad(n: number) {
   return String(Math.floor(n)).padStart(5, "0");
 }
 
-function drawLeaf(ctx: CanvasRenderingContext2D, x: number, y: number, purple = false) {
-  for (let r = 0; r < LEAF_PIXELS.length; r++) {
-    for (let c = 0; c < LEAF_PIXELS[r].length; c++) {
-      const ch = LEAF_PIXELS[r][c];
-      if (ch === "G" || ch === "D") {
-        if (purple) ctx.fillStyle = ch === "G" ? PURPLE : DARK_PURPLE;
-        else ctx.fillStyle = ch === "G" ? GREEN : DARK_GREEN;
+function drawPixels(ctx: CanvasRenderingContext2D, rows: string[], x: number, y: number, dark = DARK_GREEN) {
+  for (let r = 0; r < rows.length; r++) {
+    for (let c = 0; c < rows[r].length; c++) {
+      const ch = rows[r][c];
+      const color = ch === "D" && rows === LEAF_PIXELS ? dark : COLORS[ch];
+      if (color) {
+        ctx.fillStyle = color;
         ctx.fillRect(Math.round(x) + c, Math.round(y) + r, 1, 1);
       }
     }
@@ -123,14 +151,15 @@ function getOwnerCode() {
   }
 }
 
-export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: Props) {
+export default function BirdGame({ actionSignal, fontFamily, muted }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const firstSignal = useRef(actionSignal);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
   const audioCtxRef = useRef<AudioContext | null>(null);
+  // Game sounds on/off (separate from the music): speaker icon top-left or the M key
+  const sfxOnRef = useRef(true);
   const deathSoundRef = useRef<HTMLAudioElement | null>(null);
-  const swipeRef = useRef<{ x: number; y: number } | null>(null);
 
   // Scoreboard (shared online) and name entry
   const [showEntry, setShowEntry] = useState(false);
@@ -145,25 +174,22 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
 
   const state = useRef({
     mode: "ready" as Mode,
-    snake: [] as Cell[], // [0] is the head
-    dir: { x: 1, y: 0 } as Cell,
-    queue: [] as Cell[], // turns waiting to happen
-    grow: 0,
-    leaf: { x: 20, y: 8 } as Cell,
-    bonus: null as Cell | null,
-    bonusTime: 0,
-    step: START_STEP,
-    acc: 0,
-    wheelAcc: 0,
+    y: 70,
+    vy: 0,
+    flapTime: 0,
+    towers: [] as Tower[],
+    leaves: [] as Leaf[],
+    particles: [] as Particle[],
+    speed: START_SPEED,
     score: 0,
     best: 0,
-    eaten: 0,
-    particles: [] as Particle[],
-    smokeTimer: 0,
+    passed: 0,
+    groundOffset: 0,
     t: 0,
     runTime: 0,
     deadAt: 0,
     shake: 0,
+    flash: 0,
   });
 
   // ---------- Sounds (made in code) ----------
@@ -182,7 +208,7 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
   };
 
   const beep = (from: number, to: number, time: number, volume: number, type: OscillatorType = "square", delay = 0) => {
-    if (mutedRef.current) return;
+    if (mutedRef.current || !sfxOnRef.current) return;
     const ac = getAudio();
     if (!ac) return;
     const now = ac.currentTime + delay;
@@ -199,15 +225,17 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
     osc.stop(now + time + 0.04);
   };
 
-  const playEat = () => beep(520, 980, 0.07, 0.1);
-
-  const playBonus = () => {
-    [523, 659, 784, 1047].forEach((f, i) => beep(f, f, 0.1, 0.08, "square", i * 0.07));
+  // Soft and quiet, since it plays on every flap
+  const playFlap = () => beep(420, 560, 0.04, 0.03, "sine");
+  const playPoint = () => {
+    beep(880, 880, 0.05, 0.045);
+    beep(1320, 1320, 0.07, 0.045, "square", 0.05);
   };
-
+  const playLeaf = () => [523, 659, 784, 1047].forEach((f, i) => beep(f, f, 0.08, 0.05, "square", i * 0.06));
+  const playHit = () => beep(200, 60, 0.18, 0.18, "square");
   const playDeath = () => {
     const sound = deathSoundRef.current;
-    if (sound && !mutedRef.current) {
+    if (sound && !mutedRef.current && sfxOnRef.current) {
       sound.currentTime = 0;
       sound.play().catch(() => {});
     }
@@ -217,7 +245,7 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
 
   const loadBoard = async () => {
     try {
-      const res = await fetch("/api/scores?game=snake", { cache: "no-store" });
+      const res = await fetch("/api/scores?game=bird", { cache: "no-store" });
       if (!res.ok) throw new Error();
       const data = await res.json();
       boardRef.current = Array.isArray(data.scores) ? data.scores : [];
@@ -228,7 +256,7 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
   };
 
   const qualifies = (score: number) => {
-    if (boardStatusRef.current !== "ok" || score < 10) return false;
+    if (boardStatusRef.current !== "ok" || score < 1) return false;
     const b = boardRef.current;
     return b.length < 10 || score > b[b.length - 1].score;
   };
@@ -249,7 +277,7 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          game: "snake",
+          game: "bird",
           name: clean,
           score: Math.floor(s.score),
           runTime: s.runTime,
@@ -288,67 +316,93 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
 
   // ---------- Game ----------
 
-  const cellFree = (x: number, y: number) => {
-    const s = state.current;
-    return !s.snake.some((c) => c.x === x && c.y === y);
-  };
+  const currentGap = () => Math.max(MIN_GAP, START_GAP - state.current.passed * 0.6);
 
-  const randomFreeCell = (): Cell => {
+  const addTower = (x: number) => {
     const s = state.current;
-    for (let tries = 0; tries < 500; tries++) {
-      const x = Math.floor(Math.random() * COLS);
-      const y = Math.floor(Math.random() * ROWS);
-      const onLeaf = s.leaf && s.leaf.x === x && s.leaf.y === y;
-      const onBonus = s.bonus && s.bonus.x === x && s.bonus.y === y;
-      if (cellFree(x, y) && !onLeaf && !onBonus) return { x, y };
+    const gap = currentGap();
+    const gapY = rand(22 + gap / 2, GROUND - 16 - gap / 2);
+    s.towers.push({ x, gapY, gap, passed: false });
+    // Sometimes a weed leaf floats in the gap: +5 points
+    if (s.passed >= 2 && Math.random() < 0.22) {
+      s.leaves.push({ x: x + TOWER_W / 2 - 3, y: gapY - 3 });
     }
-    return { x: 0, y: 0 };
   };
 
   const newGame = () => {
     const s = state.current;
-    const y = Math.floor(ROWS / 2);
-    s.snake = [
-      { x: 8, y },
-      { x: 7, y },
-      { x: 6, y },
-      { x: 5, y },
-    ];
-    s.dir = { x: 1, y: 0 };
-    s.queue = [];
-    s.grow = 0;
-    s.bonus = null;
-    s.bonusTime = 0;
-    s.step = START_STEP;
-    s.acc = 0;
-    s.wheelAcc = 0;
-    s.score = 0;
-    s.eaten = 0;
-    s.runTime = 0;
+    s.y = 70;
+    s.vy = 0;
+    s.towers = [];
+    s.leaves = [];
     s.particles = [];
-    s.leaf = { x: 20, y };
+    s.speed = START_SPEED;
+    s.score = 0;
+    s.passed = 0;
+    s.runTime = 0;
+    s.shake = 0;
+    addTower(W + 40);
   };
 
-  // Where the next turn starts from (the last one waiting, or the current direction)
-  const lastDir = () => {
+  const flap = () => {
     const s = state.current;
-    return s.queue.length ? s.queue[s.queue.length - 1] : s.dir;
+    s.vy = FLAP;
+    s.flapTime = 0.15;
+    // Little puff of feathers under the bird
+    for (let i = 0; i < 3; i++) {
+      s.particles.push({
+        x: BIRD_X + 4,
+        y: s.y + BIRD_H,
+        vx: rand(-30, -10),
+        vy: rand(10, 30),
+        color: Math.random() < 0.5 ? PINK : "#ffffff",
+        life: rand(0.2, 0.4),
+        size: 1,
+      });
+    }
+    playFlap();
   };
 
-  // Steer to an exact direction (arrows, swipes)
-  const steer = (x: number, y: number) => {
+  const burst = (x: number, y: number, count: number, colors: string[], power: number) => {
     const s = state.current;
-    if (s.mode !== "running") return;
-    const last = lastDir();
-    if ((last.x === x && last.y === y) || (last.x === -x && last.y === -y)) return;
-    if (s.queue.length < 3) s.queue.push({ x, y });
+    for (let i = 0; i < count; i++) {
+      s.particles.push({
+        x,
+        y,
+        vx: rand(-power, power),
+        vy: rand(-power * 1.4, power * 0.4),
+        color: colors[Math.floor(Math.random() * colors.length)],
+        life: rand(0.5, 1.2),
+        size: 2,
+      });
+    }
   };
 
-  // Turn left / right from where it's heading (click wheel)
-  const turn = (right: boolean) => {
-    const last = lastDir();
-    if (right) steer(-last.y, last.x);
-    else steer(last.y, -last.x);
+  const toggleSfx = () => {
+    sfxOnRef.current = !sfxOnRef.current;
+    try {
+      localStorage.setItem(SFX_KEY, sfxOnRef.current ? "on" : "off");
+    } catch {}
+  };
+
+  // Little speaker in the top-left corner: with sound waves when on, an X when off
+  const drawSfxIcon = (ctx: CanvasRenderingContext2D) => {
+    const x = 6;
+    const y = 5;
+    ctx.fillStyle = INK;
+    ctx.fillRect(x, y + 2, 2, 3);
+    ctx.fillRect(x + 2, y + 1, 1, 5);
+    ctx.fillRect(x + 3, y, 1, 7);
+    if (sfxOnRef.current) {
+      ctx.fillRect(x + 5, y + 2, 1, 3);
+      ctx.fillRect(x + 7, y + 1, 1, 5);
+    } else {
+      ctx.fillStyle = PINK;
+      for (let i = 0; i < 5; i++) {
+        ctx.fillRect(x + 5 + i, y + 1 + i, 1, 1);
+        ctx.fillRect(x + 9 - i, y + 1 + i, 1, 1);
+      }
+    }
   };
 
   // Called on OK / Enter / Space / tapping the screen
@@ -357,57 +411,15 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
     getAudio(); // browsers only allow sound after a click, so wake it up here
     if (s.mode === "ready") {
       s.mode = "running";
+      flap();
+    } else if (s.mode === "running") {
+      flap();
     } else if (s.mode === "entry") {
       submitName();
     } else if (s.mode === "board" && s.t - s.deadAt > 0.6) {
       newGame();
       s.mode = "running";
-    }
-  };
-
-  const px = (c: Cell) => OX + c.x * CELL;
-  const py = (c: Cell) => OY + c.y * CELL;
-
-  // Tip of the joint, in pixels
-  const jointTip = () => {
-    const s = state.current;
-    const head = s.snake[0];
-    const cx = px(head) + CELL / 2;
-    const cy = py(head) + CELL / 2;
-    return { x: cx + s.dir.x * 9, y: cy + s.dir.y * 9 };
-  };
-
-  const puff = (x: number, y: number, count: number, spread: number) => {
-    const s = state.current;
-    for (let i = 0; i < count; i++) {
-      const life = rand(0.8, 1.5);
-      s.particles.push({
-        x: x + rand(-1, 1),
-        y: y + rand(-1, 1),
-        vx: rand(-spread, spread),
-        vy: rand(-22, -8),
-        color: SMOKE[Math.floor(Math.random() * SMOKE.length)],
-        life,
-        maxLife: life,
-        size: Math.random() < 0.4 ? 3 : 2,
-      });
-    }
-  };
-
-  const burst = (x: number, y: number, count: number, colors: string[], power: number) => {
-    const s = state.current;
-    for (let i = 0; i < count; i++) {
-      const life = rand(0.4, 1.0);
-      s.particles.push({
-        x,
-        y,
-        vx: rand(-power, power),
-        vy: rand(-power, power),
-        color: colors[Math.floor(Math.random() * colors.length)],
-        life,
-        maxLife: life,
-        size: 2,
-      });
+      flap();
     }
   };
 
@@ -416,17 +428,15 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.mode = "dying";
     s.deadAt = s.t;
     s.shake = 0.35;
-    // Every piece of the snake pops
-    s.snake.forEach((c, i) => {
-      burst(px(c) + CELL / 2, py(c) + CELL / 2, i === 0 ? 20 : 4, BOOM, i === 0 ? 90 : 50);
-    });
-    puff(px(s.snake[0]) + 4, py(s.snake[0]) + 4, 10, 20);
+    s.flash = 0.08;
+    burst(BIRD_X + BIRD_W / 2, s.y + BIRD_H / 2, 40, FEATHERS, 90);
     if (s.score > s.best) {
       s.best = Math.floor(s.score);
       try {
         localStorage.setItem(BEST_KEY, String(s.best));
       } catch {}
     }
+    playHit();
     playDeath();
   };
 
@@ -442,113 +452,119 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
   };
 
-  // One step of the snake
-  const tick = () => {
-    const s = state.current;
-    if (s.queue.length) s.dir = s.queue.shift() as Cell;
-    const head = s.snake[0];
-    const next = { x: head.x + s.dir.x, y: head.y + s.dir.y };
-
-    // Walls
-    if (next.x < 0 || next.y < 0 || next.x >= COLS || next.y >= ROWS) {
-      die();
-      return;
-    }
-    // Own body (the tail moves away this step, unless growing)
-    const body = s.grow > 0 ? s.snake : s.snake.slice(0, -1);
-    if (body.some((c) => c.x === next.x && c.y === next.y)) {
-      die();
-      return;
-    }
-
-    s.snake.unshift(next);
-    if (s.grow > 0) s.grow -= 1;
-    else s.snake.pop();
-
-    // Green leaf: grow by 1
-    if (next.x === s.leaf.x && next.y === s.leaf.y) {
-      s.grow += 1;
-      s.score += 10;
-      s.eaten += 1;
-      s.step = Math.max(MIN_STEP, s.step - SPEEDUP);
-      const tip = jointTip();
-      puff(tip.x, tip.y, 8, 14); // big exhale
-      burst(px(next) + 4, py(next) + 4, 8, [GREEN, DARK_GREEN], 40);
-      playEat();
-      s.leaf = randomFreeCell();
-      // Sometimes a rare purple leaf shows up for a few seconds
-      if (!s.bonus && s.eaten >= 3 && Math.random() < 0.18) {
-        s.bonus = randomFreeCell();
-        s.bonusTime = 6;
-      }
-    }
-
-    // Purple leaf: bonus points, grow by 3
-    if (s.bonus && next.x === s.bonus.x && next.y === s.bonus.y) {
-      s.grow += 3;
-      s.score += 50;
-      const tip = jointTip();
-      puff(tip.x, tip.y, 14, 18);
-      burst(px(next) + 4, py(next) + 4, 14, [PURPLE, DARK_PURPLE, "#ffffff"], 55);
-      playBonus();
-      s.bonus = null;
-    }
-  };
-
   const update = (dt: number) => {
     const s = state.current;
     s.t += dt;
     if (s.shake > 0) s.shake -= dt;
+    if (s.flash > 0) s.flash -= dt;
+    if (s.flapTime > 0) s.flapTime -= dt;
 
     for (const p of s.particles) {
-      p.x += p.vx * dt + Math.sin(s.t * 6 + p.y) * 0.1;
+      p.vy += 300 * dt;
+      p.x += p.vx * dt;
       p.y += p.vy * dt;
-      p.vx *= 1 - 1.5 * dt;
       p.life -= dt;
     }
     s.particles = s.particles.filter((p) => p.life > 0);
-
-    // Click wheel: turning it turns the snake
-    s.wheelAcc += spinRef.current;
-    spinRef.current = 0;
-    if (s.mode !== "running") s.wheelAcc = 0;
-    while (s.wheelAcc >= WHEEL_TURN) {
-      turn(true);
-      s.wheelAcc -= WHEEL_TURN;
-    }
-    while (s.wheelAcc <= -WHEEL_TURN) {
-      turn(false);
-      s.wheelAcc += WHEEL_TURN;
-    }
 
     if (s.mode === "dying") {
       if (s.t - s.deadAt > 1.5) finishDeath();
       return;
     }
 
-    // The joint is always smoking (also on the start screen)
-    if (s.mode === "running" || s.mode === "ready") {
-      s.smokeTimer -= dt;
-      if (s.smokeTimer <= 0) {
-        const tip = jointTip();
-        puff(tip.x, tip.y - 1, 1, 5);
-        s.smokeTimer = 0.12;
-      }
+    // Bobbing on the start screen
+    if (s.mode === "ready") {
+      s.y = 70 + Math.sin(s.t * 3) * 4;
+      s.groundOffset += START_SPEED * dt * 0.5;
+      return;
     }
-
     if (s.mode !== "running") return;
 
     s.runTime += dt;
-    if (s.bonus) {
-      s.bonusTime -= dt;
-      if (s.bonusTime <= 0) s.bonus = null;
+
+    // Falling and flapping
+    s.vy = Math.min(260, s.vy + GRAVITY * dt);
+    s.y += s.vy * dt;
+    if (s.y < -4) {
+      s.y = -4;
+      s.vy = 0;
     }
 
-    s.acc += dt;
-    while (s.acc >= s.step && s.mode === "running") {
-      s.acc -= s.step;
-      tick();
+    // Move the world
+    const move = s.speed * dt;
+    s.groundOffset += move;
+    for (const t of s.towers) t.x -= move;
+    for (const l of s.leaves) l.x -= move;
+    s.towers = s.towers.filter((t) => t.x + TOWER_W > -4);
+    s.leaves = s.leaves.filter((l) => l.x > -10);
+
+    const lastTower = s.towers[s.towers.length - 1];
+    if (!lastTower || lastTower.x < W - TOWER_SPACING) addTower(W + 4);
+
+    // Hitbox a bit smaller than the drawing (mohawk and beak tip don't count)
+    const bx1 = BIRD_X + 2;
+    const bx2 = BIRD_X + BIRD_W - 2;
+    const by1 = s.y + 4;
+    const by2 = s.y + BIRD_H - 1;
+
+    // Ground
+    if (by2 >= GROUND) {
+      s.y = GROUND - BIRD_H;
+      die();
+      return;
     }
+
+    for (const t of s.towers) {
+      // Score when the bird passes a tower
+      if (!t.passed && t.x + TOWER_W < bx1) {
+        t.passed = true;
+        s.passed += 1;
+        s.score += 1;
+        s.speed = Math.min(MAX_SPEED, START_SPEED + s.passed * 1.5);
+        playPoint();
+      }
+      // Hit a tower
+      const top = t.gapY - t.gap / 2;
+      const bottom = t.gapY + t.gap / 2;
+      if (bx2 > t.x && bx1 < t.x + TOWER_W && (by1 < top || by2 > bottom)) {
+        die();
+        return;
+      }
+    }
+
+    // Weed leaves: +5
+    for (const l of s.leaves) {
+      if (bx2 > l.x && bx1 < l.x + 7 && by2 > l.y && by1 < l.y + 7) {
+        s.score += 5;
+        burst(l.x + 3, l.y + 3, 12, [GREEN, DARK_GREEN, "#ffffff"], 45);
+        playLeaf();
+        l.x = -100;
+      }
+    }
+  };
+
+  // A tower of stacked speakers
+  const drawTower = (ctx: CanvasRenderingContext2D, x: number, y1: number, y2: number, capAtBottom: boolean) => {
+    const rx = Math.round(x);
+    const h = Math.round(y2 - y1);
+    if (h <= 0) return;
+    ctx.fillStyle = INK;
+    ctx.fillRect(rx, Math.round(y1), TOWER_W, h);
+    // Speaker cones
+    for (let yy = Math.round(y1) + 3; yy + 12 < y2; yy += 16) {
+      ctx.fillStyle = PINK;
+      ctx.fillRect(rx + 7, yy + 2, 8, 8);
+      ctx.fillStyle = INK;
+      ctx.fillRect(rx + 9, yy + 4, 4, 4);
+      ctx.fillStyle = PINK;
+      ctx.fillRect(rx + 10, yy + 5, 2, 2);
+    }
+    // Lip at the open end
+    ctx.fillStyle = DARK_PINK;
+    const lipY = capAtBottom ? Math.round(y2) - 5 : Math.round(y1);
+    ctx.fillRect(rx - 2, lipY, TOWER_W + 4, 5);
+    ctx.fillStyle = INK;
+    ctx.fillRect(rx - 2, capAtBottom ? lipY + 4 : lipY, TOWER_W + 4, 1);
   };
 
   const textBox = (ctx: CanvasRenderingContext2D, text: string, y: number) => {
@@ -557,71 +573,6 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
     ctx.fillRect(Math.round(W / 2 - w / 2), y - 2, Math.round(w), 12);
     ctx.fillStyle = INK;
     ctx.fillText(text, W / 2, y);
-  };
-
-  const drawSnake = (ctx: CanvasRenderingContext2D) => {
-    const s = state.current;
-    const n = s.snake.length;
-
-    // Body, tail first so the head sits on top
-    for (let i = n - 1; i >= 1; i--) {
-      const c = s.snake[i];
-      const x = px(c);
-      const y = py(c);
-      const tail = i === n - 1;
-      ctx.fillStyle = INK;
-      if (tail) ctx.fillRect(x + 1, y + 1, 6, 6);
-      else ctx.fillRect(x, y, 8, 8);
-      ctx.fillStyle = PINK;
-      if (tail) ctx.fillRect(x + 2, y + 2, 4, 4);
-      else ctx.fillRect(x + 1, y + 1, 6, 6);
-      if (!tail && i % 2 === 0) {
-        ctx.fillStyle = DARK_PINK;
-        ctx.fillRect(x + 3, y + 3, 2, 2);
-      }
-    }
-
-    // Head
-    const head = s.snake[0];
-    const x = px(head);
-    const y = py(head);
-    ctx.fillStyle = INK;
-    ctx.fillRect(x - 1, y - 1, 10, 10);
-    ctx.fillStyle = PINK;
-    ctx.fillRect(x, y, 8, 8);
-
-    // Eyes on the side it's heading to
-    const d = s.dir;
-    ctx.fillStyle = "#ffffff";
-    const eyes: [number, number][] =
-      d.x === 1
-        ? [[5, 1], [5, 5]]
-        : d.x === -1
-        ? [[1, 1], [1, 5]]
-        : d.y === -1
-        ? [[1, 1], [5, 1]]
-        : [[1, 5], [5, 5]];
-    for (const [ex, ey] of eyes) ctx.fillRect(x + ex, y + ey, 2, 2);
-    ctx.fillStyle = INK;
-    for (const [ex, ey] of eyes) ctx.fillRect(x + ex + (d.x === 1 ? 1 : 0), y + ey + (d.y === 1 ? 1 : 0), 1, 1);
-
-    // The joint sticking out of its mouth, with a glowing tip
-    const cx = x + 4;
-    const cy = y + 4;
-    const glow = Math.floor(s.t * 6) % 2 === 0 ? "#ff7a00" : "#ffc800";
-    if (d.x !== 0) {
-      const jx = d.x === 1 ? x + 8 : x - 6;
-      ctx.fillStyle = "#f2f2f2";
-      ctx.fillRect(jx, cy, 6, 2);
-      ctx.fillStyle = glow;
-      ctx.fillRect(d.x === 1 ? jx + 5 : jx, cy, 2, 2);
-    } else {
-      const jy = d.y === 1 ? y + 8 : y - 6;
-      ctx.fillStyle = "#f2f2f2";
-      ctx.fillRect(cx - 1, jy, 2, 6);
-      ctx.fillStyle = glow;
-      ctx.fillRect(cx - 1, d.y === 1 ? jy + 5 : jy, 2, 2);
-    }
   };
 
   const drawBoard = (ctx: CanvasRenderingContext2D) => {
@@ -675,44 +626,66 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
     ctx.fillStyle = SCREEN;
     ctx.fillRect(-4, -4, W + 8, H + 8);
 
-    // Play field border
-    ctx.strokeStyle = INK;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(OX - 1.5, OY - 1.5, COLS * CELL + 3, ROWS * CELL + 3);
-
-    // Leaves
-    drawLeaf(ctx, px(s.leaf), py(s.leaf) + Math.round(Math.sin(s.t * 5)));
-    if (s.bonus && (s.bonusTime > 2 || Math.floor(s.t * 8) % 2 === 0)) {
-      drawLeaf(ctx, px(s.bonus), py(s.bonus), true);
+    // Towers
+    for (const t of s.towers) {
+      drawTower(ctx, t.x, -4, t.gapY - t.gap / 2, true);
+      drawTower(ctx, t.x, t.gapY + t.gap / 2, GROUND, false);
     }
 
-    if (s.mode === "ready" || s.mode === "running") drawSnake(ctx);
+    // Leaves
+    for (const l of s.leaves) drawPixels(ctx, LEAF_PIXELS, l.x, l.y + Math.round(Math.sin(s.t * 5)));
 
-    // Smoke and explosion pieces (smoke fades out)
+    // Ground
+    ctx.fillStyle = INK;
+    ctx.fillRect(-4, GROUND, W + 8, 1);
+    for (let i = 0; i < W / 16 + 1; i++) {
+      const gx = Math.round((((i * 16 - s.groundOffset) % W) + W) % W);
+      ctx.fillRect(gx, GROUND + 4, 5, 1);
+      ctx.fillRect((gx + 9) % W, GROUND + 7, 3, 1);
+    }
+
+    // Bird (flaps its wing after each press, and while floating on the start screen)
+    if (s.mode === "ready" || s.mode === "running") {
+      const frame = s.flapTime > 0 || (s.mode === "ready" && Math.floor(s.t * 6) % 2 === 0) ? 1 : 0;
+      drawPixels(ctx, BIRD_FRAMES[frame], BIRD_X, s.y);
+    }
+
     for (const p of s.particles) {
-      ctx.globalAlpha = Math.max(0, Math.min(1, p.life / p.maxLife + 0.15));
       ctx.fillStyle = p.color;
       ctx.fillRect(Math.round(p.x), Math.round(p.y), p.size, p.size);
     }
-    ctx.globalAlpha = 1;
+
+    if (s.flash > 0) {
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.fillRect(-4, -4, W + 8, H + 8);
+    }
 
     ctx.restore();
 
-    // HUD
+    drawSfxIcon(ctx);
+
+    // Score: big in the middle while playing, like the original
     ctx.font = `8px ${fontFamily}`;
     ctx.textBaseline = "top";
-    ctx.fillStyle = INK;
-    ctx.textAlign = "left";
-    ctx.fillText(pad(s.score), OX, 5);
     ctx.textAlign = "right";
-    ctx.fillText(`HI ${pad(s.best)}`, W - OX, 5);
+    ctx.fillStyle = INK;
+    ctx.fillText(`HI ${pad(s.best)}`, W - 6, 6);
+    if (s.mode === "running" || s.mode === "dying") {
+      ctx.textAlign = "center";
+      ctx.font = `16px ${fontFamily}`;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(String(s.score), W / 2 + 1, 13);
+      ctx.fillStyle = INK;
+      ctx.fillText(String(s.score), W / 2, 12);
+      ctx.font = `8px ${fontFamily}`;
+    }
 
     // Messages
     ctx.textAlign = "center";
     const blink = Math.floor(s.t * 2) % 2 === 0;
     if (s.mode === "ready") {
-      textBox(ctx, "PINK SNAKE", 44);
-      if (blink) textBox(ctx, "PRESS OK TO START", 100);
+      textBox(ctx, "PINK BIRD", 40);
+      if (blink) textBox(ctx, "PRESS OK TO FLAP", 100);
       const top = boardRef.current[0];
       if (boardStatusRef.current === "ok" && top) textBox(ctx, `#1 ${top.name} ${pad(top.score)}`, 120);
     } else if (s.mode === "entry") {
@@ -743,6 +716,18 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
     } catch {}
 
     try {
+      sfxOnRef.current = localStorage.getItem(SFX_KEY) !== "off";
+    } catch {}
+
+    // M key turns game sounds on/off
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "m" || e.key === "M") toggleSfx();
+    };
+    window.addEventListener("keydown", onKey);
+
+    try {
       const saved = Number(localStorage.getItem(BEST_KEY));
       if (saved > 0) state.current.best = saved;
       const savedName = localStorage.getItem(NAME_KEY);
@@ -755,22 +740,10 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
     loadBoard();
     newGame();
 
-    // Keyboard: arrows or WASD steer
-    const down = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-      const k = e.key;
-      if (k === "ArrowUp" || k === "w" || k === "W") steer(0, -1);
-      if (k === "ArrowDown" || k === "s" || k === "S") steer(0, 1);
-      if (k === "ArrowLeft" || k === "a" || k === "A") steer(-1, 0);
-      if (k === "ArrowRight" || k === "d" || k === "D") steer(1, 0);
-    };
-    window.addEventListener("keydown", down);
-
     let raf = 0;
     let last = performance.now();
     const loop = (now: number) => {
-      const dt = Math.min(0.05, (now - last) / 1000);
+      const dt = Math.min(0.033, (now - last) / 1000);
       last = now;
       update(dt);
       draw(ctx);
@@ -779,7 +752,7 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
     raf = requestAnimationFrame(loop);
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("keydown", down);
+      window.removeEventListener("keydown", onKey);
       audioCtxRef.current?.close().catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -805,25 +778,17 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
         ref={canvasRef}
         width={W}
         height={H}
-        // Phones: swipe on the screen to steer, tap to start
         onPointerDown={(e) => {
-          const mode = state.current.mode;
-          if (mode === "entry") return;
-          swipeRef.current = { x: e.clientX, y: e.clientY };
-          if (mode !== "running") press();
-        }}
-        onPointerUp={(e) => {
-          const start = swipeRef.current;
-          swipeRef.current = null;
-          if (!start) return;
-          const dx = e.clientX - start.x;
-          const dy = e.clientY - start.y;
-          if (Math.max(Math.abs(dx), Math.abs(dy)) < 15) return;
-          if (Math.abs(dx) > Math.abs(dy)) steer(dx > 0 ? 1 : -1, 0);
-          else steer(0, dy > 0 ? 1 : -1);
-        }}
-        onPointerCancel={() => {
-          swipeRef.current = null;
+          // Tapping the speaker icon (top-left) turns game sounds on/off instead of flapping
+          const rect = e.currentTarget.getBoundingClientRect();
+          const scale = Math.min(rect.width / W, rect.height / H);
+          const cx = (e.clientX - rect.left - (rect.width - W * scale) / 2) / scale;
+          const cy = (e.clientY - rect.top - (rect.height - H * scale) / 2) / scale;
+          if (cx < 24 && cy < 20) {
+            toggleSfx();
+            return;
+          }
+          if (state.current.mode !== "entry") press();
         }}
         style={{
           position: "absolute",
@@ -833,7 +798,7 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted }: 
           objectFit: "contain",
           imageRendering: "pixelated",
           background: SCREEN,
-          touchAction: "none",
+          touchAction: "manipulation",
           cursor: "pointer",
         }}
       />
