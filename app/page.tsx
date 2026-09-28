@@ -5,6 +5,8 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Press_Start_2P } from "next/font/google";
 import JumpGame from "./components/JumpGame";
+import VortexGame from "./components/VortexGame";
+import SnakeGame from "./components/SnakeGame";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -233,6 +235,9 @@ export default function Home() {
   // Game: whether PINK RUN is open, and a counter that tells the game to jump
   const [playing, setPlaying] = useState(false);
   const [jumpSignal, setJumpSignal] = useState(0);
+  // Which game is open, and how far the click wheel was turned (for Pink Vortex)
+  const [activeGame, setActiveGame] = useState<"pinkrun" | "vortex" | "snake">("pinkrun");
+  const spinRef = useRef(0);
 
   // Glitch flicker on menu change
   const [glitch, setGlitch] = useState(false);
@@ -254,7 +259,7 @@ export default function Home() {
     socials: ["Instagram", "Twitch", "Back"],
     releases: ["TOPSHELF", "Back"],
     extras: ["Releases", "Games", "Back"],
-    games: ["Pink Run", "Back"],
+    games: ["Pink Run", "Pink Vortex", "Pink Snake", "Back"],
   };
 
   const items = menus[menu as keyof typeof menus];
@@ -336,7 +341,7 @@ export default function Home() {
     if (playing) {
       setPlaying(false);
       setMenu("games");
-      setSelected(0);
+      setSelected(activeGame === "snake" ? 2 : activeGame === "vortex" ? 1 : 0);
       return;
     }
     // Games and Releases live inside Extras, so going back returns there
@@ -442,7 +447,20 @@ export default function Home() {
     }
 
     if (menu === "games") {
-      if (item === "Pink Run") setPlaying(true);
+      if (item === "Pink Run") {
+        setActiveGame("pinkrun");
+        setPlaying(true);
+      }
+      if (item === "Pink Vortex") {
+        spinRef.current = 0;
+        setActiveGame("vortex");
+        setPlaying(true);
+      }
+      if (item === "Pink Snake") {
+        spinRef.current = 0;
+        setActiveGame("snake");
+        setPlaying(true);
+      }
       if (item === "Back") goBack();
     }
   };
@@ -495,11 +513,14 @@ export default function Home() {
       }
 
       // In the game, Space and Arrow Up also jump
-      if (playing && (e.key === " " || e.key === "ArrowUp")) {
+      if (playing && (e.key === " " || (e.key === "ArrowUp" && activeGame === "pinkrun"))) {
         e.preventDefault();
         setJumpSignal((n) => n + 1);
         return;
       }
+      // In Pink Snake the arrow keys steer (the game handles them itself)
+      if (playing && activeGame === "snake" && e.key.startsWith("Arrow")) return;
+
       // Left / right arrows skip songs
       if (e.key === "ArrowLeft") {
         prevTrack();
@@ -516,6 +537,15 @@ export default function Home() {
     };
 
     const handleWheel = (e: WheelEvent) => {
+      // In Pink Vortex the mouse wheel spins the paddle, in Pink Snake it turns the snake
+      if (playing && activeGame === "vortex") {
+        spinRef.current += e.deltaY > 0 ? 14 : -14;
+        return;
+      }
+      if (playing && activeGame === "snake") {
+        spinRef.current += e.deltaY > 0 ? 45 : -45;
+        return;
+      }
       if (e.deltaY > 0) goDown();
       if (e.deltaY < 0) goUp();
     };
@@ -631,6 +661,12 @@ export default function Home() {
     const angle = getAngleFromCenter(e.clientX, e.clientY, rect);
     const delta = normalizeAngleDelta(angle - lastAngle.current);
     lastAngle.current = angle;
+
+    // In Pink Vortex / Pink Snake, turning the click wheel steers
+    if (playing && (activeGame === "vortex" || activeGame === "snake")) {
+      spinRef.current += delta;
+      return;
+    }
     rotationAccum.current += delta;
 
     const STEP = 26;
@@ -846,7 +882,11 @@ export default function Home() {
               }}
             >
               {playing
-                ? "PINK RUN"
+                ? activeGame === "vortex"
+                  ? "PINK VORTEX"
+                  : activeGame === "snake"
+                  ? "PINK SNAKE"
+                  : "PINK RUN"
                 : menu === "main"
                 ? "PINKMANE"
                 : menu.toUpperCase()}
@@ -862,12 +902,28 @@ export default function Home() {
                 overflow: "hidden",
               }}
             >
-              <JumpGame
-                jumpSignal={jumpSignal}
-                fontFamily={pixelFont.style.fontFamily}
-                muted={isMuted}
-                theme="light"
-              />
+              {activeGame === "snake" ? (
+                <SnakeGame
+                  actionSignal={jumpSignal}
+                  spinRef={spinRef}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                />
+              ) : activeGame === "vortex" ? (
+                <VortexGame
+                  actionSignal={jumpSignal}
+                  spinRef={spinRef}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                />
+              ) : (
+                <JumpGame
+                  jumpSignal={jumpSignal}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                  theme="light"
+                />
+              )}
             </div>
           ) : menu === "releases" && selected === 0 ? (
             <div
@@ -1116,11 +1172,21 @@ export default function Home() {
 
         <div className={`${pixelFont.className} controls-hint`}>
           <span className="hint-touch">
-            {playing ? "tap screen or OK to jump · ◀▶ songs" : "swipe wheel to scroll · ◀▶ songs"}
+            {playing
+              ? activeGame === "snake"
+                ? "swipe screen or turn wheel to steer · OK start"
+                : activeGame === "vortex"
+                ? "turn wheel or drag screen · OK launch · ◀▶ songs"
+                : "tap screen or OK to jump · ◀▶ songs"
+              : "swipe wheel to scroll · ◀▶ songs"}
           </span>
           <span className="hint-keys">
             {playing
-              ? "space jump · ◀▶ songs · backspace exit"
+              ? activeGame === "snake"
+                ? "arrows / WASD steer · space start · backspace exit"
+                : activeGame === "vortex"
+                ? "scroll / ↑↓ spin · space launch · backspace exit"
+                : "space jump · ◀▶ songs · backspace exit"
               : "scroll or drag wheel · enter select · ◀▶ songs · backspace back"}
           </span>
         </div>

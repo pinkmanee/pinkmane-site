@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { BANNED_KEY, KEY, OWNER_PREFIX, cleanName, getRedis, isOwner, topTen } from "../shared";
+import { BANNED_KEY, GAMES, OWNER_PREFIX, cleanName, getRedis, isOwner } from "../shared";
 
-// Owner-only tool to remove names from the scoreboard.
+// Owner-only tool to remove names from the scoreboards (all games at once).
 //
 // Remove + ban a name (it can't be used again):
 //   https://pinkmane.site/api/scores/remove?code=YOURCODE&name=THE NAME
@@ -29,10 +29,12 @@ export async function GET(req: Request) {
       return NextResponse.json({ unbanned: clean });
     }
 
-    await redis.zrem(KEY, clean);
+    for (const game of Object.values(GAMES)) {
+      await redis.zrem(game.key, clean);
+    }
     await redis.del(OWNER_PREFIX + clean);
     await redis.sadd(BANNED_KEY, clean);
-    return NextResponse.json({ removed: clean, banned: true, scores: await topTen(redis) });
+    return NextResponse.json({ removed: clean, banned: true, from: Object.keys(GAMES) });
   } catch {
     return NextResponse.json({ error: "could not remove" }, { status: 500 });
   }

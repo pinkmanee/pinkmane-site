@@ -3,7 +3,20 @@ import { createHash, timingSafeEqual } from "crypto";
 
 // Shared helpers for the PINK RUN scoreboard
 
+// Pink Run's board (kept under its original name so old scores stay)
 export const KEY = "pinkrun:scores";
+
+// Every game with its own Top 10.
+// rate/base: the biggest score that's believable for how long a run lasted
+export const GAMES: Record<string, { key: string; rate: number; base: number; max: number }> = {
+  pinkrun: { key: KEY, rate: 60, base: 100, max: 100000 },
+  vortex: { key: "pinkvortex:scores", rate: 150, base: 1000, max: 1000000 },
+  snake: { key: "pinksnake:scores", rate: 40, base: 200, max: 100000 },
+};
+
+export function gameConfig(game: unknown) {
+  return typeof game === "string" && GAMES[game] ? GAMES[game] : GAMES.pinkrun;
+}
 export const BANNED_KEY = "pinkrun:banned";
 export const OWNER_PREFIX = "pinkrun:owner:";
 export const MAX_ENTRIES = 100;
@@ -75,8 +88,8 @@ export function isOwner(code: unknown) {
   return timingSafeEqual(a, b);
 }
 
-export async function topTen(redis: Redis): Promise<Entry[]> {
-  const raw = (await redis.zrange(KEY, 0, 9, { rev: true, withScores: true })) as (string | number)[];
+export async function topTen(redis: Redis, key: string = KEY): Promise<Entry[]> {
+  const raw = (await redis.zrange(key, 0, 9, { rev: true, withScores: true })) as (string | number)[];
   const out: Entry[] = [];
   for (let i = 0; i < raw.length; i += 2) {
     out.push({ name: String(raw[i]), score: Number(raw[i + 1]) });

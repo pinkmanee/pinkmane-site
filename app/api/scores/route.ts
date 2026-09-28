@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import {
   BANNED_KEY,
   BLOCKED,
-  KEY,
   MAX_ENTRIES,
   OWNER_PREFIX,
   cleanName,
+  gameConfig,
   getRedis,
   hash,
   isOwner,
@@ -21,11 +21,13 @@ function fail(error: string, status = 400) {
   return NextResponse.json({ error }, { status });
 }
 
-export async function GET() {
+// Read a Top 10:  /api/scores  (Pink Run)  or  /api/scores?game=vortex
+export async function GET(req: Request) {
   const redis = getRedis();
   if (!redis) return fail("offline", 503);
+  const game = gameConfig(new URL(req.url).searchParams.get("game"));
   try {
-    return NextResponse.json({ scores: await topTen(redis) });
+    return NextResponse.json({ scores: await topTen(redis, game.key) });
   } catch {
     return fail("offline", 503);
   }
@@ -35,7 +37,14 @@ export async function POST(req: Request) {
   const redis = getRedis();
   if (!redis) return fail("offline", 503);
 
-  let body: { name?: unknown; score?: unknown; runTime?: unknown; device?: unknown; ownerCode?: unknown };
+  let body: {
+    name?: unknown;
+    score?: unknown;
+    runTime?: unknown;
+    device?: unknown;
+    ownerCode?: unknown;
+    game?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
@@ -43,6 +52,7 @@ export async function POST(req: Request) {
   }
 
   const { name, score, runTime, device, ownerCode } = body;
+  const game = gameConfig(body.game);
   if (
     typeof name !== "string" ||
     typeof score !== "number" ||
@@ -60,8 +70,8 @@ export async function POST(req: Request) {
 
   // Simple cheat check: the score has to be possible for how long the run lasted
   const s = Math.floor(score);
-  if (!Number.isFinite(s) || s < 1 || s > 100000) return fail("score not valid");
-  if (!(runTime > 0) || runTime > 3600 || s > runTime * 60 + 100) return fail("score not valid");
+  if (!Number.isFinite(s) || s < 1 || s > game.max) return fail("score not valid");
+  if (!(runTime > 0) || runTime > 7200 || s > runTime * game.rate + game.base) return fail("score not valid");
 
   try {
     if (await redis.sismember(BANNED_KEY, clean)) return fail("pick another name");
@@ -71,7 +81,7 @@ export async function POST(req: Request) {
       // Only you (with the owner code) can use PINKMANE
       if (!owner) return fail("name reserved");
     } else {
-      // Every other name belongs to the first device that used it
+      // Every other name belongs to the first device that used it (same across all games)
       const lockKey = OWNER_PREFIX + clean;
       const deviceHash = hash(device);
       await redis.set(lockKey, deviceHash, { nx: true });
@@ -85,15 +95,15 @@ export async function POST(req: Request) {
     if (!allowed) return fail("slow down", 429);
 
     // Each name keeps only its best score
-    const current = await redis.zscore(KEY, clean);
+    const current = await redis.zscore(game.key, clean);
     if (current === null || s > Number(current)) {
-      await redis.zadd(KEY, { score: s, member: clean });
+      await redis.zadd(game.key, { score: s, member: clean });
     }
 
     // Keep only the top 100 in the database
-    await redis.zremrangebyrank(KEY, 0, -(MAX_ENTRIES + 1));
+    await redis.zremrangebyrank(game.key, 0, -(MAX_ENTRIES + 1));
 
-    return NextResponse.json({ scores: await topTen(redis), name: clean });
+    return NextResponse.json({ scores: await topTen(redis, game.key), name: clean });
   } catch {
     return fail("could not save", 500);
   }
