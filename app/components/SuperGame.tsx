@@ -14,7 +14,18 @@ type Props = {
 };
 
 // golden = paused on the golden leaf screen, choose = picking your spell before a boss, paused = Esc
-type Mode = "ready" | "running" | "pipe" | "hurt" | "dying" | "entry" | "board" | "golden" | "choose" | "paused";
+type Mode =
+  | "select"
+  | "ready"
+  | "running"
+  | "pipe"
+  | "hurt"
+  | "dying"
+  | "entry"
+  | "board"
+  | "golden"
+  | "choose"
+  | "paused";
 
 // One column of the level
 type Column = {
@@ -56,7 +67,10 @@ type Entry = { name: string; score: number };
 type BoardStatus = "loading" | "ok" | "offline";
 
 // Game size in pixels. It gets scaled up to fill the screen.
-const W = 256;
+// Widened to match the aspect ratio of the screen cutout drawn in handheld.png (it's a
+// wide PSP-style screen, ~2.1:1) — this used to be a narrower 256, which is why there were
+// two empty bars down the sides when this rendered inside the handheld.
+const W = 336;
 const H = 160;
 const T = 16; // one tile
 const ROWS = 10;
@@ -83,10 +97,51 @@ const MAX_LIVES = 4;
 
 // Zones change every this many tiles, each with its own look and harder jumping
 const ZONE_LEN = 150;
-const ZONE_NAMES = ["PINK FIELDS", "SPEAKER HILLS", "ROOFTOPS", "PINK CLOUDS", "TWISTED TREES", "SMOKE OCEAN"];
+const ZONE_NAMES = [
+  "PINK FIELDS",
+  "SPEAKER HILLS",
+  "ROOFTOPS",
+  "PINK CLOUDS",
+  "TWISTED TREES",
+  "SMOKE OCEAN",
+  "GIVE A FUCK FIELD",
+  "GODS PSP FIELD",
+  "IPOD USER FIELD",
+  "TRIPPY FIELD",
+  "SMALL PRETTY TITTIES FIELD",
+  "TOP SHELF FIELD",
+  "TWISTED CORAL PEAKS",
+];
+// The 7 cover-art fields: zone id = FIELD_ZONE_START + index into this list.
+// Ground/platforms in these zones use the same plain look as PINK FIELDS —
+// only the backdrop changes, to whichever cover this stretch of the level is themed on.
+const FIELD_ZONE_START = 6;
+const FIELD_IMAGES = [
+  "/backgrounds/field-gaf.png",
+  "/backgrounds/field-godspsp.png",
+  "/backgrounds/field-ipoduser.png",
+  "/backgrounds/field-trippy.png",
+  "/backgrounds/field-spt.png",
+  "/backgrounds/field-topshelf.png",
+  "/backgrounds/field-coral.png",
+];
 const Z_CLOUDS = 3;
 // Colours of each zone on the progress line at the bottom
-const ZONE_COLORS = ["#ff5fe0", "#ff9a3c", "#8e3fb0", "#fbd3f3", "#b06ce0", "#c6b9d6"];
+const ZONE_COLORS = [
+  "#ff5fe0",
+  "#ff9a3c",
+  "#8e3fb0",
+  "#fbd3f3",
+  "#b06ce0",
+  "#c6b9d6",
+  "#d63cc8", // give a fuck field
+  "#9b8bd6", // gods psp field
+  "#5b6fd6", // ipod user field
+  "#c68bff", // trippy field
+  "#e07ab0", // small pretty titties field
+  "#b19cff", // top shelf field
+  "#3fb0a8", // twisted coral peaks
+];
 const Z_TREES = 4;
 const Z_SMOKE = 5;
 const VOID_ZONE = 99;
@@ -107,6 +162,9 @@ const EGG_COLS = 26; // how many tiles the hidden area has to the left of the st
 const JET_UNTIL = 2000;
 const JET_THRUST = 1900;
 const JET_MAX_UP = -165;
+const JET_FUEL_MAX = 5; // seconds of flight on a full tank
+const JET_REFUEL_TIME = 2; // seconds on the ground to go from empty to full
+const JET_REFUEL_RATE = JET_FUEL_MAX / JET_REFUEL_TIME;
 // ---------- Golden leaf (secret Stutters track) ----------
 // From this score on, the next SoundCloud Void has a spinning golden leaf (once per game).
 const GOLD_AT = 8000;
@@ -124,7 +182,7 @@ const BOSS_HP_STEP = 3; // each next troll takes this many more
 const BOSS_SPEED_STEP = 0.25; // each next troll is 25% faster
 const BOSS_SPARE_SHOTS = 2; // you get this many more shots than he needs
 const TROLL_DEATH_SOUND = "/sounds/trolldeath.mp3";
-const BOSS_ARENA = 16; // tiles wide (exactly one screen)
+const BOSS_ARENA = 21; // tiles wide (exactly one screen, now that the screen is wider)
 const TROLL_SPEED = 38; // slower than you (you run at 100)
 const TROLL_JUMP = -330;
 const PTS_BOSS = 1000;
@@ -135,10 +193,24 @@ const TR_HX = 8;
 const TR_HY = 10;
 const TR_HW = 28;
 const TR_HH = 38;
+// ---------- Boss: the giant (a bigger, tougher troll) ----------
+// Shots alone only bring him to his knees — you have to finish him with a stomp.
+const GIANT_HP = 12; // shots needed before he goes down
+const GIANT_SCALE = 3; // vs the troll's 2 — noticeably bigger
+const GIANT_W = 22 * GIANT_SCALE;
+const GIANT_H = 24 * GIANT_SCALE;
+const GIANT_HX = Math.round((TR_HX / TR_W) * GIANT_W);
+const GIANT_HY = Math.round((TR_HY / TR_H) * GIANT_H);
+const GIANT_HW = Math.round((TR_HW / TR_W) * GIANT_W);
+const GIANT_HH = Math.round((TR_HH / TR_H) * GIANT_H);
+const GIANT_SPEED_MULT = 0.7; // bigger, so a little slower than the regular troll
+const GIANT_DAZE_TIME = 3.5; // seconds you have to jump on his head once he's down
+const GIANT_DAZE_HP = 3; // miss the window and he gets back up with this much health
+const PTS_GIANT = 2000;
 
 const MY_GOATS = ["LIL PEEP", "YUNG LEAN", "GHOSTEMANE", "SMOKEDOPE2016", "DRIPPIN SO PRETTY"];
 // Second sign, further left behind the jetpack
-const SHOUT_OUTS = ["TOMBFELL", "O1M4DE", "LEOHWASFOUND", "STUTTERS", "SLITFACE", "SALADE", "LIL SAD K"];
+const SHOUT_OUTS = ["O1M4DE", "TOMBFELL", "LEOHWASFOUND", "STUTTERS", "SLITFACE", "SALADE", "LIL SAD K"];
 
 // Points
 const PTS_LEAF = 10;
@@ -151,6 +223,29 @@ const SFX_KEY = "pinksuper-sfx";
 const NAME_KEY = "pinkrun-name";
 const DEVICE_KEY = "pinkrun-device";
 const OWNER_KEY = "pinkrun-owner";
+
+// ---------- Outfits (no accounts, everything lives in this browser) ----------
+// Coins are just your lifetime grams total, added up every time you die. Some outfits
+// cost coins, some unlock from an achievement. Add PNGs at the given paths to use them;
+// until you do, that outfit just shows as a flat-colored dude (see OUTFIT_FALLBACK below).
+type OutfitId = "classic" | "ghost" | "icy" | "og";
+const OUTFITS: { id: OutfitId; name: string; file: string; how: string }[] = [
+  { id: "classic", name: "CLASSIC PINKMANE", file: "/game/pinkdude.png", how: "ALWAYS UNLOCKED" },
+  { id: "og", name: "TRIPPY PINKMANE", file: "/game/pinkdude-pinkfit.png", how: "REACH SCORE 30000" },
+  { id: "ghost", name: "GHOSTY PINKMANE", file: "/game/pinkdude-ghost.png", how: "BEAT A TROLL" },
+  { id: "icy", name: "ICY PINKMANE", file: "/game/pinkdude-icy.png", how: "500 LIFETIME GRAMS" },
+];
+const ICY_COST = 500;
+const OG_SCORE_UNLOCK = 30000;
+const OUTFIT_FALLBACK: Record<OutfitId, string> = {
+  classic: "#d63cc8",
+  og: "#d63cc8",
+  ghost: "#bfe9d8",
+  icy: "#8fd9ff",
+};
+const COINS_KEY = "pinksuper-coins"; // lifetime grams, never goes down
+const UNLOCKED_KEY = "pinksuper-outfits"; // JSON array of unlocked outfit ids
+const OUTFIT_KEY = "pinksuper-outfit"; // currently worn outfit id
 
 // Plays on Game Over: public/sounds/killed.mp3
 const DEATH_SOUND = "/sounds/killed.mp3";
@@ -167,7 +262,15 @@ const ROOF = "#6a2a8a";
 const ROOF_LINE = "#8e3fb0";
 const CLOUD = "#fdeefb";
 const CLOUD_SKY = "#f3d3ee";
-const VOID_BG = "#160c1d";
+// A different accent tint for each Void room (index matches buildVoid's "which"), so the
+// rooms feel a bit less identical even though the wave pattern is the same
+const VOID_PALETTES: { bg: string; a: string; b: string }[] = [
+  { bg: "#160c1d", a: "#3a1a44", b: "#2a1234" }, // 0: the classic
+  { bg: "#0c1a1d", a: "#1a4044", b: "#123034" }, // 1: the stairs
+  { bg: "#1d0c16", a: "#441a34", b: "#341228" }, // 2: FOLLOW ME ON SOUNDCLOUD (one line)
+  { bg: "#141a0c", a: "#3a4418", b: "#2a3410" }, // 3: the zigzag
+  { bg: "#0c1420", a: "#1a2c48", b: "#122038" }, // 4: FOLLOW ME / ON SOUNDCLOUD (two lines)
+];
 // Twisted Trees
 const TREE_SKY = "#c9a9e8";
 const TREE_FAR = "#a57fcf";
@@ -396,6 +499,21 @@ function getDeviceId() {
   }
 }
 
+// Some browsers (private/incognito windows, strict privacy settings, some in-app
+// browsers) block localStorage entirely. Everything that saves progress already
+// wraps its calls in try/catch, so nothing crashes either way — this just lets us
+// tell the player their unlocks won't stick around, instead of failing silently.
+function storageAvailable() {
+  try {
+    const testKey = "__pinkmane_storage_test__";
+    localStorage.setItem(testKey, "1");
+    localStorage.removeItem(testKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getOwnerCode() {
   try {
     return localStorage.getItem(OWNER_KEY) || "";
@@ -406,8 +524,9 @@ function getOwnerCode() {
 
 export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const spriteRef = useRef<HTMLImageElement | null>(null);
+  const spritesRef = useRef<Partial<Record<OutfitId, HTMLImageElement>>>({});
   const shipRef = useRef<HTMLImageElement | null>(null); // your ghost ship drawing: /public/game/ghostship.png
+  const fieldImagesRef = useRef<HTMLImageElement[]>([]); // the 7 cover-art field backgrounds
   const firstSignal = useRef(actionSignal);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
@@ -435,7 +554,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const savingRef = useRef(false);
 
   const state = useRef({
-    mode: "ready" as Mode,
+    mode: "select" as Mode,
+    outfit: "classic" as OutfitId,
+    unlocked: ["classic"] as OutfitId[],
+    coins: 0,
+    selectIndex: 0,
+    storageOk: true, // false if this browser blocks localStorage; progress just won't save
     x: 40,
     y: 0,
     vx: 0,
@@ -466,7 +590,13 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     jetItem: null as null | { x: number; y: number },
     jetpack: false,
     flying: false,
+    jetFuel: JET_FUEL_MAX, // seconds of flight left in the tank; refills while grounded
+    camY: 0, // vertical camera offset: follows you up when you jump/fly higher than the screen
+    killStreak: 0, // consecutive stomps without the streak timer running out
+    killStreakTimer: 0,
+    pauseChoice: 0, // which option is highlighted on the pause menu: 0 resume, 1 restart, 2 home
     lastVoid: -1, // which Void map you saw last, so you get a different one next time
+    followShown: false, // the FOLLOW ME ON SOUNDCLOUD room has already shown up once this game
     // Golden leaf
     goldDone: false,
     goldLeaf: null as null | { x: number; y: number },
@@ -490,6 +620,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       jumpTimer: number;
       facing: number;
       dead: number; // counts down while he's falling apart
+      kind: "troll" | "giant";
+      dazed: number; // giant only: >0 while he's down and waiting for the finishing stomp
     },
     hinted: [] as string[], // which "how to use it" hints were already shown this game
     hintText: "",
@@ -799,7 +931,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const lineLen = Math.max(1, 3 - Math.floor(progress * 3));
     const th = Math.max(2, 5 - Math.floor(progress * 4));
     // After 10k the lines vanish a few seconds after you touch them (faster after 15k)
-    const fragile = s.score >= 15000 ? 1.4 : s.score >= 10000 ? 3 : 0;
+    const fragile = s.score >= 15000 ? 0.6 : s.score >= 10000 ? 1.3 : 0;
     for (let k = 0; k < gapW; k++) s.cols.push(makeCol(-1, zone));
     let row = s.genGround - 2;
     let o = 1;
@@ -1202,6 +1334,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.jetItem = { x: -14 * T + 7, y: 6 * T - 18 };
     s.jetpack = false;
     s.flying = false;
+    s.jetFuel = JET_FUEL_MAX;
+    s.camY = 0;
+    s.killStreak = 0;
+    s.killStreakTimer = 0;
+    s.pauseChoice = 0;
+    s.followShown = false;
     s.goldDone = false;
     s.goldLeaf = null;
     stopStutters();
@@ -1352,15 +1490,20 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       cam: s.cam,
       pipeCol: s.pipeCol,
     };
-    // Golden leaf time? Then it's one of the rooms without words (0, 1 or 3)
+    // Golden leaf time? Then it's one of the rooms without words (0, 1 or 3).
+    // Rooms 2 and 4 spell out FOLLOW ME ON SOUNDCLOUD, so once you've seen either one
+    // this game, they drop out of the pool (no reason to see the ad twice in one run).
     const gold = !s.goldDone && s.score >= GOLD_AT;
-    let which = Math.floor(Math.random() * VOID_MAPS);
+    let which: number;
     if (gold) {
       const plain = [0, 1, 3].filter((m) => m !== s.lastVoid);
       which = plain[Math.floor(Math.random() * plain.length)];
-    } else if (which === s.lastVoid) {
-      which = (which + 1 + Math.floor(Math.random() * (VOID_MAPS - 1))) % VOID_MAPS;
+    } else {
+      const base = s.followShown ? [0, 1, 3] : [0, 1, 2, 3, 4];
+      const pool = base.filter((m) => m !== s.lastVoid);
+      which = pool[Math.floor(Math.random() * pool.length)];
     }
+    if (which === 2 || which === 4) s.followShown = true;
     s.lastVoid = which;
     const room = buildVoid(which);
     // where the golden leaf floats in each room (high up, you have to work for it)
@@ -1374,6 +1517,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.powerups = [];
     s.fireballs = [];
     s.cam = 0;
+    s.camY = 0;
     s.x = 2 * T;
     s.y = -SPRITE_H;
     s.vx = 0;
@@ -1397,6 +1541,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.powerups = saved.powerups;
     s.fireballs = [];
     s.cam = saved.cam;
+    s.camY = 0;
     const pc = s.cols[saved.pipeCol];
     const pc2 = s.cols[saved.pipeCol + 1];
     if (pc) pc.pipeUsed = true;
@@ -1420,8 +1565,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       e.alive = false;
       e.squash = 0;
     }
-    const hp = BOSS_HP_START + s.bossCount * BOSS_HP_STEP;
-    s.boss = { x: s.cam + W - 50, y: 8 * T - TR_H, vx: 0, vy: 0, hp, maxHp: hp, hit: 0, jumpTimer: 2.2, facing: -1, dead: 0 };
+    // Every other one is the bigger, tougher giant instead of the regular troll
+    const kind: "troll" | "giant" = s.bossCount % 2 === 1 ? "giant" : "troll";
+    const hp = kind === "giant" ? GIANT_HP : BOSS_HP_START + s.bossCount * BOSS_HP_STEP;
+    const bh = kind === "giant" ? GIANT_H : TR_H;
+    s.boss = { x: s.cam + W - 50, y: 8 * T - bh, vx: 0, vy: 0, hp, maxHp: hp, hit: 0, jumpTimer: 2.2, facing: -1, dead: 0, kind, dazed: 0 };
     // Freeze and let the player pick a spell
     heldRef.current = { left: false, right: false, up: false };
     touchRef.current = 0;
@@ -1444,7 +1592,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.fireTime = kind === "fire" ? 999 : 0; // no timer in a boss fight
     s.mode = "running";
     s.flash = 1.6;
-    s.flashText = s.bossCount === 0 ? "FIGHT THE TROLL!" : `TROLL #${s.bossCount + 1}!`;
+    const bossLabel = s.boss?.kind === "giant" ? "GIANT" : "TROLL";
+    s.flashText = s.bossCount === 0 ? `FIGHT THE ${bossLabel}!` : `${bossLabel} #${s.bossCount + 1}!`;
     s.hinted = s.hinted.filter((h) => h !== "bossjump");
     showHint("bossjump", "FREE DOUBLE JUMPS HERE!");
     s.hintTime = 4;
@@ -1456,6 +1605,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const s = state.current;
     if (s.mode !== "running") return;
     s.mode = "paused";
+    s.pauseChoice = 0;
     heldRef.current = { left: false, right: false, up: false };
     touchRef.current = 0;
     touchUpRef.current = false;
@@ -1466,6 +1616,51 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (s.mode !== "paused") return;
     s.mode = "running";
     if (s.stuttersOn) stuttersRef.current?.play().catch(() => {});
+  };
+  // Dev hack: press 9 to jump straight to the start of the first cover-art field, so you
+  // can check backgrounds without actually running the whole level to get there.
+  const teleportToFirstField = () => {
+    const s = state.current;
+    if (s.mode !== "running" || s.inBonus || s.bossState === "fight") return;
+    const targetCol = FIELD_ZONE_START * ZONE_LEN + 2;
+    generateUpTo(targetCol + Math.ceil(W / T) + 4);
+    s.eggOpen = false;
+    s.x = targetCol * T;
+    s.y = 8 * T - SPRITE_H;
+    s.vx = 0;
+    s.vy = 0;
+    s.camY = 0;
+    s.cam = Math.max(0, targetCol * T - 40);
+    s.farthest = Math.max(s.farthest, s.x);
+    s.score = Math.floor(s.farthest / T) + s.bonus;
+    popup(s.x + 10, s.y - 10, "TELEPORT!");
+  };
+
+  // Leaves the game the same way the handheld's own Back button does
+  const goHome = () => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace" }));
+  };
+
+  // ---------- Outfits ----------
+  const unlockOutfit = (id: OutfitId) => {
+    const s = state.current;
+    if (s.unlocked.includes(id)) return;
+    s.unlocked = [...s.unlocked, id];
+    try {
+      localStorage.setItem(UNLOCKED_KEY, JSON.stringify(s.unlocked));
+    } catch {}
+    s.flash = 2.5;
+    s.flashText = `NEW OUTFIT: ${OUTFITS.find((o) => o.id === id)?.name ?? id.toUpperCase()}!`;
+  };
+  // Coins are just your lifetime grams total; added whenever a run ends
+  const addCoins = (n: number) => {
+    if (n <= 0) return;
+    const s = state.current;
+    s.coins += n;
+    try {
+      localStorage.setItem(COINS_KEY, String(s.coins));
+    } catch {}
+    if (s.coins >= ICY_COST) unlockOutfit("icy");
   };
 
   const playTrollDeath = () => {
@@ -1484,9 +1679,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const hitBoss = (ice: boolean) => {
     const s = state.current;
     const b = s.boss;
-    if (!b || b.dead > 0) return;
-    const cx = b.x + TR_W / 2;
-    const cy = b.y + TR_H / 2;
+    if (!b || b.dead > 0 || b.dazed > 0) return;
+    const isGiant = b.kind === "giant";
+    const cx = b.x + (isGiant ? GIANT_W : TR_W) / 2;
+    const cy = b.y + (isGiant ? GIANT_H : TR_H) / 2;
     if (b.hit > 0.3) {
       burst(cx, cy, 5, ice ? ICE : FIRE, 30);
       return;
@@ -1498,9 +1694,17 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.shake = 0.12;
     playStomp();
     if (b.hp <= 0) {
-      b.dead = 1.6;
-      popup(cx, b.y - 6, "BYE TROLL!");
-      playTrollDeath();
+      if (isGiant) {
+        // He's down, but shots alone won't finish him — you have to stomp his head
+        b.dazed = GIANT_DAZE_TIME;
+        b.vx = 0;
+        s.shake = 0.2;
+        popup(cx, b.y - 10, "STOMP HIM!");
+      } else {
+        b.dead = 1.6;
+        popup(cx, b.y - 6, "BYE TROLL!");
+        playTrollDeath();
+      }
     } else {
       popup(cx, b.y - 6, `${b.hp} LEFT`);
     }
@@ -1533,6 +1737,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (s.lives <= 0) {
       s.mode = "dying";
       s.deadAt = s.t;
+      addCoins(Math.floor(s.score));
       if (s.score > s.best) {
         s.best = Math.floor(s.score);
         try {
@@ -1562,12 +1767,31 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const press = () => {
     const s = state.current;
     getAudio(); // browsers only allow sound after a click, so wake it up here
-    if (s.mode === "golden") {
+    if (s.mode === "select") {
+      const o = OUTFITS[s.selectIndex];
+      if (s.unlocked.includes(o.id)) {
+        s.outfit = o.id;
+        try {
+          localStorage.setItem(OUTFIT_KEY, o.id);
+        } catch {}
+        s.mode = "ready";
+      } else {
+        s.flash = 1.2;
+        s.flashText = `LOCKED \u2014 ${o.how}`;
+      }
+    } else if (s.mode === "golden") {
       closeGolden(false);
     } else if (s.mode === "choose") {
       pickSpell(s.spellChoice);
     } else if (s.mode === "paused") {
-      resumeGame();
+      if (s.pauseChoice === 1) {
+        newGame();
+        s.mode = "running";
+      } else if (s.pauseChoice === 2) {
+        goHome();
+      } else {
+        resumeGame();
+      }
     } else if (s.mode === "ready") {
       s.mode = "running";
     } else if (s.mode === "running") {
@@ -1605,12 +1829,17 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     playPowerAppear();
   };
 
+  const KILL_STREAK_WINDOW = 1.2; // seconds you have to chain the next stomp
   const killEnemy = (e: Enemy, points: number) => {
     const s = state.current;
     e.alive = false;
     e.squash = 0.35;
-    s.bonus += points;
-    popup(e.x + 7, e.y - 4, `+${points}`);
+    s.killStreak += 1;
+    s.killStreakTimer = KILL_STREAK_WINDOW;
+    const doubled = s.killStreak >= 2;
+    const finalPoints = doubled ? points * 2 : points;
+    s.bonus += finalPoints;
+    popup(e.x + 7, e.y - 4, doubled ? `+${finalPoints} DOUBLE KILL!` : `+${finalPoints}`);
     burst(e.x + 7, e.y + 7, 12, e.kind === "flyer" ? [LIGHT_GREEN, DARK_GREEN, "#ffffff"] : ["#8a8a8a", "#ffffff", INK], 60);
     playStomp();
   };
@@ -1633,6 +1862,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       p.life -= dt;
     }
     s.popups = s.popups.filter((p) => p.life > 0);
+
+    // Kill streak: stomping enemies back-to-back within this window keeps the streak alive
+    if (s.killStreakTimer > 0) {
+      s.killStreakTimer -= dt;
+      if (s.killStreakTimer <= 0) s.killStreak = 0;
+    }
 
     // Click wheel: turning it walks you that way for a moment
     const spin = spinRef.current;
@@ -1675,6 +1910,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (s.mode !== "running") return;
 
     s.runTime += dt;
+    if (!s.unlocked.includes("og") && s.score >= OG_SCORE_UNLOCK) unlockOutfit("og");
     if (s.invuln > 0) s.invuln -= dt;
 
     if (s.hintTime > 0) s.hintTime -= dt;
@@ -1702,9 +1938,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (s.vx > target) s.vx = Math.max(target, s.vx - ACCEL * dt);
     s.vy = Math.min(420, s.vy + GRAVITY * dt);
 
-    // Jetpack: hold jump to fly up
-    s.flying = s.jetpack && (heldRef.current.up || touchUpRef.current);
+    // Jetpack: hold jump to fly, but only while there's fuel. Land to refuel.
+    const wantsFly = s.jetpack && (heldRef.current.up || touchUpRef.current);
+    s.flying = wantsFly && s.jetFuel > 0;
     if (s.flying) {
+      s.jetFuel = Math.max(0, s.jetFuel - dt);
       s.vy = Math.max(JET_MAX_UP, s.vy - JET_THRUST * dt);
       if (Math.random() < 0.7) {
         s.particles.push({
@@ -1716,6 +1954,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           life: rand(0.15, 0.3),
         });
       }
+      if (s.jetFuel <= 0) popup(s.x + SPRITE_W / 2, s.y - 6, "OUT OF GAS!");
+    } else if (s.jetpack && s.onGround) {
+      s.jetFuel = Math.min(JET_FUEL_MAX, s.jetFuel + dt * JET_REFUEL_RATE);
     }
 
     // Move sideways, then up/down, stopping at solid tiles
@@ -1750,9 +1991,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
       s.vy = 0;
     }
-    // Top of the screen is a ceiling (only matters with the jetpack)
-    if (s.y < -6) {
-      s.y = -6;
+    // A generous safety ceiling — well above the old fixed wall, and high enough you can
+    // fly for a good while, but bounded so the vertical camera below only ever has to
+    // scroll a predictable, safe distance (keeps backgrounds fully covered, no edge showing).
+    if (s.y < -260) {
+      s.y = -260;
       if (s.vy < 0) s.vy = 0;
     }
     // Landing on bricks or thin lines from above
@@ -1805,6 +2048,14 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       generateUpTo(Math.floor((s.cam + W) / T) + 4);
       if (s.bossState === "placed" && s.cam >= s.bossCol * T) startBoss();
     }
+
+    // Vertical camera: when a jump or a jetpack flight takes you higher than the screen
+    // normally shows, the screen scrolls up with you instead of an invisible ceiling
+    // stopping you short. It eases back down once you're back near the ground.
+    const VIEW_TOP_MARGIN = 24;
+    const desiredCamY = Math.min(0, s.y - VIEW_TOP_MARGIN);
+    s.camY += (desiredCamY - s.camY) * Math.min(1, dt * 6);
+    if (Math.abs(s.camY - desiredCamY) < 0.05) s.camY = desiredCamY;
 
     // Score: distance + bonus
     if (!s.inBonus) s.farthest = Math.max(s.farthest, s.x);
@@ -1982,10 +2233,13 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         }
       }
       const tb = s.boss;
-      if (f.life > 0 && tb && tb.dead <= 0) {
-        const bx1 = tb.x + TR_HX;
-        const by1 = tb.y + TR_HY;
-        if (f.x + 4 > bx1 && f.x < bx1 + TR_HW && f.y + 4 > by1 && f.y < by1 + TR_HH) {
+      if (f.life > 0 && tb && tb.dead <= 0 && tb.dazed <= 0) {
+        const tbGiant = tb.kind === "giant";
+        const bx1 = tb.x + (tbGiant ? GIANT_HX : TR_HX);
+        const by1 = tb.y + (tbGiant ? GIANT_HY : TR_HY);
+        const bw1 = tbGiant ? GIANT_HW : TR_HW;
+        const bh1 = tbGiant ? GIANT_HH : TR_HH;
+        if (f.x + 4 > bx1 && f.x < bx1 + bw1 && f.y + 4 > by1 && f.y < by1 + bh1) {
           f.life = 0;
           hitBoss(f.ice);
         }
@@ -2042,37 +2296,76 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
     s.enemies = s.enemies.filter((e) => e.alive || e.squash > 0);
 
-    // The troll: walks at you (slower than you), sometimes jumps at you. Only shots hurt him.
+    // The troll (or, every other fight, the bigger giant): walks at you, sometimes jumps at
+    // you. Shots hurt him; the giant additionally needs a finishing stomp once he's down.
     const b = s.boss;
     if (s.bossState === "fight" && b) {
+      const isGiant = b.kind === "giant";
+      const bw = isGiant ? GIANT_W : TR_W;
+      const bh = isGiant ? GIANT_H : TR_H;
+      const bhx = isGiant ? GIANT_HX : TR_HX;
+      const bhy = isGiant ? GIANT_HY : TR_HY;
+      const bhw = isGiant ? GIANT_HW : TR_HW;
+      const bhh = isGiant ? GIANT_HH : TR_HH;
       if (b.dead > 0) {
         b.dead -= dt;
         b.y += 30 * dt;
-        if (Math.random() < 0.5) burst(b.x + rand(6, TR_W - 6), b.y + rand(10, TR_H), 2, [LIGHT_GREEN, GREEN, "#ffffff"], 40);
+        if (Math.random() < 0.5) burst(b.x + rand(6, bw - 6), b.y + rand(10, bh), 2, [LIGHT_GREEN, GREEN, "#ffffff"], 40);
         if (b.dead <= 0) {
+          const kind = b.kind;
           s.boss = null;
           s.bossState = "none";
           s.bossCount += 1; // the next one comes 10k later, faster and tougher
-          s.bonus += PTS_BOSS;
+          unlockOutfit("ghost");
+          const pts = kind === "giant" ? PTS_GIANT : PTS_BOSS;
+          s.bonus += pts;
           s.flash = 2.5;
-          s.flashText = `TROLL DOWN! +${PTS_BOSS}`;
+          s.flashText = `${kind === "giant" ? "GIANT" : "TROLL"} DOWN! +${pts}`;
           // leftover shots stay, but back to normal rules
           if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
           s.ammo = Math.min(s.ammo, 5);
         }
+      } else if (b.dazed > 0) {
+        // Down but not out: he just lies there while you line up the finishing stomp
+        b.dazed -= dt;
+        b.vy = Math.min(420, b.vy + GRAVITY * dt);
+        b.y += b.vy * dt;
+        if (b.y > 8 * T - bh) {
+          b.y = 8 * T - bh;
+          b.vy = 0;
+        }
+        const bx1 = b.x + bhx;
+        const by1 = b.y + bhy;
+        if (hx() + HB_W > bx1 && hx() < bx1 + bhw && hy() + HB_H > by1 && hy() < by1 + bhh) {
+          if (s.vy > 0 && hy() + HB_H - by1 < 14) {
+            // The finishing move!
+            s.vy = STOMP_BOUNCE;
+            b.dazed = 0;
+            b.dead = 1.6;
+            popup(b.x + bw / 2, b.y - 6, "GIANT DOWN!");
+            playTrollDeath();
+          }
+          // Otherwise touching him while he's down is harmless — no hurt() here
+        }
+        if (b.dazed <= 0 && b.dead <= 0) {
+          // Ran out of time without being stomped: he gets back up
+          b.hp = GIANT_DAZE_HP;
+          popup(b.x + bw / 2, b.y - 10, "GETTING BACK UP!");
+        }
       } else {
         if (b.hit > 0) b.hit -= dt;
+        const speedMul = isGiant ? GIANT_SPEED_MULT : 1;
         const pc = s.x + HB_X + HB_W / 2;
-        const tc = b.x + TR_HX + TR_HW / 2;
+        const tc = b.x + bhx + bhw / 2;
         const dir = pc < tc ? -1 : 1;
-        const onGround = b.y >= 8 * T - TR_H - 0.5;
+        const onGround = b.y >= 8 * T - bh - 0.5;
         if (onGround && b.hit <= 0.2) {
           b.facing = dir;
-          b.vx = dir * TROLL_SPEED * bossSpeed();
+          b.vx = dir * TROLL_SPEED * bossSpeed() * speedMul;
           b.jumpTimer -= dt;
           if (b.jumpTimer <= 0 && Math.abs(pc - tc) < 120) {
             b.vy = TROLL_JUMP;
-            b.vx = dir * 75 * bossSpeed();
+            b.vx = dir * 75 * bossSpeed() * speedMul;
             b.jumpTimer = rand(1.8, 3.2) / bossSpeed();
             playBump();
           }
@@ -2080,19 +2373,19 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         b.vy = Math.min(420, b.vy + GRAVITY * dt);
         b.x += b.vx * dt;
         b.y += b.vy * dt;
-        if (b.y > 8 * T - TR_H) {
+        if (b.y > 8 * T - bh) {
           if (b.vy > 200) s.shake = 0.12; // heavy landing
-          b.y = 8 * T - TR_H;
+          b.y = 8 * T - bh;
           b.vy = 0;
         }
-        b.x = Math.max(s.cam - TR_HX, Math.min(s.cam + W - TR_W + TR_HX, b.x));
+        b.x = Math.max(s.cam - bhx, Math.min(s.cam + W - bw + bhx, b.x));
         // Touching him hurts, unless you land on top of him (he's too big to squash, you just bounce off)
-        const bx1 = b.x + TR_HX;
-        const by1 = b.y + TR_HY;
-        if (hx() + HB_W > bx1 && hx() < bx1 + TR_HW && hy() + HB_H > by1 && hy() < by1 + TR_HH) {
+        const bx1 = b.x + bhx;
+        const by1 = b.y + bhy;
+        if (hx() + HB_W > bx1 && hx() < bx1 + bhw && hy() + HB_H > by1 && hy() < by1 + bhh) {
           if (s.vy > 0 && hy() + HB_H - by1 < 12) {
             s.vy = STOMP_BOUNCE;
-            popup(b.x + TR_W / 2, b.y - 6, "NOPE!");
+            popup(b.x + bw / 2, b.y - 6, "NOPE!");
             playBump();
           } else if (s.invuln <= 0) {
             hurt();
@@ -2279,19 +2572,39 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const cam = s.cam;
 
     if (zone === VOID_ZONE) {
-      // SoundCloud Void: dark room with a moving sound wave
-      ctx.fillStyle = VOID_BG;
-      ctx.fillRect(-4, -4, W + 8, H + 8);
+      // SoundCloud Void: dark room with a moving sound wave, tinted a bit differently per room
+      const pal = VOID_PALETTES[((s.lastVoid % VOID_PALETTES.length) + VOID_PALETTES.length) % VOID_PALETTES.length] || VOID_PALETTES[0];
+      ctx.fillStyle = pal.bg;
+      // Extended upward so it still fully covers the screen when the vertical camera scrolls up
+      ctx.fillRect(-4, -1200, W + 8, H + 1400);
       for (let i = 0; i < W / 4 + 1; i++) {
         const h = 10 + (Math.sin(s.t * 3 + i * 0.5) + 1) * 14 + hash(i) * 12;
-        ctx.fillStyle = i % 2 === 0 ? "#3a1a44" : "#2a1234";
+        ctx.fillStyle = i % 2 === 0 ? pal.a : pal.b;
         ctx.fillRect(i * 4, 64 - h / 2, 3, h);
       }
       return;
     }
 
+    if (zone >= FIELD_ZONE_START && zone < FIELD_ZONE_START + FIELD_IMAGES.length) {
+      // A cover-art field: the backdrop is the pixelated cover, ground/platforms stay plain.
+      // Fallback fill first, only shows if the image hasn't loaded yet.
+      ctx.fillStyle = SCREEN;
+      ctx.fillRect(-4, -1200, W + 8, H + 1400);
+      const img = fieldImagesRef.current[zone - FIELD_ZONE_START];
+      if (img && img.complete && img.naturalWidth > 0) {
+        // Stack extra copies directly above the visible one, so jumping high (which
+        // scrolls the screen up) reveals more of the same cover instead of a plain gap.
+        const COPIES_ABOVE = 6;
+        for (let i = -COPIES_ABOVE; i <= 0; i++) {
+          ctx.drawImage(img, 0, i * H, W, H);
+        }
+      }
+      return;
+    }
+
     ctx.fillStyle = zone === Z_CLOUDS ? CLOUD_SKY : zone === Z_TREES ? TREE_SKY : zone === Z_SMOKE ? SMOKE_SKY : SCREEN;
-    ctx.fillRect(-4, -4, W + 8, H + 8);
+    // Extended upward so it still fully covers the screen when the vertical camera scrolls up
+    ctx.fillRect(-4, -1200, W + 8, H + 1400);
 
     if (zone === 0) {
       // Rolling hills
@@ -2766,6 +3079,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
     ctx.save();
     if (s.shake > 0) ctx.translate(Math.round(rand(-2, 2)), Math.round(rand(-2, 2)));
+    ctx.translate(0, -Math.round(s.camY));
 
     drawBackground(ctx, viewZone);
     if (!s.inBonus && cam < 0) {
@@ -2832,15 +3146,27 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       const jx = Math.round(ji.x - cam);
       const jy = ji.y - Math.round(Math.abs(Math.sin(s.t * 3)) * 3);
       // Ghostly "MY GOATS" label floating above the jetpack, pulsing like a spirit
-      const ghostAlpha = 0.5 + Math.sin(s.t * 2) * 0.25;
+      // (kept bright and outlined so it stays readable against any background)
+      const ghostAlpha = 0.75 + Math.sin(s.t * 2) * 0.2;
       ctx.save();
-      ctx.font = `8px ${fontFamily}`;
+      ctx.font = `9px ${fontFamily}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
-      ctx.shadowColor = "rgba(190,255,225,0.9)";
-      ctx.shadowBlur = 6;
-      ctx.fillStyle = `rgba(225,255,240,${ghostAlpha})`;
+      ctx.shadowColor = "rgba(190,255,225,0.95)";
+      ctx.shadowBlur = 9;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = `rgba(20,10,30,${Math.min(1, ghostAlpha + 0.1)})`;
+      ctx.strokeText("MY GOATS", jx + 9, jy - 8);
+      ctx.fillStyle = `rgba(230,255,242,${ghostAlpha})`;
       ctx.fillText("MY GOATS", jx + 9, jy - 8);
+      ctx.restore();
+      // Little reminder that the jetpack's fuel runs out
+      ctx.save();
+      ctx.font = `6px ${fontFamily}`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(`ONLY TILL SCORE ${JET_UNTIL}`, jx + 22, jy + 9);
       ctx.restore();
       drawPixels(ctx, JETPACK, jx, jy, { K: INK, P: PINK, p: DARK_PINK, W: "#ffffff", g: "#78788a" }, 2);
       if (Math.floor(s.t * 4) % 2 === 0) {
@@ -2929,78 +3255,109 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
     }
 
-    // The troll, with wiggly green stink lines around him
+    // The troll (or the bigger giant), with wiggly green stink lines around him
     if (s.boss) {
       const b = s.boss;
+      const isGiant = b.kind === "giant";
+      const bw = isGiant ? GIANT_W : TR_W;
+      const scale = isGiant ? GIANT_SCALE : 2;
       const bx = Math.round(b.x - cam);
       const walking = Math.abs(b.vx) > 5 && b.vy === 0;
       const by = Math.round(b.y) - (walking && Math.floor(s.t * 6) % 2 === 0 ? 1 : 0);
-      for (let k = 0; k < 4; k++) {
-        const lx = bx + 2 + k * 13;
+      for (let k = 0; k < (isGiant ? 6 : 4); k++) {
+        const lx = bx + 2 + k * (isGiant ? 16 : 13);
         const rise = (s.t * 14 + k * 5) % 10;
         for (let j = 0; j < 7; j++) {
           ctx.fillStyle = j % 2 === 0 ? "#7fc24a" : "#4e8f2a";
           ctx.fillRect(Math.round(lx + Math.sin(s.t * 7 + j * 0.9 + k) * 2), Math.round(by + 4 - rise - j * 2), 1, 2);
         }
       }
-      const flash = (b.hit > 0 && Math.floor(s.t * 20) % 2 === 0) || (b.dead > 0 && Math.floor(s.t * 14) % 2 === 0);
+      const flash =
+        (b.hit > 0 && Math.floor(s.t * 20) % 2 === 0) ||
+        (b.dead > 0 && Math.floor(s.t * 14) % 2 === 0) ||
+        (b.dazed > 0 && Math.floor(s.t * 10) % 2 === 0);
       const colors = flash ? Object.fromEntries(Object.keys(TROLL_COLORS).map((k) => [k, "#ffffff"])) : TROLL_COLORS;
-      drawPixels(ctx, b.facing > 0 ? TROLL_RIGHT : TROLL, bx, by, colors, 2);
+      drawPixels(ctx, b.facing > 0 ? TROLL_RIGHT : TROLL, bx, by, colors, scale);
       // little health bar over his head
-      if (b.dead <= 0) {
+      if (b.dead <= 0 && b.dazed <= 0) {
+        const barW = isGiant ? 46 : 30;
         ctx.fillStyle = INK;
-        ctx.fillRect(bx + 6, by - 7, 32, 4);
+        ctx.fillRect(bx + (isGiant ? 9 : 6), by - 7, barW + 2, 4);
         ctx.fillStyle = "#9b8fa6";
-        ctx.fillRect(bx + 7, by - 6, 30, 2);
+        ctx.fillRect(bx + (isGiant ? 10 : 7), by - 6, barW, 2);
         ctx.fillStyle = LIGHT_GREEN;
-        ctx.fillRect(bx + 7, by - 6, Math.round((30 * Math.max(0, b.hp)) / b.maxHp), 2);
+        ctx.fillRect(bx + (isGiant ? 10 : 7), by - 6, Math.round((barW * Math.max(0, b.hp)) / b.maxHp), 2);
       }
       // a drip hanging off his tongue now and then
-      if (!flash && Math.floor(s.t * 3) % 2 === 0) {
+      if (!flash && b.dazed <= 0 && Math.floor(s.t * 3) % 2 === 0) {
         ctx.fillStyle = TROLL_COLORS.T;
-        const tx = b.facing > 0 ? bx + TR_W - 12 : bx + 6;
-        ctx.fillRect(tx, by + 26, 6, 2);
+        const tx = b.facing > 0 ? bx + bw - 12 : bx + 6;
+        ctx.fillRect(tx, by + (isGiant ? 39 : 26), 6, 2);
       }
+    }
+
+    // On the outfit-select screen, dim everything drawn so far (background, ground, jetpack
+    // sign, etc.) so the big character preview below stands out against it
+    if (s.mode === "select") {
+      ctx.fillStyle = "rgba(10, 6, 14, 0.55)";
+      ctx.fillRect(-4, -4, W + 8, H + 8);
     }
 
     // You
     const blinking = s.invuln > 0 && Math.floor(s.t * 12) % 2 === 0;
-    const showYou = ["ready", "running", "pipe", "golden", "choose", "paused"].includes(s.mode);
+    const showYou = ["select", "ready", "running", "pipe", "golden", "choose", "paused"].includes(s.mode);
     if (showYou && !blinking) {
-      const sprite = spriteRef.current;
+      const previewOutfit = s.mode === "select" ? OUTFITS[s.selectIndex].id : s.outfit;
+      const sprite = spritesRef.current[previewOutfit];
       const frame = s.onGround && Math.abs(s.vx) > 5 ? Math.floor(s.runAnim * 10) % 2 : 0;
-      const x = Math.round(s.x - cam);
-      const y = Math.round(s.y);
-      ctx.save();
-      if (s.mode === "pipe") {
-        // Only draw the part above the pipe while sinking in
-        const c = colAt(s.pipeCol);
-        ctx.beginPath();
-        ctx.rect(0, 0, W, c.ground * T);
-        ctx.clip();
-      }
-      // Jetpack on your back
-      if (s.jetpack) {
-        const bx = s.facing > 0 ? x + 2 : x + SPRITE_W - 7;
-        const by = y + 13;
-        drawPixels(ctx, JET_SMALL, bx, by, { K: INK, P: PINK, p: DARK_PINK, W: "#ffffff", g: "#78788a" }, 1);
-        if (s.flying && Math.floor(s.t * 20) % 2 === 0) {
-          drawPixels(ctx, JET_SMALL_FLAME, bx, by + 8, { O: "#ff7a00", Y: "#ffc800" }, 1);
-        }
-      }
-      if (sprite && sprite.complete && sprite.naturalWidth > 0) {
-        if (s.facing < 0) {
-          ctx.translate(x + SPRITE_W, y);
-          ctx.scale(-1, 1);
-          ctx.drawImage(sprite, frame * SPRITE_W, 0, SPRITE_W, SPRITE_H, 0, 0, SPRITE_W, SPRITE_H);
+
+      if (s.mode === "select") {
+        // Big centered portrait, so it's obviously the whole point of this screen
+        const scale = 2.4;
+        const bigW = SPRITE_W * scale;
+        const bigH = SPRITE_H * scale;
+        const bx = Math.round(W / 2 - bigW / 2);
+        const by = 32;
+        if (sprite && sprite.complete && sprite.naturalWidth > 0) {
+          ctx.drawImage(sprite, frame * SPRITE_W, 0, SPRITE_W, SPRITE_H, bx, by, bigW, bigH);
         } else {
-          ctx.drawImage(sprite, frame * SPRITE_W, 0, SPRITE_W, SPRITE_H, x, y, SPRITE_W, SPRITE_H);
+          ctx.fillStyle = OUTFIT_FALLBACK[previewOutfit];
+          ctx.fillRect(bx + HB_X * scale, by + HB_Y * scale, HB_W * scale, HB_H * scale);
         }
       } else {
-        ctx.fillStyle = PINK;
-        ctx.fillRect(x + HB_X, y + HB_Y, HB_W, HB_H);
+        const x = Math.round(s.x - cam);
+        const y = Math.round(s.y);
+        ctx.save();
+        if (s.mode === "pipe") {
+          // Only draw the part above the pipe while sinking in
+          const c = colAt(s.pipeCol);
+          ctx.beginPath();
+          ctx.rect(0, 0, W, c.ground * T);
+          ctx.clip();
+        }
+        // Jetpack on your back
+        if (s.jetpack) {
+          const bx = s.facing > 0 ? x + 2 : x + SPRITE_W - 7;
+          const by = y + 13;
+          drawPixels(ctx, JET_SMALL, bx, by, { K: INK, P: PINK, p: DARK_PINK, W: "#ffffff", g: "#78788a" }, 1);
+          if (s.flying && Math.floor(s.t * 20) % 2 === 0) {
+            drawPixels(ctx, JET_SMALL_FLAME, bx, by + 8, { O: "#ff7a00", Y: "#ffc800" }, 1);
+          }
+        }
+        if (sprite && sprite.complete && sprite.naturalWidth > 0) {
+          if (s.facing < 0) {
+            ctx.translate(x + SPRITE_W, y);
+            ctx.scale(-1, 1);
+            ctx.drawImage(sprite, frame * SPRITE_W, 0, SPRITE_W, SPRITE_H, 0, 0, SPRITE_W, SPRITE_H);
+          } else {
+            ctx.drawImage(sprite, frame * SPRITE_W, 0, SPRITE_W, SPRITE_H, x, y, SPRITE_W, SPRITE_H);
+          }
+        } else {
+          ctx.fillStyle = OUTFIT_FALLBACK[previewOutfit];
+          ctx.fillRect(x + HB_X, y + HB_Y, HB_W, HB_H);
+        }
+        ctx.restore();
       }
-      ctx.restore();
     }
 
     for (const p of s.particles) {
@@ -3016,13 +3373,15 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     ctx.textAlign = "center";
     for (const p of s.popups) {
       ctx.fillStyle = INK;
-      ctx.fillText(p.text, Math.round(p.x - cam) + 1, Math.round(p.y) + 1);
+      ctx.fillText(p.text, Math.round(p.x - cam) + 1, Math.round(p.y - s.camY) + 1);
       ctx.fillStyle = p.text.startsWith("+1") ? PINK : "#ffc800";
-      ctx.fillText(p.text, Math.round(p.x - cam), Math.round(p.y));
+      ctx.fillText(p.text, Math.round(p.x - cam), Math.round(p.y - s.camY));
     }
 
-    // HUD
+    // HUD (score, lives, powers) — none of it means anything yet on the outfit-select
+    // screen, so it stays hidden there and the screen is just the character picker
     const hudInk = viewZone === VOID_ZONE ? "#ffffff" : INK;
+    if (s.mode !== "select") {
     drawSfxIcon(ctx, hudInk);
     ctx.fillStyle = hudInk;
     ctx.textAlign = "left";
@@ -3068,27 +3427,43 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       ctx.fillStyle = "#3de0c8";
       ctx.fillRect(x, 14, 4, 4);
     }
-    // Troll health bar
+    // Boss health bar
     if (s.boss && s.bossState === "fight") {
       const b = s.boss;
+      const label = b.kind === "giant" ? "GIANT" : "TROLL";
       ctx.fillStyle = hudInk;
       ctx.textAlign = "left";
-      ctx.fillText(s.bossCount === 0 ? "TROLL" : `TROLL ${s.bossCount + 1}`, W / 2 - 60, 25);
+      ctx.fillText(s.bossCount === 0 ? label : `${label} ${s.bossCount + 1}`, W / 2 - 60, 25);
       const bw = 72;
       const bx = W / 2 + 6;
       ctx.fillStyle = INK;
       ctx.fillRect(bx - 1, 25, bw + 2, 8);
-      ctx.fillStyle = "#9b8fa6";
-      ctx.fillRect(bx, 26, bw, 6);
-      const part = Math.max(0, b.hp) / b.maxHp;
-      ctx.fillStyle = part > 0.5 ? LIGHT_GREEN : part > 0.25 ? "#ffc800" : "#e0303a";
-      ctx.fillRect(bx, 26, Math.round(bw * part), 6);
-      ctx.fillStyle = "rgba(255,255,255,0.5)";
-      ctx.fillRect(bx, 26, Math.round(bw * part), 1);
+      if (b.dazed > 0) {
+        ctx.fillStyle = "#ffc800";
+        ctx.fillText("STOMP HIM!", bx, 26);
+      } else {
+        ctx.fillStyle = "#9b8fa6";
+        ctx.fillRect(bx, 26, bw, 6);
+        const part = Math.max(0, b.hp) / b.maxHp;
+        ctx.fillStyle = part > 0.5 ? LIGHT_GREEN : part > 0.25 ? "#ffc800" : "#e0303a";
+        ctx.fillRect(bx, 26, Math.round(bw * part), 6);
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.fillRect(bx, 26, Math.round(bw * part), 1);
+      }
     }
-    // Jetpack: a little icon under the score while you have it
+    // Jetpack: a little icon + fuel bar under the score while you have it
     if (s.jetpack) {
       drawPixels(ctx, JETPACK, 22, 16, { K: hudInk, P: PINK, p: DARK_PINK, W: "#ffffff", g: "#78788a" }, 1);
+      const fuelFrac = s.jetFuel / JET_FUEL_MAX;
+      const fbx = 38;
+      const fby = 20;
+      const fbw = 40;
+      ctx.fillStyle = hudInk;
+      ctx.fillRect(fbx - 1, fby - 1, fbw + 2, 6);
+      ctx.fillStyle = "#3a3a3a";
+      ctx.fillRect(fbx, fby, fbw, 4);
+      ctx.fillStyle = fuelFrac > 0.4 ? "#ffc800" : fuelFrac > 0.15 ? "#ff7a00" : "#e0303a";
+      ctx.fillRect(fbx, fby, Math.round(fbw * fuelFrac), 4);
     }
     if (hasFire() && s.power === "fire" && s.bossState !== "fight") {
       const left = s.fireTime / FIRE_TIME;
@@ -3101,13 +3476,24 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         ctx.fillRect(9, H - 11, Math.max(0, Math.round((W - 18) * left)), 2);
       }
     }
+    } // end of the select-mode HUD gate
 
-    if (s.mode !== "ready") drawProgress(ctx);
+    if (s.mode !== "ready" && s.mode !== "select") drawProgress(ctx);
 
     // Messages
     const blink = Math.floor(s.t * 2) % 2 === 0;
     ctx.textAlign = "center";
-    if (s.mode === "ready") {
+    if (s.mode === "select") {
+      const o = OUTFITS[s.selectIndex];
+      const owned = s.unlocked.includes(o.id);
+      textBox(ctx, "CHOOSE YOUR PINKMANE", 8);
+      textBox(ctx, o.name, 20);
+      // The big portrait itself is drawn further down, right in the middle of the screen
+      textBox(ctx, owned ? "PRESS OK TO WEAR IT" : `LOCKED \u2014 ${o.how}`, 118);
+      textBox(ctx, `GRAMS SAVED UP: ${s.coins}`, 130);
+      if (!s.storageOk) textBox(ctx, "BROWSER STORAGE BLOCKED \u2014 WON'T SAVE", 141);
+      if (blink) textBox(ctx, "\u2190 \u2192 BROWSE OUTFITS", 152);
+    } else if (s.mode === "ready") {
       textBox(ctx, "SUPER PINKMANE", 36);
       if (blink) textBox(ctx, "PRESS OK TO START", 54);
       const top = boardRef.current[0];
@@ -3135,8 +3521,19 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (s.mode === "paused") {
       ctx.fillStyle = "rgba(22, 12, 29, 0.7)";
       ctx.fillRect(0, 0, W, H);
-      textBox(ctx, "PAUSED", 60);
-      if (blink) textBox(ctx, "ESC TO CONTINUE", 80);
+      textBox(ctx, "PAUSED", 40);
+      const options = ["RESUME", "RESTART", "HOME"];
+      options.forEach((label, i) => {
+        const picked = s.pauseChoice === i;
+        const text = (picked ? "> " : "") + label;
+        const y = 62 + i * 16;
+        const w = ctx.measureText(text).width + 10;
+        ctx.fillStyle = picked ? PINK : SCREEN;
+        ctx.fillRect(Math.round(W / 2 - w / 2), y - 2, Math.round(w), 12);
+        ctx.fillStyle = picked ? "#ffffff" : INK;
+        ctx.fillText(text, W / 2, y);
+      });
+      if (blink) textBox(ctx, "\u2191\u2193 CHOOSE \u00b7 OK CONFIRM", 118);
     }
   };
 
@@ -3148,12 +3545,19 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (!ctx) return;
     ctx.imageSmoothingEnabled = false;
 
-    const sprite = new Image();
-    sprite.src = "/game/pinkdude.png";
-    spriteRef.current = sprite;
+    OUTFITS.forEach((o) => {
+      const img = new Image();
+      img.src = o.file;
+      spritesRef.current[o.id] = img;
+    });
     const ship = new Image();
     ship.src = "/game/ghostship.png";
     shipRef.current = ship;
+    fieldImagesRef.current = FIELD_IMAGES.map((src) => {
+      const im = new Image();
+      im.src = src;
+      return im;
+    });
     deathSoundRef.current = new Audio(DEATH_SOUND);
 
     // Owner code: open the site once with ?owner=YOURCODE on each of your devices
@@ -3168,6 +3572,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
     } catch {}
 
+    state.current.storageOk = storageAvailable();
+
     try {
       sfxOnRef.current = localStorage.getItem(SFX_KEY) !== "off";
       const saved = Number(localStorage.getItem(BEST_KEY));
@@ -3176,6 +3582,17 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (savedName) {
         nameRef.current = savedName;
         setName(savedName);
+      }
+      const savedCoins = Number(localStorage.getItem(COINS_KEY));
+      if (savedCoins > 0) state.current.coins = savedCoins;
+      const savedUnlocked = JSON.parse(localStorage.getItem(UNLOCKED_KEY) || "[]");
+      if (Array.isArray(savedUnlocked) && savedUnlocked.length) {
+        state.current.unlocked = Array.from(new Set(["classic", ...savedUnlocked])) as OutfitId[];
+      }
+      const savedOutfit = localStorage.getItem(OUTFIT_KEY) as OutfitId | null;
+      if (savedOutfit && state.current.unlocked.includes(savedOutfit)) {
+        state.current.outfit = savedOutfit;
+        state.current.selectIndex = OUTFITS.findIndex((o) => o.id === savedOutfit);
       }
     } catch {}
 
@@ -3195,10 +3612,23 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         else if (mode === "paused") resumeGame();
         return;
       }
+      // Browsing outfits before the game starts
+      if (mode === "select") {
+        if (k === "ArrowLeft" || k === "a" || k === "A")
+          state.current.selectIndex = (state.current.selectIndex + OUTFITS.length - 1) % OUTFITS.length;
+        if (k === "ArrowRight" || k === "d" || k === "D") state.current.selectIndex = (state.current.selectIndex + 1) % OUTFITS.length;
+        return;
+      }
       // Picking a spell before a boss fight
       if (mode === "choose") {
         if (k === "ArrowLeft" || k === "a" || k === "A") state.current.spellChoice = 0;
         if (k === "ArrowRight" || k === "d" || k === "D") state.current.spellChoice = 1;
+        return;
+      }
+      // Choosing Resume / Restart / Home on the pause menu
+      if (mode === "paused") {
+        if (k === "ArrowUp" || k === "w" || k === "W") state.current.pauseChoice = (state.current.pauseChoice + 2) % 3;
+        if (k === "ArrowDown" || k === "s" || k === "S") state.current.pauseChoice = (state.current.pauseChoice + 1) % 3;
         return;
       }
       if (k === "ArrowLeft" || k === "a" || k === "A") heldRef.current.left = true;
@@ -3208,6 +3638,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (k === "ArrowDown" || k === "s" || k === "S") down();
       if (k === "f" || k === "F" || k === "x" || k === "X") shoot();
       if (k === "m" || k === "M") toggleSfx();
+      if (k === "9") teleportToFirstField();
     };
     const keyUp = (e: KeyboardEvent) => {
       const k = e.key;

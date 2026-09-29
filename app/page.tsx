@@ -1211,14 +1211,6 @@ activeGame === "maze" ? (
         <div className="top-controls">
           <BatteryIcon />
           <VuBars active={!isMuted && !isPaused} />
-          <button
-            onClick={toggleMute}
-            onMouseDown={noFocus}
-            aria-label={isMuted ? "Unmute music" : "Mute music"}
-            className="mute-btn"
-          >
-            <SpeakerIcon muted={isMuted} />
-          </button>
           <input
             type="range"
             min={0}
@@ -1231,6 +1223,14 @@ activeGame === "maze" ? (
             onPointerUp={(e) => e.currentTarget.blur()}
             onTouchEnd={(e) => e.currentTarget.blur()}
           />
+          <button
+            onClick={toggleMute}
+            onMouseDown={noFocus}
+            aria-label={isMuted ? "Unmute music" : "Mute music"}
+            className="mute-btn"
+          >
+            <SpeakerIcon muted={isMuted} />
+          </button>
         </div>
 
         <div
@@ -1807,6 +1807,7 @@ activeGame === "maze" ? (
                   [["SPACE", "↑"], "jump"],
                   [["S"], "shoot / pipe"],
                   [["M"], "sounds"],
+                  [["ESC"], "pause"],
                   [["BACKSPACE"], "menu"],
                 ]
               : [
