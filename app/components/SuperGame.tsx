@@ -13,27 +13,45 @@ type Props = {
   muted: boolean;
 };
 
-type Mode = "ready" | "running" | "hurt" | "dying" | "entry" | "board";
-// One column of the level: where the ground starts (row) or -1 for a pit,
-// floating brick rows (block = lower floor, block2 = upper floor), and a bonus block you bump from below
+type Mode = "ready" | "running" | "pipe" | "hurt" | "dying" | "entry" | "board";
+
+// One column of the level
 type Column = {
-  ground: number;
-  block: number;
-  block2: number;
-  bonus: number;
+  ground: number; // row where the ground starts, -1 = pit
+  block: number; // floating brick floor (one-way), -1 = none
+  block2: number; // second brick floor above it
+  bonus: number; // bonus block row (bump it from below), -1 = none
   used: boolean;
   bump: number;
-  zone: number;
+  line: number; // thin line to jump on (one-way), -1 = none
+  lineTh: number; // how thick the line is drawn (gets thinner the farther you go)
+  pipe: number; // 0 = no pipe, 1 = left half, 2 = right half
+  pipeOut: boolean; // pipe that leads back out of the bonus room
+  pipeUsed: boolean;
+  zone: number; // which zone look this column has (99 = SoundCloud Void)
 };
+
+type Enemy = {
+  kind: "walker" | "flyer";
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  baseY: number;
+  phase: number;
+  alive: boolean;
+  squash: number;
+};
+type Leaf = { x: number; y: number; taken: boolean };
+type Heart = { x: number; y: number; taken: boolean };
 type PowerUp = { x: number; y: number; vx: number; vy: number };
 type Fireball = { x: number; y: number; vx: number; vy: number; life: number };
-type Enemy = { x: number; y: number; vx: number; vy: number; alive: boolean; squash: number };
-type Leaf = { x: number; y: number; taken: boolean };
 type Particle = { x: number; y: number; vx: number; vy: number; color: string; life: number };
+type Popup = { x: number; y: number; text: string; life: number };
 type Entry = { name: string; score: number };
 type BoardStatus = "loading" | "ok" | "offline";
 
-// Game size in pixels. It gets scaled up to fill the iPod screen.
+// Game size in pixels. It gets scaled up to fill the screen.
 const W = 256;
 const H = 160;
 const T = 16; // one tile
@@ -54,15 +72,25 @@ const JUMP = -370;
 const RUN = 100;
 const ACCEL = 900;
 const STOMP_BOUNCE = -240;
-const START_LIVES = 3;
+
+// Lives are hearts: you start with 2 and can collect up to 4
+const START_LIVES = 2;
+const MAX_LIVES = 4;
 
 // Zones change every this many tiles, each with its own look and harder jumping
-const ZONE_LEN = 140;
-const ZONE_NAMES = ["PINK FIELDS", "SPEAKER HILLS", "ROOFTOPS"];
+const ZONE_LEN = 150;
+const ZONE_NAMES = ["PINK FIELDS", "SPEAKER HILLS", "ROOFTOPS", "PINK CLOUDS"];
+const VOID_ZONE = 99;
 
-// Fire power: fireballs fly out on their own (the iPod only has one action button: jump)
-const FIRE_EVERY = 0.5;
+// Fire power: 5 fireballs, and a timer bar at the bottom. Picking up another one refills, it doesn't stack.
+const FIRE_AMMO = 5;
+const FIRE_TIME = 15;
 const FIREBALL_SPEED = 170;
+
+// Points
+const PTS_LEAF = 10;
+const PTS_WALKER = 100;
+const PTS_FLYER = 150;
 
 // Saved in the visitor's browser (name, device and owner code are shared with the other games)
 const BEST_KEY = "pinksuper-best";
@@ -81,10 +109,14 @@ const PINK = "#d63cc8";
 const DARK_PINK = "#8a1f86";
 const GREEN = "#2e9e3a";
 const DARK_GREEN = "#1b6b25";
-const BOOM = [PINK, "#ffc800", INK, "#777777", "#ffffff"];
-const FIRE = ["#ff7a00", "#ffc800", "#d21e1e", "#ffffff"];
+const LIGHT_GREEN = "#6fdc5a";
 const ROOF = "#6a2a8a";
 const ROOF_LINE = "#8e3fb0";
+const CLOUD = "#fdeefb";
+const CLOUD_SKY = "#f3d3ee";
+const VOID_BG = "#160c1d";
+const BOOM = [PINK, "#ffc800", INK, "#777777", "#ffffff"];
+const FIRE = ["#ff7a00", "#ffc800", "#d21e1e", "#ffffff"];
 
 // Haters: grumpy grey clouds that walk around (drawn 2x bigger)
 const HATER = [
@@ -96,6 +128,27 @@ const HATER = [
   "GGKKKGG",
   ".G.G.G.",
 ];
+// Green flying monster (two wing frames, drawn 2x bigger)
+const FLYER = [
+  [
+    "GG.....GG",
+    "GGG...GGG",
+    ".GGDDDGG.",
+    "..DWDWD..",
+    "..DDDDD..",
+    "...D.D...",
+    ".........",
+  ],
+  [
+    ".........",
+    "...DDD...",
+    "..DWDWD..",
+    "GGDDDDDGG",
+    "GGG.D.GGG",
+    "GG.....GG",
+    ".........",
+  ],
+];
 const LEAF = [
   "...G...",
   "..GGG..",
@@ -104,6 +157,14 @@ const LEAF = [
   ".GGGGG.",
   "...D...",
   "...D...",
+];
+const HEART = [
+  ".PP.PP.",
+  "PPPPPPP",
+  "PPPPPPP",
+  ".PPPPP.",
+  "..PPP..",
+  "...P...",
 ];
 
 function rand(min: number, max: number) {
@@ -131,6 +192,12 @@ function drawPixels(
       }
     }
   }
+}
+
+// Small repeatable "random" number for background decorations
+function hash(n: number) {
+  const x = Math.sin(n * 127.1) * 43758.5453;
+  return x - Math.floor(x);
 }
 
 // A random ID for this browser, so names stay locked to the device that claimed them
@@ -189,24 +256,40 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     vx: 0,
     vy: 0,
     onGround: false,
-    coyote: 0, // a tiny moment after walking off an edge where you can still jump
+    coyote: 0,
     facing: 1,
     cam: 0,
     cols: [] as Column[],
-    // level generator memory
     genGround: 8,
     genFlat: 0,
+    pipeZones: [] as number[], // zones that already got their bonus pipe
     enemies: [] as Enemy[],
     leaves: [] as Leaf[],
+    hearts: [] as Heart[],
     powerups: [] as PowerUp[],
     fireballs: [] as Fireball[],
     particles: [] as Particle[],
-    fire: false, // got the flaming weed leaf
-    fireCooldown: 0,
+    popups: [] as Popup[],
+    ammo: 0,
+    fireTime: 0,
     auraTimer: 0,
     zoneShown: 0,
     flash: 0,
     flashText: "",
+    // Bonus room (SoundCloud Void)
+    inBonus: false,
+    saved: null as null | {
+      cols: Column[];
+      enemies: Enemy[];
+      leaves: Leaf[];
+      hearts: Heart[];
+      powerups: PowerUp[];
+      cam: number;
+      pipeCol: number;
+    },
+    pipeDir: 0 as 0 | 1 | -1, // 1 = going down into the void, -1 = coming out
+    pipeTimer: 0,
+    pipeCol: 0,
     score: 0,
     farthest: 0,
     bonus: 0,
@@ -254,18 +337,21 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     osc.stop(now + time + 0.04);
   };
 
-  const playJump = () => beep(260, 640, 0.12, 0.05, "square");
+  const playJump = () => beep(260, 640, 0.12, 0.045, "square");
   const playLeaf = () => {
-    beep(988, 988, 0.05, 0.05);
-    beep(1319, 1319, 0.1, 0.05, "square", 0.05);
+    beep(988, 988, 0.05, 0.045);
+    beep(1319, 1319, 0.1, 0.045, "square", 0.05);
   };
-  const playStomp = () => beep(500, 120, 0.12, 0.08, "square");
+  const playStomp = () => beep(500, 120, 0.12, 0.07, "square");
   const playHurt = () => beep(500, 70, 0.5, 0.08, "sawtooth");
-  const playBump = () => beep(180, 120, 0.08, 0.08, "square");
+  const playBump = () => beep(180, 120, 0.08, 0.07, "square");
   const playPowerAppear = () => [330, 440, 554, 659].forEach((f, i) => beep(f, f, 0.07, 0.05, "square", i * 0.05));
-  const playPowerUp = () => [523, 659, 784, 1047, 1319].forEach((f, i) => beep(f, f * 1.01, 0.08, 0.06, "square", i * 0.06));
-  const playFireball = () => beep(900, 300, 0.07, 0.03, "sawtooth");
+  const playPowerUp = () => [523, 659, 784, 1047, 1319].forEach((f, i) => beep(f, f * 1.01, 0.08, 0.055, "square", i * 0.06));
+  const playFireball = () => beep(900, 300, 0.07, 0.035, "sawtooth");
   const playPowerDown = () => beep(700, 200, 0.35, 0.07, "square");
+  const playEmpty = () => beep(140, 110, 0.05, 0.05, "square");
+  const playHeart = () => [659, 784, 988, 1319].forEach((f, i) => beep(f, f, 0.09, 0.055, "triangle", i * 0.07));
+  const playPipe = () => [520, 390, 260, 180].forEach((f, i) => beep(f, f * 0.9, 0.08, 0.05, "square", i * 0.08));
   const playDeath = () => {
     const sound = deathSoundRef.current;
     if (sound && !mutedRef.current && sfxOnRef.current) {
@@ -363,52 +449,111 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     bonus: -1,
     used: false,
     bump: 0,
+    line: -1,
+    lineTh: 4,
+    pipe: 0,
+    pipeOut: false,
+    pipeUsed: false,
     zone,
     ...extra,
   });
 
   const zoneOf = (i: number) => Math.floor(i / ZONE_LEN) % ZONE_NAMES.length;
 
-  const addHater = (i: number, ground: number, progress: number) => {
+  const addWalker = (i: number, ground: number, progress: number) => {
     state.current.enemies.push({
+      kind: "walker",
       x: i * T,
       y: ground * T - 14,
       vx: -(28 + progress * 24),
       vy: 0,
+      baseY: 0,
+      phase: 0,
       alive: true,
       squash: 0,
     });
   };
 
-  // Floating bricks: sometimes two floors, sometimes with a bonus block in the lower row
-  const addPlatforms = (zone: number, progress: number) => {
+  const addFlyer = (i: number, ground: number, progress: number) => {
+    const baseY = Math.max(20, (ground - 3) * T + rand(-8, 8));
+    state.current.enemies.push({
+      kind: "flyer",
+      x: i * T,
+      y: baseY,
+      vx: -(30 + progress * 22),
+      vy: 0,
+      baseY,
+      phase: Math.random() * Math.PI * 2,
+      alive: true,
+      squash: 0,
+    });
+  };
+
+  // Floating bricks: sometimes two floors, rarely with a bonus block (orange leaf inside)
+  const addPlatforms = (zone: number) => {
     const s = state.current;
     const i0 = s.cols.length;
     const g = s.genGround;
     const len = 3 + Math.floor(Math.random() * 3);
     const row = g - 3;
-    const twoFloors = g >= 7 && Math.random() < (zone === 1 ? 0.65 : 0.4);
-    const bonusAt = Math.random() < 0.4 ? 1 + Math.floor(Math.random() * (len - 2)) : -1;
+    const twoFloors = g >= 7 && Math.random() < (zone === 1 ? 0.6 : 0.35);
+    const bonusAt = Math.random() < 0.15 ? 1 + Math.floor(Math.random() * (len - 2)) : -1;
     for (let k = 0; k < len; k++) {
       const upper = twoFloors && k >= 1 && k < len - 1 ? row - 3 : -1;
       if (k === bonusAt) s.cols.push(makeCol(g, zone, { bonus: row, block2: upper }));
       else s.cols.push(makeCol(g, zone, { block: row, block2: upper }));
-      // Leaves on the highest floor there is
       const top = upper >= 0 ? upper : row;
-      if (Math.random() < (upper >= 0 ? 0.8 : 0.5)) {
+      // Very rarely a heart instead of a leaf
+      if (Math.random() < 0.02) {
+        s.hearts.push({ x: (i0 + k) * T + 1, y: (top - 1) * T + 2, taken: false });
+      } else if (Math.random() < (upper >= 0 ? 0.8 : 0.5)) {
         s.leaves.push({ x: (i0 + k) * T + 1, y: (top - 1) * T + 1, taken: false });
       }
     }
-    void progress;
+  };
+
+  // A wide pit with thin lines to hop across. The farther you go, the shorter and thinner they get.
+  const addLineBridge = (zone: number, progress: number) => {
+    const s = state.current;
+    const i0 = s.cols.length;
+    const gapW = 6 + Math.floor(Math.random() * 4);
+    const lineLen = Math.max(1, 3 - Math.floor(progress * 3));
+    const th = Math.max(2, 5 - Math.floor(progress * 4));
+    for (let k = 0; k < gapW; k++) s.cols.push(makeCol(-1, zone));
+    let row = s.genGround - 2;
+    let o = 1;
+    while (o + lineLen <= gapW - 1) {
+      for (let k = 0; k < lineLen; k++) {
+        const c = s.cols[i0 + o + k];
+        c.line = row;
+        c.lineTh = th;
+      }
+      if (Math.random() < 0.5) s.leaves.push({ x: (i0 + o) * T + 1, y: (row - 1) * T + 1, taken: false });
+      o += lineLen + 1 + (Math.random() < progress ? 1 : 0);
+      row = Math.max(3, Math.min(s.genGround - 1, row + Math.floor(rand(-1, 1.99))));
+    }
+  };
+
+  // A pipe down into the SoundCloud Void (one per zone)
+  const addPipe = (zone: number) => {
+    const s = state.current;
+    const g = s.genGround;
+    const top = g - 2;
+    s.cols.push(makeCol(g, zone));
+    s.cols.push(makeCol(top, zone, { pipe: 1 }));
+    s.cols.push(makeCol(top, zone, { pipe: 2 }));
+    s.cols.push(makeCol(g, zone));
   };
 
   // Builds the level a bit ahead of the camera. Gets harder the farther you go.
   const generateUpTo = (col: number) => {
     const s = state.current;
+    if (s.inBonus) return;
     while (s.cols.length <= col) {
       const i = s.cols.length;
       const zone = zoneOf(i);
-      const progress = Math.min(1, i / 500); // 0 at the start, 1 after ~500 tiles
+      const zoneIndex = Math.floor(i / ZONE_LEN);
+      const progress = Math.min(1, i / 900); // reaches full difficulty after ~900 tiles
 
       // Safe start, and a calm flat bit at the start of every new zone
       if (i < 18 || i % ZONE_LEN < 5) {
@@ -420,14 +565,31 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (s.genFlat > 0) {
         s.genFlat -= 1;
         s.cols.push(makeCol(s.genGround, zone));
-        // Haters on flat ground
-        if (s.genFlat > 1 && Math.random() < 0.06 + progress * 0.1 + (zone === 1 ? 0.04 : 0)) {
-          addHater(i, s.genGround, progress);
+        if (s.genFlat > 1 && zone !== 3 && Math.random() < 0.05 + progress * 0.09 + (zone === 1 ? 0.03 : 0)) {
+          addWalker(i, s.genGround, progress);
+        }
+        if (progress > 0.06 && Math.random() < 0.015 + progress * 0.035 + (zone === 3 ? 0.03 : 0)) {
+          addFlyer(i, s.genGround, progress);
         }
         continue;
       }
 
+      // Bonus pipe halfway through each zone
+      if (i % ZONE_LEN > 60 && !s.pipeZones.includes(zoneIndex)) {
+        s.pipeZones.push(zoneIndex);
+        addPipe(zone);
+        s.genFlat = 3;
+        continue;
+      }
+
       const r = Math.random();
+      const lineChance = progress < 0.1 ? 0 : zone === 3 ? 0.3 : 0.14;
+
+      if (r < lineChance) {
+        addLineBridge(zone, progress);
+        s.genFlat = 3 + Math.floor(Math.random() * 3);
+        continue;
+      }
 
       if (zone === 2) {
         // ROOFTOPS: narrow pillars at different heights with gaps between
@@ -436,7 +598,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           for (let k = 0; k < count; k++) {
             const gap = Math.random() < 0.35 + progress * 0.3 ? 2 : 1;
             for (let g2 = 0; g2 < gap; g2++) s.cols.push(makeCol(-1, zone));
-            // Over a wide gap, the next roof is at most 1 floor higher (so it's always reachable)
             let delta = Math.floor(rand(-2, 2.99));
             if (gap === 2 && delta < -1) delta = -1;
             s.genGround = Math.max(5, Math.min(8, s.genGround + delta));
@@ -447,57 +608,118 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
             }
           }
         } else {
-          addPlatforms(zone, progress);
+          addPlatforms(zone);
         }
         s.genFlat = 3 + Math.floor(Math.random() * 4);
         continue;
       }
 
-      if (r < 0.26 + progress * 0.14) {
+      if (zone === 3) {
+        // PINK CLOUDS: fluffy islands floating in the sky
+        const count = 2 + Math.floor(Math.random() * 3);
+        for (let k = 0; k < count; k++) {
+          const gap = 1 + Math.floor(Math.random() * (progress > 0.5 ? 3 : 2));
+          for (let g2 = 0; g2 < gap; g2++) s.cols.push(makeCol(-1, zone));
+          let delta = Math.floor(rand(-1, 1.99));
+          if (gap >= 2 && delta < 0) delta = 0;
+          s.genGround = Math.max(5, Math.min(8, s.genGround + delta));
+          const width = 2 + Math.floor(Math.random() * 4);
+          const start = s.cols.length;
+          for (let w2 = 0; w2 < width; w2++) s.cols.push(makeCol(s.genGround, zone));
+          if (Math.random() < 0.5) {
+            s.leaves.push({ x: (start + Math.floor(width / 2)) * T + 1, y: (s.genGround - 2) * T, taken: false });
+          }
+        }
+        s.genFlat = 2 + Math.floor(Math.random() * 3);
+        continue;
+      }
+
+      if (r < lineChance + 0.24 + progress * 0.12) {
         // A pit, 2 to 3 tiles wide
         const width = Math.random() < 0.3 + progress * 0.4 ? 3 : 2;
         for (let k = 0; k < width; k++) s.cols.push(makeCol(-1, zone));
         if (Math.random() < 0.5) {
           s.leaves.push({ x: (i + width / 2) * T - 7, y: (s.genGround - 3) * T, taken: false });
         }
-      } else if (r < (zone === 1 ? 0.6 : 0.48)) {
-        // Step up or down (SPEAKER HILLS: bigger steps, up to 2 floors)
+      } else if (r < (zone === 1 ? 0.62 : 0.5)) {
+        // Step up or down (SPEAKER HILLS: bigger steps)
         const size = zone === 1 && Math.random() < 0.5 ? 2 : 1;
         const next = Math.max(zone === 1 ? 5 : 6, Math.min(8, s.genGround + (Math.random() < 0.5 ? -size : size)));
         s.genGround = next;
         s.cols.push(makeCol(next, zone));
       } else {
-        addPlatforms(zone, progress);
+        addPlatforms(zone);
       }
       s.genFlat = 3 + Math.floor(Math.random() * (7 - progress * 3));
     }
   };
 
+  // The bonus room: SoundCloud Void. Weed leaves everywhere, one bonus heart, and a pipe out.
+  const buildVoid = () => {
+    const cols: Column[] = [];
+    const leaves: Leaf[] = [];
+    const hearts: Heart[] = [];
+    const len = 36;
+    for (let i = 0; i < len; i++) {
+      if (i === 0 || i === len - 1) {
+        cols.push(makeCol(0, VOID_ZONE)); // walls
+        continue;
+      }
+      const c = makeCol(8, VOID_ZONE);
+      if (i >= 8 && i <= 12) c.block = 5;
+      if (i >= 20 && i <= 24) c.block = 5;
+      if (i >= 14 && i <= 18) {
+        c.line = 3;
+        c.lineTh = 3;
+      }
+      if (i === len - 4) {
+        c.ground = 6;
+        c.pipe = 1;
+        c.pipeOut = true;
+      }
+      if (i === len - 3) {
+        c.ground = 6;
+        c.pipe = 2;
+        c.pipeOut = true;
+      }
+      cols.push(c);
+    }
+    // Leaves: a row along the floor, on the bricks, and a wave in the air
+    for (let i = 3; i < len - 6; i++) leaves.push({ x: i * T + 1, y: 7 * T + 1, taken: false });
+    for (let i = 8; i <= 12; i++) leaves.push({ x: i * T + 1, y: 4 * T + 1, taken: false });
+    for (let i = 20; i <= 24; i++) leaves.push({ x: i * T + 1, y: 4 * T + 1, taken: false });
+    for (let i = 14; i <= 18; i++) leaves.push({ x: i * T + 1, y: 2 * T + 1, taken: false });
+    for (let i = 3; i < 7; i++) leaves.push({ x: i * T + 1, y: (5 - Math.abs(i - 5)) * T, taken: false });
+    // The bonus life, up on the thin line
+    hearts.push({ x: 16 * T + 1, y: 1 * T + 4, taken: false });
+    return { cols, leaves, hearts };
+  };
+
   const colAt = (col: number): Column => {
     const s = state.current;
     if (col < 0) return makeCol(0, 0);
+    if (s.inBonus) return s.cols[col] || makeCol(0, VOID_ZONE);
     generateUpTo(col + 2);
     return s.cols[col];
   };
 
-  // Ground is always solid. Floating blocks are "one-way": you can jump up through them
-  // from below and land on top (so haters under them can still be jumped over).
+  // Ground and bonus blocks are solid. Bricks and thin lines are "one-way": you land on them from above.
   const solidAt = (px: number, py: number) => {
     const col = Math.floor(px / T);
     const row = Math.floor(py / T);
     if (row < 0) return false;
     if (row >= ROWS) return false;
     const c = colAt(col);
-    if (c.bonus >= 0 && row === c.bonus) return true; // bonus blocks are solid all around
+    if (c.bonus >= 0 && row === c.bonus) return true;
     return c.ground >= 0 && row >= c.ground;
   };
 
-  // Tops of the floating brick floors in this column (you can land on these)
-  const blockTopsAt = (px: number) => {
+  const oneWayTopsAt = (px: number) => {
     const c = colAt(Math.floor(px / T));
     const tops: number[] = [];
     if (c.block >= 0) tops.push(c.block * T);
     if (c.block2 >= 0) tops.push(c.block2 * T);
+    if (c.line >= 0) tops.push(c.line * T);
     return tops;
   };
 
@@ -515,7 +737,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
   const groundYAt = (col: number) => {
     const c = colAt(col);
-    return c.ground >= 0 ? c.ground * T : -1;
+    return c.ground >= 0 && c.pipe === 0 ? c.ground * T : -1;
   };
 
   const placeOnGroundNear = (x: number) => {
@@ -533,20 +755,24 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
     s.vx = 0;
     s.vy = 0;
-    // Clear haters right next to where you come back
     for (const e of s.enemies) if (Math.abs(e.x - s.x) < 60) e.alive = false;
   };
 
   const newGame = () => {
     const s = state.current;
+    s.inBonus = false;
+    s.saved = null;
     s.cols = [];
     s.enemies = [];
     s.leaves = [];
+    s.hearts = [];
     s.powerups = [];
     s.fireballs = [];
     s.particles = [];
-    s.fire = false;
-    s.fireCooldown = 0;
+    s.popups = [];
+    s.pipeZones = [];
+    s.ammo = 0;
+    s.fireTime = 0;
     s.zoneShown = 0;
     s.flash = 0;
     s.genGround = 8;
@@ -568,27 +794,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
   const jump = () => {
     const s = state.current;
+    if (s.mode !== "running") return;
     if (s.onGround || s.coyote > 0) {
       s.vy = JUMP;
       s.onGround = false;
       s.coyote = 0;
       playJump();
-    }
-  };
-
-  // Called on OK / Enter / Space / tapping the middle of the screen
-  const press = () => {
-    const s = state.current;
-    getAudio(); // browsers only allow sound after a click, so wake it up here
-    if (s.mode === "ready") {
-      s.mode = "running";
-    } else if (s.mode === "running") {
-      jump();
-    } else if (s.mode === "entry") {
-      submitName();
-    } else if (s.mode === "board" && s.t - s.deadAt > 0.6) {
-      newGame();
-      s.mode = "running";
     }
   };
 
@@ -606,18 +817,135 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
   };
 
+  const popup = (x: number, y: number, text: string) => {
+    state.current.popups.push({ x, y, text, life: 0.9 });
+  };
+
+  const hasFire = () => {
+    const s = state.current;
+    return s.ammo > 0 && s.fireTime > 0;
+  };
+
+  // Shoot one fireball (F / X / ↓, or the handheld's fire button)
+  const shoot = () => {
+    const s = state.current;
+    if (s.mode !== "running") return;
+    if (!hasFire()) {
+      if (s.fireTime > 0) playEmpty();
+      return;
+    }
+    if (s.fireballs.length >= 2) return;
+    s.ammo -= 1;
+    s.fireballs.push({
+      x: s.x + (s.facing > 0 ? SPRITE_W - 4 : 0),
+      y: s.y + 16,
+      vx: s.facing * FIREBALL_SPEED,
+      vy: 40,
+      life: 1.6,
+    });
+    playFireball();
+    if (s.ammo <= 0) s.fireTime = 0;
+  };
+
+  // Standing on a pipe and pressing down: into the SoundCloud Void (or back out)
+  const pipeUnderFeet = () => {
+    const s = state.current;
+    if (!s.onGround) return -1;
+    const cx = s.x + HB_X + HB_W / 2;
+    const col = Math.floor(cx / T);
+    const c = colAt(col);
+    if (c.pipe === 0 || c.pipeUsed) return -1;
+    const feet = s.y + HB_Y + HB_H;
+    if (Math.abs(feet - c.ground * T) > 2) return -1;
+    return c.pipe === 1 ? col : col - 1;
+  };
+
+  const down = () => {
+    const s = state.current;
+    if (s.mode !== "running") return;
+    const pipeCol = pipeUnderFeet();
+    if (pipeCol >= 0) {
+      s.mode = "pipe";
+      s.pipeDir = s.inBonus ? -1 : 1;
+      s.pipeTimer = 0.7;
+      s.pipeCol = pipeCol;
+      s.x = pipeCol * T + T - SPRITE_W / 2;
+      s.vx = 0;
+      s.vy = 0;
+      playPipe();
+      return;
+    }
+    shoot();
+  };
+
+  const enterVoid = () => {
+    const s = state.current;
+    s.saved = {
+      cols: s.cols,
+      enemies: s.enemies,
+      leaves: s.leaves,
+      hearts: s.hearts,
+      powerups: s.powerups,
+      cam: s.cam,
+      pipeCol: s.pipeCol,
+    };
+    const room = buildVoid();
+    s.inBonus = true;
+    s.cols = room.cols;
+    s.leaves = room.leaves;
+    s.hearts = room.hearts;
+    s.enemies = [];
+    s.powerups = [];
+    s.fireballs = [];
+    s.cam = 0;
+    s.x = 2 * T;
+    s.y = -SPRITE_H;
+    s.vx = 0;
+    s.vy = 0;
+    s.flash = 2;
+    s.flashText = "SOUNDCLOUD VOID";
+    s.mode = "running";
+  };
+
+  const leaveVoid = () => {
+    const s = state.current;
+    const saved = s.saved;
+    s.inBonus = false;
+    if (!saved) return;
+    s.cols = saved.cols;
+    s.enemies = saved.enemies;
+    s.leaves = saved.leaves;
+    s.hearts = saved.hearts;
+    s.powerups = saved.powerups;
+    s.fireballs = [];
+    s.cam = saved.cam;
+    const pc = s.cols[saved.pipeCol];
+    const pc2 = s.cols[saved.pipeCol + 1];
+    if (pc) pc.pipeUsed = true;
+    if (pc2) pc2.pipeUsed = true;
+    s.saved = null;
+    // Pop out of the pipe you went into
+    s.x = saved.pipeCol * T + T - SPRITE_W / 2;
+    s.y = (pc ? pc.ground * T : 6 * T) - SPRITE_H - 2;
+    s.vy = -260;
+    s.invuln = 1;
+    s.mode = "running";
+  };
+
   const hurt = (pit = false) => {
     const s = state.current;
-    if (s.fire && !pit) {
-      // Like Mario: getting hit while on fire only takes the fire away
-      s.fire = false;
+    if (hasFire() && !pit) {
+      // Getting hit while you have fire only takes the fire away
+      s.ammo = 0;
+      s.fireTime = 0;
       s.invuln = 1.5;
       s.shake = 0.15;
       burst(s.x + SPRITE_W / 2, s.y + 8, 16, FIRE, 60);
       playPowerDown();
       return;
     }
-    s.fire = false;
+    s.ammo = 0;
+    s.fireTime = 0;
     s.lives -= 1;
     s.shake = 0.3;
     burst(s.x + SPRITE_W / 2, s.y + SPRITE_H / 2, 34, BOOM, 100);
@@ -650,6 +978,22 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
   };
 
+  // Called on OK / Enter / Space / tapping the middle of the screen
+  const press = () => {
+    const s = state.current;
+    getAudio(); // browsers only allow sound after a click, so wake it up here
+    if (s.mode === "ready") {
+      s.mode = "running";
+    } else if (s.mode === "running") {
+      jump();
+    } else if (s.mode === "entry") {
+      submitName();
+    } else if (s.mode === "board" && s.t - s.deadAt > 0.6) {
+      newGame();
+      s.mode = "running";
+    }
+  };
+
   // Bumping a bonus block from below: a flaming weed leaf pops out and slides away
   const bumpBlock = (col: number) => {
     const s = state.current;
@@ -660,7 +1004,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       return;
     }
     c.used = true;
-    s.bonus += 10;
     s.powerups.push({
       x: col * T + 1,
       y: (c.bonus - 1) * T + 2,
@@ -671,22 +1014,21 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     playPowerAppear();
   };
 
-  const shootFireball = () => {
+  const killEnemy = (e: Enemy, points: number) => {
     const s = state.current;
-    s.fireballs.push({
-      x: s.x + (s.facing > 0 ? SPRITE_W - 4 : 0),
-      y: s.y + 16,
-      vx: s.facing * FIREBALL_SPEED,
-      vy: 40,
-      life: 1.6,
-    });
-    playFireball();
+    e.alive = false;
+    e.squash = 0.35;
+    s.bonus += points;
+    popup(e.x + 7, e.y - 4, `+${points}`);
+    burst(e.x + 7, e.y + 7, 12, e.kind === "flyer" ? [LIGHT_GREEN, DARK_GREEN, "#ffffff"] : ["#8a8a8a", "#ffffff", INK], 60);
+    playStomp();
   };
 
   const update = (dt: number) => {
     const s = state.current;
     s.t += dt;
     if (s.shake > 0) s.shake -= dt;
+    if (s.flash > 0) s.flash -= dt;
 
     for (const p of s.particles) {
       p.vy += 400 * dt;
@@ -695,6 +1037,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       p.life -= dt;
     }
     s.particles = s.particles.filter((p) => p.life > 0);
+    for (const p of s.popups) {
+      p.y -= 18 * dt;
+      p.life -= dt;
+    }
+    s.popups = s.popups.filter((p) => p.life > 0);
 
     // Click wheel: turning it walks you that way for a moment
     const spin = spinRef.current;
@@ -720,10 +1067,30 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
       return;
     }
+    if (s.mode === "pipe") {
+      // Sink into the pipe, then switch worlds
+      s.y += 45 * dt;
+      s.pipeTimer -= dt;
+      if (s.pipeTimer <= 0) {
+        if (s.pipeDir > 0) enterVoid();
+        else leaveVoid();
+      }
+      return;
+    }
     if (s.mode !== "running") return;
 
     s.runTime += dt;
     if (s.invuln > 0) s.invuln -= dt;
+
+    // Fire power runs out when the timer bar is empty
+    if (s.fireTime > 0) {
+      s.fireTime -= dt;
+      if (s.fireTime <= 0) {
+        s.fireTime = 0;
+        s.ammo = 0;
+        playPowerDown();
+      }
+    }
 
     // Which way do you want to go
     let want = 0;
@@ -769,12 +1136,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
       s.vy = 0;
     }
-    // Landing on a floating brick floor from above
+    // Landing on bricks or thin lines from above
     if (!s.onGround && s.vy >= 0) {
       const bottom = hy() + HB_H;
       let landed = false;
       for (const fx of [hx() + 1, hx() + HB_W - 1]) {
-        for (const top of blockTopsAt(fx)) {
+        for (const top of oneWayTopsAt(fx)) {
           if (prevBottom <= top + 1 && bottom >= top) {
             s.y = top - HB_H - HB_Y - 0.01;
             s.vy = 0;
@@ -791,12 +1158,16 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
     if (Math.abs(s.vx) > 5 && s.onGround) s.runAnim += dt;
 
-    // Camera follows you forward only
-    s.cam = Math.max(s.cam, s.x - 90);
-    generateUpTo(Math.floor((s.cam + W) / T) + 4);
+    // Camera follows you forward only (in the Void it stays inside the room)
+    if (s.inBonus) {
+      s.cam = Math.max(0, Math.min(s.cols.length * T - W, s.x - 110));
+    } else {
+      s.cam = Math.max(s.cam, s.x - 90);
+      generateUpTo(Math.floor((s.cam + W) / T) + 4);
+    }
 
     // Score: distance + bonus
-    s.farthest = Math.max(s.farthest, s.x);
+    if (!s.inBonus) s.farthest = Math.max(s.farthest, s.x);
     s.score = Math.floor(s.farthest / T) + s.bonus;
 
     // Fell in a pit
@@ -806,13 +1177,14 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
 
     // Zone name when you enter a new zone
-    const zoneIndex = Math.floor(Math.floor(s.x / T) / ZONE_LEN);
-    if (zoneIndex > s.zoneShown) {
-      s.zoneShown = zoneIndex;
-      s.flash = 2;
-      s.flashText = ZONE_NAMES[zoneIndex % ZONE_NAMES.length];
+    if (!s.inBonus) {
+      const zoneIndex = Math.floor(Math.floor(s.x / T) / ZONE_LEN);
+      if (zoneIndex > s.zoneShown) {
+        s.zoneShown = zoneIndex;
+        s.flash = 2;
+        s.flashText = `ZONE ${zoneIndex + 1}: ${ZONE_NAMES[zoneIndex % ZONE_NAMES.length]}`;
+      }
     }
-    if (s.flash > 0) s.flash -= dt;
 
     // Bonus block bounce animation
     for (let col = Math.floor(s.cam / T); col <= Math.floor((s.cam + W) / T); col++) {
@@ -831,11 +1203,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         pu.y = Math.floor((pu.y + 14) / T) * T - 14;
         pu.vy = 0;
       }
-      // Catch it!
       if (hx() + HB_W > pu.x && hx() < pu.x + 14 && hy() + HB_H > pu.y && hy() < pu.y + 14) {
-        s.fire = true;
-        s.fireCooldown = 0.2;
+        // 5 fireballs and a full timer. Doesn't stack: it just refills.
+        s.ammo = FIRE_AMMO;
+        s.fireTime = FIRE_TIME;
         s.bonus += 100;
+        popup(pu.x + 7, pu.y - 4, "FIRE!");
         burst(pu.x + 7, pu.y + 7, 20, FIRE, 70);
         playPowerUp();
         pu.y = 999;
@@ -843,16 +1216,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
     s.powerups = s.powerups.filter((pu) => pu.y < H + 20 && pu.x > s.cam - 40);
 
-    // On fire: throw fireballs on your own, with little flames around you
-    if (s.fire) {
-      s.fireCooldown -= dt;
-      if (s.fireCooldown <= 0 && s.fireballs.length < 2) {
-        shootFireball();
-        s.fireCooldown = FIRE_EVERY;
-      }
+    // Little flames around you while you have fire
+    if (hasFire()) {
       s.auraTimer -= dt;
       if (s.auraTimer <= 0) {
-        s.auraTimer = 0.06;
+        s.auraTimer = 0.07;
         s.particles.push({
           x: s.x + rand(6, 18),
           y: s.y + rand(0, 10),
@@ -864,7 +1232,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
     }
 
-    // Fireballs bounce along the ground and burn haters
+    // Fireballs bounce along the ground and burn monsters
     for (const f of s.fireballs) {
       f.life -= dt;
       f.vy = Math.min(300, f.vy + 900 * dt);
@@ -882,12 +1250,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (f.x < s.cam - 10 || f.x > s.cam + W + 10 || f.y > H) f.life = 0;
       for (const e of s.enemies) {
         if (!e.alive) continue;
-        if (f.x + 4 > e.x && f.x < e.x + 14 && f.y + 4 > e.y && f.y < e.y + 14) {
-          e.alive = false;
-          e.squash = 0.3;
-          s.bonus += 50;
-          burst(e.x + 7, e.y + 7, 14, [...FIRE, "#8a8a8a"], 60);
-          playStomp();
+        const ew = e.kind === "flyer" ? 18 : 14;
+        if (f.x + 4 > e.x && f.x < e.x + ew && f.y + 4 > e.y && f.y < e.y + 14) {
+          killEnemy(e, e.kind === "flyer" ? PTS_FLYER : PTS_WALKER);
           f.life = 0;
           break;
         }
@@ -895,40 +1260,47 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
     s.fireballs = s.fireballs.filter((f) => f.life > 0);
 
-    // Haters walk, turn at edges and walls
+    // Monsters
     for (const e of s.enemies) {
       if (!e.alive) {
         e.squash -= dt;
         continue;
       }
-      if (e.x < s.cam - 40 || e.x > s.cam + W + 40) continue;
-      e.vy = Math.min(420, e.vy + GRAVITY * dt);
-      e.x += e.vx * dt;
-      const front = e.vx < 0 ? e.x : e.x + 14;
-      const footRow = Math.floor((e.y + 14) / T);
-      const wall = solidAt(front, e.y + 7);
-      const edge = !solidAt(front, (footRow + 0.5) * T);
-      if (wall || edge) e.vx = -e.vx;
-      e.y += e.vy * dt;
-      if (solidAt(e.x + 7, e.y + 14)) {
-        e.y = Math.floor((e.y + 14) / T) * T - 14;
-        e.vy = 0;
+      if (e.x < s.cam - 60 || e.x > s.cam + W + 40) {
+        if (e.x < s.cam - 60) e.alive = false;
+        continue;
       }
-      if (e.y > H + 20) e.alive = false;
+      if (e.kind === "flyer") {
+        // Green flyer: floats left in a wave
+        e.phase += dt * 2.6;
+        e.x += e.vx * dt;
+        e.y = e.baseY + Math.sin(e.phase) * 14;
+      } else {
+        // Walker: walks, turns at edges and walls
+        e.vy = Math.min(420, e.vy + GRAVITY * dt);
+        e.x += e.vx * dt;
+        const front = e.vx < 0 ? e.x : e.x + 14;
+        const footRow = Math.floor((e.y + 14) / T);
+        const wall = solidAt(front, e.y + 7);
+        const edge = !solidAt(front, (footRow + 0.5) * T);
+        if (wall || edge) e.vx = -e.vx;
+        e.y += e.vy * dt;
+        if (solidAt(e.x + 7, e.y + 14)) {
+          e.y = Math.floor((e.y + 14) / T) * T - 14;
+          e.vy = 0;
+        }
+        if (e.y > H + 20) e.alive = false;
+      }
 
       // Touching you
+      const ew = e.kind === "flyer" ? 18 : 14;
       const px1 = hx();
       const py1 = hy();
-      if (px1 + HB_W > e.x + 2 && px1 < e.x + 12 && py1 + HB_H > e.y + 2 && py1 < e.y + 14) {
+      if (px1 + HB_W > e.x + 2 && px1 < e.x + ew - 2 && py1 + HB_H > e.y + 2 && py1 < e.y + 12) {
         const falling = s.vy > 0 && py1 + HB_H - e.y < 10;
         if (falling) {
-          // Stomp!
-          e.alive = false;
-          e.squash = 0.4;
+          killEnemy(e, e.kind === "flyer" ? PTS_FLYER : PTS_WALKER);
           s.vy = STOMP_BOUNCE;
-          s.bonus += 50;
-          burst(e.x + 7, e.y + 7, 12, ["#8a8a8a", "#ffffff", INK], 60);
-          playStomp();
         } else if (s.invuln <= 0) {
           hurt();
           return;
@@ -937,23 +1309,43 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
     s.enemies = s.enemies.filter((e) => e.alive || e.squash > 0);
 
-    // Weed leaves: +10
+    // Weed leaves: points
     for (const l of s.leaves) {
       if (l.taken) continue;
       if (hx() + HB_W > l.x && hx() < l.x + 14 && hy() + HB_H > l.y && hy() < l.y + 14) {
         l.taken = true;
-        s.bonus += 10;
-        burst(l.x + 7, l.y + 7, 10, [GREEN, DARK_GREEN, "#ffffff"], 45);
+        s.bonus += PTS_LEAF;
+        burst(l.x + 7, l.y + 7, 8, [GREEN, DARK_GREEN, "#ffffff"], 45);
         playLeaf();
       }
     }
     s.leaves = s.leaves.filter((l) => !l.taken && l.x > s.cam - 40);
+
+    // Hearts: an extra life (max 4)
+    for (const h of s.hearts) {
+      if (h.taken) continue;
+      if (hx() + HB_W > h.x && hx() < h.x + 14 && hy() + HB_H > h.y && hy() < h.y + 12) {
+        h.taken = true;
+        if (s.lives < MAX_LIVES) {
+          s.lives += 1;
+          popup(h.x + 7, h.y - 4, "+1 LIFE");
+        } else {
+          s.bonus += 200;
+          popup(h.x + 7, h.y - 4, "+200");
+        }
+        burst(h.x + 7, h.y + 6, 16, [PINK, "#ffffff", DARK_PINK], 60);
+        playHeart();
+      }
+    }
+    s.hearts = s.hearts.filter((h) => !h.taken && h.x > s.cam - 40);
   };
 
-  const drawSfxIcon = (ctx: CanvasRenderingContext2D) => {
+  // ---------- Drawing ----------
+
+  const drawSfxIcon = (ctx: CanvasRenderingContext2D, color: string) => {
     const x = 6;
     const y = 5;
-    ctx.fillStyle = INK;
+    ctx.fillStyle = color;
     ctx.fillRect(x, y + 2, 2, 3);
     ctx.fillRect(x + 2, y + 1, 1, 5);
     ctx.fillRect(x + 3, y, 1, 7);
@@ -1014,6 +1406,195 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (Math.floor(s.t * 2) % 2 === 0) ctx.fillText("OK TO PLAY AGAIN", W / 2, 148);
   };
 
+  // Background for each zone (moves slower than the level, so it feels far away)
+  const drawBackground = (ctx: CanvasRenderingContext2D, zone: number) => {
+    const s = state.current;
+    const cam = s.cam;
+
+    if (zone === VOID_ZONE) {
+      // SoundCloud Void: dark room with a moving sound wave
+      ctx.fillStyle = VOID_BG;
+      ctx.fillRect(-4, -4, W + 8, H + 8);
+      for (let i = 0; i < W / 4 + 1; i++) {
+        const h = 10 + (Math.sin(s.t * 3 + i * 0.5) + 1) * 14 + hash(i) * 12;
+        ctx.fillStyle = i % 2 === 0 ? "#3a1a44" : "#2a1234";
+        ctx.fillRect(i * 4, 64 - h / 2, 3, h);
+      }
+      return;
+    }
+
+    ctx.fillStyle = zone === 3 ? CLOUD_SKY : SCREEN;
+    ctx.fillRect(-4, -4, W + 8, H + 8);
+
+    if (zone === 0) {
+      // Rolling hills
+      ctx.fillStyle = HILLS;
+      const off = -((cam * 0.3) % 120);
+      for (let i = -1; i < 4; i++) {
+        const x = off + i * 120;
+        ctx.beginPath();
+        ctx.moveTo(x, 130);
+        ctx.quadraticCurveTo(x + 50, 70, x + 100, 130);
+        ctx.fill();
+      }
+    } else if (zone === 1) {
+      // Far-away speaker stacks
+      const base = Math.floor((cam * 0.3) / 40);
+      for (let i = -1; i < W / 40 + 2; i++) {
+        const idx = base + i;
+        const x = Math.round(idx * 40 - cam * 0.3);
+        const h = 40 + Math.floor(hash(idx) * 50);
+        ctx.fillStyle = HILLS;
+        ctx.fillRect(x, 130 - h, 30, h);
+        ctx.fillStyle = SCREEN;
+        for (let yy = 130 - h + 6; yy < 124; yy += 14) {
+          ctx.beginPath();
+          ctx.arc(x + 15, yy + 4, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    } else if (zone === 2) {
+      // City skyline with lit windows
+      const base = Math.floor((cam * 0.25) / 24);
+      for (let i = -1; i < W / 24 + 2; i++) {
+        const idx = base + i;
+        const x = Math.round(idx * 24 - cam * 0.25);
+        const h = 30 + Math.floor(hash(idx + 7) * 70);
+        ctx.fillStyle = HILLS;
+        ctx.fillRect(x, 140 - h, 22, h);
+        ctx.fillStyle = "#e7b3e0";
+        for (let yy = 140 - h + 4; yy < 134; yy += 8) {
+          for (let xx = 3; xx < 20; xx += 6) {
+            if (hash(idx * 31 + yy + xx) > 0.55) ctx.fillRect(x + xx, yy, 2, 3);
+          }
+        }
+      }
+    } else {
+      // Pink clouds drifting in the sky
+      const base = Math.floor((cam * 0.2) / 70);
+      for (let i = -1; i < W / 70 + 2; i++) {
+        const idx = base + i;
+        const x = Math.round(idx * 70 - cam * 0.2 + Math.sin(s.t * 0.3 + idx) * 4);
+        const y = 20 + Math.floor(hash(idx + 3) * 60);
+        ctx.fillStyle = "#fbe3f6";
+        ctx.beginPath();
+        ctx.arc(x + 14, y + 10, 10, 0, Math.PI * 2);
+        ctx.arc(x + 28, y + 6, 13, 0, Math.PI * 2);
+        ctx.arc(x + 42, y + 10, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillRect(x + 12, y + 10, 32, 10);
+      }
+    }
+  };
+
+  const drawGround = (ctx: CanvasRenderingContext2D, c: Column, col: number, x: number) => {
+    const s = state.current;
+    const gy = c.ground * T;
+    if (c.pipe) return;
+    if (c.zone === VOID_ZONE) {
+      ctx.fillStyle = INK;
+      ctx.fillRect(x, gy, T, H - gy);
+      ctx.fillStyle = GREEN;
+      ctx.fillRect(x, gy, T, 2);
+      // weed pattern in the floor
+      if (gy < H - 12) drawPixels(ctx, LEAF, x + 4, gy + 6, { G: DARK_GREEN, D: "#10401a" });
+      return;
+    }
+    if (c.zone === 3) {
+      // Fluffy cloud islands
+      ctx.fillStyle = CLOUD;
+      ctx.fillRect(x, gy + 4, T, H - gy);
+      ctx.beginPath();
+      ctx.arc(x + 8, gy + 6, 7, Math.PI, 0);
+      ctx.fill();
+      ctx.fillStyle = PINK;
+      ctx.fillRect(x, gy + 4, T, 1);
+      ctx.fillStyle = "#f3c6ec";
+      ctx.fillRect(x + ((col * 5) % 10) + 2, gy + 12, 3, 2);
+      return;
+    }
+    if (c.zone === 2) {
+      ctx.fillStyle = ROOF;
+      ctx.fillRect(x, gy, T, H - gy);
+      ctx.fillStyle = ROOF_LINE;
+      for (let yy = gy + 6; yy < H; yy += 8) ctx.fillRect(x, yy, T, 1);
+      ctx.fillRect(x + (col % 2) * 8 + 3, gy + 6, 1, H - gy - 6);
+      ctx.fillStyle = INK;
+      ctx.fillRect(x, gy, T, 3);
+      ctx.fillStyle = PINK;
+      ctx.fillRect(x, gy, T, 1);
+      return;
+    }
+    if (c.zone === 1) {
+      ctx.fillStyle = INK;
+      ctx.fillRect(x, gy, T, H - gy);
+      ctx.fillStyle = PINK;
+      ctx.fillRect(x, gy, T, 2);
+      for (let yy = gy + 5; yy + 8 < H; yy += 14) {
+        ctx.fillStyle = DARK_PINK;
+        ctx.fillRect(x + 4, yy, 8, 8);
+        ctx.fillStyle = INK;
+        ctx.fillRect(x + 6, yy + 2, 4, 4);
+        ctx.fillStyle = PINK;
+        ctx.fillRect(x + 7, yy + 3, 2, 2);
+      }
+      return;
+    }
+    ctx.fillStyle = INK;
+    ctx.fillRect(x, gy, T, H - gy);
+    ctx.fillStyle = PINK;
+    ctx.fillRect(x, gy, T, 2);
+    ctx.fillRect(x + ((col * 7) % 12) + 2, gy + 7, 2, 2);
+    ctx.fillRect(x + ((col * 5) % 10) + 3, gy + 20, 2, 2);
+    void s;
+  };
+
+  const drawBrick = (ctx: CanvasRenderingContext2D, x: number, by: number, zone: number) => {
+    if (zone === 3 || zone === VOID_ZONE) {
+      // cloud puffs / void blocks
+      ctx.fillStyle = zone === 3 ? CLOUD : "#2d1838";
+      ctx.fillRect(x, by + 2, T, T - 4);
+      ctx.fillStyle = zone === 3 ? PINK : GREEN;
+      ctx.fillRect(x, by + 2, T, 1);
+      return;
+    }
+    ctx.fillStyle = DARK_PINK;
+    ctx.fillRect(x, by, T, T);
+    ctx.fillStyle = PINK;
+    ctx.fillRect(x + 1, by + 1, T - 2, T - 2);
+    ctx.fillStyle = DARK_PINK;
+    ctx.fillRect(x, by + 7, T, 1);
+    ctx.fillRect(x + 7, by, 1, 7);
+    ctx.fillRect(x + 3, by + 8, 1, 8);
+    ctx.fillRect(x + 11, by + 8, 1, 8);
+  };
+
+  const drawPipe = (ctx: CanvasRenderingContext2D, c: Column, x: number) => {
+    const s = state.current;
+    const top = c.ground * T;
+    const left = c.pipe === 1;
+    // body
+    ctx.fillStyle = INK;
+    ctx.fillRect(x, top + 6, T, H - top);
+    ctx.fillStyle = c.pipeUsed ? "#6c6474" : DARK_PINK;
+    ctx.fillRect(x + (left ? 2 : 0), top + 6, T - 2, H - top);
+    ctx.fillStyle = c.pipeUsed ? "#8a8292" : PINK;
+    if (left) ctx.fillRect(x + 4, top + 6, 3, H - top);
+    // rim
+    ctx.fillStyle = INK;
+    ctx.fillRect(x - (left ? 2 : 0), top, T + 2, 7);
+    ctx.fillStyle = c.pipeUsed ? "#8a8292" : PINK;
+    ctx.fillRect(x - (left ? 1 : 0), top + 1, T + (left ? 1 : -1), 5);
+    // the dark opening, with a little glow while it can still be used
+    if (!c.pipeUsed && left) {
+      const glow = Math.floor(s.t * 3) % 2 === 0 ? "#ff7a00" : "#ffc800";
+      ctx.fillStyle = glow;
+      ctx.fillRect(x + 10, top - 6, 12, 2);
+      ctx.fillStyle = INK;
+      ctx.fillRect(x + 15, top - 10, 2, 3);
+    }
+  };
+
   const draw = (ctx: CanvasRenderingContext2D) => {
     const s = state.current;
 
@@ -1022,81 +1603,31 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       return;
     }
 
+    const cam = Math.round(s.cam);
+    const viewZone = s.inBonus ? VOID_ZONE : colAt(Math.floor((cam + W / 2) / T)).zone;
+
     ctx.save();
     if (s.shake > 0) ctx.translate(Math.round(rand(-2, 2)), Math.round(rand(-2, 2)));
 
-    ctx.fillStyle = SCREEN;
-    ctx.fillRect(-4, -4, W + 8, H + 8);
+    drawBackground(ctx, viewZone);
 
-    // Far-away hills, moving slower than the level
-    ctx.fillStyle = HILLS;
-    const hillOff = -((s.cam * 0.3) % 120);
-    for (let i = -1; i < 4; i++) {
-      const hx = hillOff + i * 120;
-      ctx.beginPath();
-      ctx.moveTo(hx, 130);
-      ctx.quadraticCurveTo(hx + 50, 70, hx + 100, 130);
-      ctx.fill();
-    }
-
-    const cam = Math.round(s.cam);
     const firstCol = Math.floor(cam / T);
 
-    const drawBrick = (x: number, by: number) => {
-      ctx.fillStyle = DARK_PINK;
-      ctx.fillRect(x, by, T, T);
-      ctx.fillStyle = PINK;
-      ctx.fillRect(x + 1, by + 1, T - 2, T - 2);
-      ctx.fillStyle = DARK_PINK;
-      ctx.fillRect(x, by + 7, T, 1);
-      ctx.fillRect(x + 7, by, 1, 7);
-      ctx.fillRect(x + 3, by + 8, 1, 8);
-      ctx.fillRect(x + 11, by + 8, 1, 8);
-    };
-
-    // Ground (a different look in every zone), bricks and bonus blocks
+    // Level: ground, bricks, thin lines, bonus blocks, pipes
     for (let col = firstCol; col <= firstCol + W / T + 1; col++) {
       const c = colAt(col);
       const x = col * T - cam;
-      if (c.ground >= 0) {
-        const gy = c.ground * T;
-        if (c.zone === 2) {
-          // Rooftops: purple bricks
-          ctx.fillStyle = ROOF;
-          ctx.fillRect(x, gy, T, H - gy);
-          ctx.fillStyle = ROOF_LINE;
-          for (let yy = gy + 6; yy < H; yy += 8) ctx.fillRect(x, yy, T, 1);
-          ctx.fillRect(x + ((col % 2) * 8) + 3, gy + 6, 1, H - gy - 6);
-          ctx.fillStyle = INK;
-          ctx.fillRect(x, gy, T, 3);
-          ctx.fillStyle = PINK;
-          ctx.fillRect(x, gy, T, 1);
-        } else if (c.zone === 1) {
-          // Speaker hills: black with pink speaker cones
-          ctx.fillStyle = INK;
-          ctx.fillRect(x, gy, T, H - gy);
-          ctx.fillStyle = PINK;
-          ctx.fillRect(x, gy, T, 2);
-          for (let yy = gy + 5; yy + 8 < H; yy += 14) {
-            ctx.fillStyle = DARK_PINK;
-            ctx.fillRect(x + 4, yy, 8, 8);
-            ctx.fillStyle = INK;
-            ctx.fillRect(x + 6, yy + 2, 4, 4);
-            ctx.fillStyle = PINK;
-            ctx.fillRect(x + 7, yy + 3, 2, 2);
-          }
-        } else {
-          // Pink fields
-          ctx.fillStyle = INK;
-          ctx.fillRect(x, gy, T, H - gy);
-          ctx.fillStyle = PINK;
-          ctx.fillRect(x, gy, T, 2);
-          ctx.fillRect(x + ((col * 7) % 12) + 2, gy + 7, 2, 2);
-          ctx.fillRect(x + ((col * 5) % 10) + 3, gy + 20, 2, 2);
-        }
+      if (c.ground >= 0 && !c.pipe) drawGround(ctx, c, col, x);
+      if (c.pipe) drawPipe(ctx, c, x);
+      if (c.block >= 0) drawBrick(ctx, x, c.block * T, c.zone);
+      if (c.block2 >= 0) drawBrick(ctx, x, c.block2 * T, c.zone);
+      if (c.line >= 0) {
+        const ly = c.line * T;
+        ctx.fillStyle = INK;
+        ctx.fillRect(x, ly, T, c.lineTh + 1);
+        ctx.fillStyle = c.zone === VOID_ZONE ? LIGHT_GREEN : PINK;
+        ctx.fillRect(x, ly, T, c.lineTh);
       }
-      if (c.block >= 0) drawBrick(x, c.block * T);
-      if (c.block2 >= 0) drawBrick(x, c.block2 * T);
       if (c.bonus >= 0) {
         const by = c.bonus * T - (c.bump > 0 ? Math.round(Math.sin((c.bump / 0.15) * Math.PI) * 4) : 0);
         if (c.used) {
@@ -1115,6 +1646,16 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           drawPixels(ctx, LEAF, x + 4, by + 4, { G: "#ff7a00", D: "#ffc800" }, 1);
         }
       }
+    }
+
+    // Leaves and hearts
+    for (const l of s.leaves) {
+      drawPixels(ctx, LEAF, l.x - cam, l.y + Math.round(Math.sin(s.t * 4 + l.x) * 2), { G: GREEN, D: DARK_GREEN }, 2);
+    }
+    for (const h of s.hearts) {
+      const bob = Math.round(Math.sin(s.t * 5 + h.x) * 2);
+      drawPixels(ctx, HEART, h.x - cam + 1, h.y + bob + 1, { P: INK }, 2);
+      drawPixels(ctx, HEART, h.x - cam, h.y + bob, { P: Math.floor(s.t * 4) % 2 === 0 ? PINK : "#ff5fe0" }, 2);
     }
 
     // Flaming weed leaves (the power-up)
@@ -1139,15 +1680,18 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       ctx.fillRect(x + 2, y + 2, 1, 1);
     }
 
-    // Leaves
-    for (const l of s.leaves) {
-      drawPixels(ctx, LEAF, l.x - cam, l.y + Math.round(Math.sin(s.t * 4 + l.x) * 2), { G: GREEN, D: DARK_GREEN }, 2);
-    }
-
-    // Haters (squashed flat when stomped)
+    // Monsters (squashed flat when beaten)
     for (const e of s.enemies) {
       const x = e.x - cam;
-      if (e.alive) {
+      if (e.kind === "flyer") {
+        if (e.alive) {
+          const frame = Math.floor(s.t * 8 + e.phase) % 2;
+          drawPixels(ctx, FLYER[frame], x, e.y, { G: LIGHT_GREEN, D: DARK_GREEN, W: "#ffffff" }, 2);
+        } else {
+          ctx.fillStyle = LIGHT_GREEN;
+          ctx.fillRect(x + 2, e.y + 10, 14, 3);
+        }
+      } else if (e.alive) {
         const bob = Math.floor(s.t * 6 + e.x) % 2;
         drawPixels(ctx, HATER, x, e.y - bob, { G: "#8a8a8a", K: INK, W: "#ffffff" }, 2);
       } else {
@@ -1158,13 +1702,20 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
     // You
     const blinking = s.invuln > 0 && Math.floor(s.t * 12) % 2 === 0;
-    if ((s.mode === "ready" || s.mode === "running") && !blinking) {
+    if ((s.mode === "ready" || s.mode === "running" || s.mode === "pipe") && !blinking) {
       const sprite = spriteRef.current;
       const frame = s.onGround && Math.abs(s.vx) > 5 ? Math.floor(s.runAnim * 10) % 2 : 0;
       const x = Math.round(s.x - cam);
       const y = Math.round(s.y);
+      ctx.save();
+      if (s.mode === "pipe") {
+        // Only draw the part above the pipe while sinking in
+        const c = colAt(s.pipeCol);
+        ctx.beginPath();
+        ctx.rect(0, 0, W, c.ground * T);
+        ctx.clip();
+      }
       if (sprite && sprite.complete && sprite.naturalWidth > 0) {
-        ctx.save();
         if (s.facing < 0) {
           ctx.translate(x + SPRITE_W, y);
           ctx.scale(-1, 1);
@@ -1172,11 +1723,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         } else {
           ctx.drawImage(sprite, frame * SPRITE_W, 0, SPRITE_W, SPRITE_H, x, y, SPRITE_W, SPRITE_H);
         }
-        ctx.restore();
       } else {
         ctx.fillStyle = PINK;
         ctx.fillRect(x + HB_X, y + HB_Y, HB_W, HB_H);
       }
+      ctx.restore();
     }
 
     for (const p of s.particles) {
@@ -1186,37 +1737,72 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
     ctx.restore();
 
-    // HUD (on a small dark bar so it's readable over hills)
+    // Point popups
     ctx.font = `8px ${fontFamily}`;
     ctx.textBaseline = "top";
-    drawSfxIcon(ctx);
-    ctx.fillStyle = INK;
+    ctx.textAlign = "center";
+    for (const p of s.popups) {
+      ctx.fillStyle = INK;
+      ctx.fillText(p.text, Math.round(p.x - cam) + 1, Math.round(p.y) + 1);
+      ctx.fillStyle = p.text.startsWith("+1") ? PINK : "#ffc800";
+      ctx.fillText(p.text, Math.round(p.x - cam), Math.round(p.y));
+    }
+
+    // HUD
+    const hudInk = viewZone === VOID_ZONE ? "#ffffff" : INK;
+    drawSfxIcon(ctx, hudInk);
+    ctx.fillStyle = hudInk;
     ctx.textAlign = "left";
     ctx.fillText(pad(s.score), 22, 6);
     ctx.textAlign = "right";
     ctx.fillText(`HI ${pad(s.best)}`, W - 6, 6);
-    for (let i = 0; i < s.lives; i++) {
-      ctx.fillStyle = PINK;
-      ctx.fillRect(W / 2 - 12 + i * 8, 7, 5, 5);
+
+    // Hearts = lives (max 4)
+    for (let i = 0; i < MAX_LIVES; i++) {
+      const x = W / 2 - 34 + i * 16;
+      drawPixels(ctx, HEART, x + 1, 5, { P: INK }, 1);
+      drawPixels(ctx, HEART, x, 4, { P: i < s.lives ? PINK : "#9b8fa6" }, 1);
     }
-    // Little flame next to the lives while you have fire power
-    if (s.fire) {
-      drawPixels(ctx, LEAF, W / 2 + 14, 4, { G: "#ff7a00", D: "#d21e1e" }, 1);
+
+    // Fire power: 5 fireball icons + a blinking orange timer bar along the bottom
+    if (hasFire()) {
+      for (let i = 0; i < FIRE_AMMO; i++) {
+        const x = W / 2 - 15 + i * 6;
+        ctx.fillStyle = i < s.ammo ? "#ff7a00" : "#9b8fa6";
+        ctx.fillRect(x, 14, 4, 4);
+        if (i < s.ammo) {
+          ctx.fillStyle = "#ffc800";
+          ctx.fillRect(x + 1, 15, 2, 2);
+        }
+      }
+      const left = s.fireTime / FIRE_TIME;
+      const low = s.fireTime < 4;
+      const barOn = !low || Math.floor(s.t * 8) % 2 === 0;
+      ctx.fillStyle = INK;
+      ctx.fillRect(8, H - 6, W - 16, 4);
+      if (barOn) {
+        ctx.fillStyle = Math.floor(s.t * 6) % 2 === 0 ? "#ff7a00" : "#ffc800";
+        ctx.fillRect(9, H - 5, Math.max(0, Math.round((W - 18) * left)), 2);
+      }
     }
 
     // Messages
-    ctx.textAlign = "center";
     const blink = Math.floor(s.t * 2) % 2 === 0;
+    ctx.textAlign = "center";
     if (s.mode === "ready") {
       textBox(ctx, "SUPER PINKMANE", 36);
       if (blink) textBox(ctx, "PRESS OK TO START", 54);
       const top = boardRef.current[0];
       if (boardStatusRef.current === "ok" && top) textBox(ctx, `#1 ${top.name} ${pad(top.score)}`, 70);
-    } else if (s.mode === "running" && s.flash > 0) {
+    } else if ((s.mode === "running" || s.mode === "pipe") && s.flash > 0) {
       textBox(ctx, s.flashText, 36);
     } else if (s.mode === "entry") {
       textBox(ctx, "NEW TOP 10 SCORE!", 30);
       textBox(ctx, pad(s.score), 44);
+    }
+    // Hint on top of an unused pipe
+    if (s.mode === "running" && pipeUnderFeet() >= 0 && blink) {
+      textBox(ctx, s.inBonus ? "PRESS DOWN TO LEAVE" : "PRESS DOWN TO ENTER", 88);
     }
   };
 
@@ -1259,23 +1845,26 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     loadBoard();
     newGame();
 
-    // Keyboard: ← → / A D walk, ↑ / W jump (Space and Enter jump through the iPod), M = sounds
-    const down = (e: KeyboardEvent) => {
+    // Keyboard: ← → / A D walk, ↑ / W jump (Space and Enter jump through the iPod),
+    // F / X shoot, ↓ / S go down a pipe (or shoot), M = game sounds on/off
+    const keyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       const k = e.key;
       if (k === "ArrowLeft" || k === "a" || k === "A") heldRef.current.left = true;
       if (k === "ArrowRight" || k === "d" || k === "D") heldRef.current.right = true;
-      if ((k === "ArrowUp" || k === "w" || k === "W") && state.current.mode === "running") jump();
+      if (k === "ArrowUp" || k === "w" || k === "W") jump();
+      if (k === "ArrowDown" || k === "s" || k === "S") down();
+      if (k === "f" || k === "F" || k === "x" || k === "X") shoot();
       if (k === "m" || k === "M") toggleSfx();
     };
-    const up = (e: KeyboardEvent) => {
+    const keyUp = (e: KeyboardEvent) => {
       const k = e.key;
       if (k === "ArrowLeft" || k === "a" || k === "A") heldRef.current.left = false;
       if (k === "ArrowRight" || k === "d" || k === "D") heldRef.current.right = false;
     };
-    window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
+    window.addEventListener("keydown", keyDown);
+    window.addEventListener("keyup", keyUp);
 
     let raf = 0;
     let last = performance.now();
@@ -1289,8 +1878,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     raf = requestAnimationFrame(loop);
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
+      window.removeEventListener("keydown", keyDown);
+      window.removeEventListener("keyup", keyUp);
       audioCtxRef.current?.close().catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1316,8 +1905,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         ref={canvasRef}
         width={W}
         height={H}
-        // Phones: hold the left or right third to walk, tap the middle to jump.
-        // Speaker icon (top-left) = game sounds on/off.
+        // Phones: hold the left or right third to walk, tap the middle to jump,
+        // swipe down in the middle to shoot / go down a pipe. Speaker icon (top-left) = sounds.
         onPointerDown={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           const scale = Math.min(rect.width / W, rect.height / H);
@@ -1339,6 +1928,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           } else if (cx > W * 0.67) {
             e.currentTarget.setPointerCapture(e.pointerId);
             touchRef.current = 1;
+          } else if (cy > H * 0.6) {
+            down();
           } else {
             jump();
           }
