@@ -156,6 +156,71 @@ const BatteryIcon = () => (
   </svg>
 );
 
+// PINKMANE written with little pixel bricks (5x7 letters)
+const BRICK_FONT: Record<string, string[]> = {
+  P: ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+  I: ["11111", "00100", "00100", "00100", "00100", "00100", "11111"],
+  N: ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
+  K: ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
+  M: ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
+  A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+};
+
+const BrickWord = ({ text }: { text: string }) => {
+  // Solid chunky pixels with a dark shadow one pixel down-right, like classic blocky game text
+  const pixels: { x: number; y: number }[] = [];
+  let col = 0;
+  for (const ch of text) {
+    const rows = BRICK_FONT[ch];
+    if (rows) {
+      rows.forEach((row, y) =>
+        row.split("").forEach((bit, x) => {
+          if (bit === "1") pixels.push({ x: col + x, y });
+        })
+      );
+    }
+    col += 7;
+  }
+  const cols = col - 2;
+  return (
+    <svg
+      viewBox={`0 0 ${cols + 1} 8`}
+      className="hh-bricks"
+      role="img"
+      aria-label={text}
+      shapeRendering="crispEdges"
+    >
+      {pixels.map((p, i) => (
+        <rect key={`s${i}`} x={p.x + 1} y={p.y + 1} width={1.02} height={1.02} fill="#4a1447" />
+      ))}
+      {pixels.map((p, i) => (
+        <rect key={`p${i}`} x={p.x} y={p.y} width={1.02} height={1.02} fill="#d63cc8" />
+      ))}
+    </svg>
+  );
+};
+
+// The handheld is your own pixel drawing: /public/game/handheld.png (94 x 39 pixels).
+// Everything below is placed on top of it, measured in the drawing's pixels.
+const HH = { w: 94, h: 39 };
+const hhBox = (x1: number, y1: number, x2: number, y2: number): React.CSSProperties => ({
+  left: `${(x1 / HH.w) * 100}%`,
+  top: `${(y1 / HH.h) * 100}%`,
+  width: `${((x2 - x1 + 1) / HH.w) * 100}%`,
+  height: `${((y2 - y1 + 1) / HH.h) * 100}%`,
+});
+
+// Equal-size triangles for the handheld's D-pad
+const DpadArrow = ({ dir }: { dir: "up" | "down" | "left" | "right" }) => {
+  const rot = { up: 0, right: 90, down: 180, left: 270 }[dir];
+  return (
+    <svg viewBox="0 0 10 10" className="hh-arrow" style={{ transform: `rotate(${rot}deg)` }}>
+      <path d="M5 1.5 L9 8 L1 8 Z" fill="currentColor" />
+    </svg>
+  );
+};
+
 // Small dancing bars next to the mute button, pulsing on the beat
 const VuBars = ({ active }: { active: boolean }) => (
   <div className="vu-bars">
@@ -849,6 +914,27 @@ activeGame === "maze" ? (
     onMouseDown: noFocus,
   });
 
+  // The drawn analog stick: press and drag, it holds the arrow key in that direction
+  const stickKey = useRef<string | null>(null);
+  const stickMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const dx = e.clientX - (r.left + r.width / 2);
+    const dy = e.clientY - (r.top + r.height / 2);
+    let key: string | null = null;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) > r.width * 0.15) {
+      key = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "ArrowRight" : "ArrowLeft") : dy > 0 ? "ArrowDown" : "ArrowUp";
+    }
+    if (key !== stickKey.current) {
+      if (stickKey.current) padKey(stickKey.current, "keyup");
+      if (key) padKey(key, "keydown");
+      stickKey.current = key;
+    }
+  };
+  const stickRelease = () => {
+    if (stickKey.current) padKey(stickKey.current, "keyup");
+    stickKey.current = null;
+  };
+
   const tickerText = `${isPaused ? "PAUSED" : "NOW PLAYING"}: ${TRACKS[trackIndex].title.toUpperCase()} ✦   `;
 
   return (
@@ -1368,116 +1454,125 @@ activeGame === "maze" ? (
             ))}
           </div>
 
-          <div className={`hh-shell ${pixelFont.className}`}>
-            {/* Shoulder buttons: previous / next song */}
-            <button className="hh-shoulder hh-shoulder-l" onClick={prevTrack} onMouseDown={noFocus} aria-label="Previous song">
-              L
-            </button>
-            <button className="hh-shoulder hh-shoulder-r" onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song">
-              R
-            </button>
+          <div className={`hh-device ${pixelFont.className}`}>
+            {/* Your drawing */}
+            <img src="/game/handheld.png" alt="" className="hh-art" draggable={false} />
 
-            <div className="hh-body">
-              <div className="hh-side hh-left">
-                <div className="hh-dpad">
-                  <button className="hh-d hh-up" aria-label="Up" {...padProps("ArrowUp")}>
-                    ▲
-                  </button>
-                  <button className="hh-d hh-l" aria-label="Left" {...padProps("ArrowLeft")}>
-                    ◀
-                  </button>
-                  <div className="hh-d-center" />
-                  <button className="hh-d hh-r" aria-label="Right" {...padProps("ArrowRight")}>
-                    ▶
-                  </button>
-                  <button className="hh-d hh-down" aria-label="Down" {...padProps("ArrowDown")}>
-                    ▼
-                  </button>
+            {/* The game, inside the screen you drew */}
+            <div className="hh-screen" style={hhBox(15, 4, 78, 33)}>
+              {gameElement}
+              {handheldBoot && (
+                <div className="screen-overlay">
+                  <div className="hh-boot-dude" />
+                  <div className="screen-overlay-label">PINKMANE</div>
+                  <div className="screen-overlay-loading">LOADING...</div>
+                  <SegmentedBar duration={1.4} active={handheldBoot} />
                 </div>
-                <div className="hh-grill" />
-              </div>
-
-              <div className="hh-screen">
-                {gameElement}
-                {handheldBoot && (
-                  <div className="screen-overlay">
-                    <div className="hh-boot-dude" />
-                    <div className="screen-overlay-label">PINKMANE</div>
-                    <div className="screen-overlay-loading">LOADING...</div>
-                    <SegmentedBar duration={1.4} active={handheldBoot} />
-                  </div>
-                )}
-                <div className="crt-overlay" />
-              </div>
-
-              <div className="hh-side hh-right">
-                {/* Four buttons in a diamond, with our own symbols */}
-                <div className="hh-face">
-                  <button className="hh-btn hh-top" onClick={togglePlay} onMouseDown={noFocus} aria-label="Play or pause music">
-                    ♪
-                  </button>
-                  <button className="hh-btn hh-left-b" onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song">
-                    ✦
-                  </button>
-                  <button className="hh-btn hh-right-b hh-back" onClick={goBack} onMouseDown={noFocus} aria-label="Back">
-                    B
-                  </button>
-                  <button className="hh-btn hh-bottom-b hh-ok" onClick={selectItem} onMouseDown={noFocus} aria-label="A">
-                    A
-                  </button>
-                </div>
-                <div className={`hh-led ${!isPaused && !isMuted ? "hh-led-on" : ""}`} />
-              </div>
+              )}
+              <div className="crt-overlay" />
             </div>
 
-            {/* Bottom row: volume, the PINKMANE wordmark, music and HOME */}
-            <div className="hh-bottom">
-              <div className="hh-bottom-group">
-                <button className="hh-small" onClick={() => stepVolume(-0.1)} onMouseDown={noFocus} aria-label="Volume down">
-                  −
-                </button>
-                <span className="hh-label">VOL</span>
-                <button className="hh-small" onClick={() => stepVolume(0.1)} onMouseDown={noFocus} aria-label="Volume up">
-                  +
-                </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={volume}
-                  aria-label="Music volume"
-                  className="volume-slider hh-volume"
-                  onChange={(e) => changeVolume(Number(e.target.value))}
-                  onPointerUp={(e) => e.currentTarget.blur()}
-                  onTouchEnd={(e) => e.currentTarget.blur()}
-                />
-                <button className="hh-small" onClick={toggleMute} onMouseDown={noFocus} aria-label={isMuted ? "Unmute music" : "Mute music"}>
-                  <SpeakerIcon muted={isMuted} />
-                </button>
-              </div>
+            {/* PINKMANE on the bottom edge */}
+            <div className="hh-logo" style={hhBox(34, 34.6, 58, 37.4)}>
+              <BrickWord text="PINKMANE" />
+            </div>
 
-              <div className="hh-wordmark">PINKMANE</div>
+            {/* Light that pulses to the beat while music plays */}
+            <div className={`hh-led2 ${!isPaused && !isMuted ? "hh-led-on" : ""}`} style={hhBox(2, 24, 2, 24)} />
 
-              <div className="hh-bottom-group">
-                <button className="hh-small" onClick={prevTrack} onMouseDown={noFocus} aria-label="Previous song">
-                  <PrevTrackIcon />
-                </button>
-                <button className="hh-small" onClick={togglePlay} onMouseDown={noFocus} aria-label={isPaused ? "Play music" : "Pause music"}>
-                  {isPaused ? <PlayIcon /> : <PauseIcon />}
-                </button>
-                <button className="hh-small" onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song">
-                  <NextTrackIcon />
-                </button>
-                <button className="hh-small hh-home" onClick={goHome} onMouseDown={noFocus} aria-label="Home">
-                  home
-                </button>
-              </div>
+            {/* Invisible buttons on top of the drawn ones */}
+            <button className="hh-hit" style={hhBox(5, 9, 10, 13)} aria-label="Up" {...padProps("ArrowUp")} />
+            <button className="hh-hit" style={hhBox(5, 16, 10, 21)} aria-label="Down" {...padProps("ArrowDown")} />
+            <button className="hh-hit" style={hhBox(1, 12, 6, 17)} aria-label="Left" {...padProps("ArrowLeft")} />
+            <button className="hh-hit" style={hhBox(9, 12, 14, 17)} aria-label="Right" {...padProps("ArrowRight")} />
+            <button
+              className="hh-hit hh-hit-round"
+              style={hhBox(2, 23, 11, 31)}
+              aria-label="Stick"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                stickMove(e);
+              }}
+              onPointerMove={(e) => {
+                if (e.buttons || e.pointerType === "touch") stickMove(e);
+              }}
+              onPointerUp={stickRelease}
+              onPointerCancel={stickRelease}
+              onLostPointerCapture={stickRelease}
+              onMouseDown={noFocus}
+            />
+
+            <button className="hh-hit hh-hit-round" style={hhBox(83, 8, 89, 13)} onClick={togglePlay} onMouseDown={noFocus} aria-label="Play or pause music" />
+            <button className="hh-hit hh-hit-round" style={hhBox(79, 13, 85, 18)} onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song" />
+            <button className="hh-hit hh-hit-round" style={hhBox(87, 13, 93, 18)} onClick={goBack} onMouseDown={noFocus} aria-label="Back" />
+            <button className="hh-hit hh-hit-round" style={hhBox(83, 17, 89, 23)} onClick={selectItem} onMouseDown={noFocus} aria-label="A" />
+
+            <button className="hh-hit" style={hhBox(4, 0, 13, 3)} onClick={prevTrack} onMouseDown={noFocus} aria-label="Previous song" />
+            <button className="hh-hit" style={hhBox(80, 0, 89, 3)} onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song" />
+
+            <button className="hh-hit" style={hhBox(14, 34, 20, 38)} onClick={goHome} onMouseDown={noFocus} aria-label="Home" />
+            <button className="hh-hit" style={hhBox(22, 34, 25, 38)} onClick={() => stepVolume(-0.1)} onMouseDown={noFocus} aria-label="Volume down" />
+            <button className="hh-hit" style={hhBox(26, 34, 30, 38)} onClick={() => stepVolume(0.1)} onMouseDown={noFocus} aria-label="Volume up" />
+            <button className="hh-hit" style={hhBox(60, 34, 63, 38)} onClick={prevTrack} onMouseDown={noFocus} aria-label="Previous song" />
+            <button className="hh-hit" style={hhBox(64, 34, 67, 38)} onClick={togglePlay} onMouseDown={noFocus} aria-label="Play or pause music" />
+            <button className="hh-hit" style={hhBox(68, 34, 72, 38)} onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song" />
+            <button className="hh-hit" style={hhBox(73, 34, 78, 38)} onClick={toggleMute} onMouseDown={noFocus} aria-label={isMuted ? "Unmute music" : "Mute music"} />
+          </div>
+
+          {/* Phones held upright: big thumb controls under the device */}
+          <div className="hh-portrait-pad">
+            <div className="hh-dpad">
+              <button className="hh-d hh-up" aria-label="Up" {...padProps("ArrowUp")}>
+                <DpadArrow dir="up" />
+              </button>
+              <button className="hh-d hh-l" aria-label="Left" {...padProps("ArrowLeft")}>
+                <DpadArrow dir="left" />
+              </button>
+              <div className="hh-d-center" />
+              <button className="hh-d hh-r" aria-label="Right" {...padProps("ArrowRight")}>
+                <DpadArrow dir="right" />
+              </button>
+              <button className="hh-d hh-down" aria-label="Down" {...padProps("ArrowDown")}>
+                <DpadArrow dir="down" />
+              </button>
+            </div>
+            <div className="hh-face">
+              <button className="hh-btn hh-top" onClick={togglePlay} onMouseDown={noFocus} aria-label="Play or pause music">
+                <span className="hh-btn-in">♪</span>
+              </button>
+              <button className="hh-btn hh-left-b" onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song">
+                <span className="hh-btn-in">✦</span>
+              </button>
+              <button className="hh-btn hh-right-b hh-back" onClick={goBack} onMouseDown={noFocus} aria-label="Back">
+                <span className="hh-btn-in">B</span>
+              </button>
+              <button className="hh-btn hh-bottom-b hh-ok" onClick={selectItem} onMouseDown={noFocus} aria-label="A">
+                <span className="hh-btn-in">A</span>
+              </button>
             </div>
           </div>
 
+          {/* Volume slider + what the buttons do */}
+          <div className={`hh-under ${pixelFont.className}`}>
+            <span>VOL</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={volume}
+              aria-label="Music volume"
+              className="volume-slider hh-volume"
+              onChange={(e) => changeVolume(Number(e.target.value))}
+              onPointerUp={(e) => e.currentTarget.blur()}
+              onTouchEnd={(e) => e.currentTarget.blur()}
+            />
+          </div>
+
           <div className={`hh-hint ${pixelFont.className}`}>
-            A = {activeGame === "super" ? "jump" : "start"} · B = back · home = main menu · L / R = songs
+            d-pad / stick = move · bottom button = {activeGame === "super" ? "jump" : "start"} · right button = back ·
+            top button = play/pause · bottom bars: home, vol −, vol + | songs, play, next, mute
             <span className="hh-rotate"> · turn your phone sideways for a bigger screen</span>
           </div>
         </div>
@@ -1681,29 +1776,98 @@ activeGame === "maze" ? (
           }
         }
 
-        /* Wide body with round ends */
-        .hh-shell {
+        /* Your drawing, scaled up with sharp pixels */
+        .hh-device {
           position: relative;
           z-index: 1;
-          width: min(96vw, 1250px, calc((100dvh - 80px) * 2.05));
-          padding: clamp(12px, 2vw, 26px) clamp(16px, 3vw, 44px) clamp(8px, 1.2vw, 16px);
-          box-sizing: border-box;
-          background: linear-gradient(180deg, #e9e3ec 0%, #cfc6d8 55%, #bdb3c8 100%);
-          border: 3px solid #111;
-          border-radius: clamp(40px, 10vw, 150px) / 50%;
-          box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.7), inset 0 -4px 0 rgba(0, 0, 0, 0.15),
-            0 18px 40px rgba(0, 0, 0, 0.55), 0 0 26px rgba(214, 60, 200, 0.35);
+          width: min(96vw, 1300px, calc((100dvh - 120px) * 2.41));
+          aspect-ratio: 94 / 39;
+          filter: drop-shadow(0 12px 0 rgba(0, 0, 0, 0.3)) drop-shadow(0 0 24px rgba(214, 60, 200, 0.45));
+        }
+        .hh-art {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          image-rendering: pixelated;
+          user-select: none;
+          pointer-events: none;
+        }
+        .hh-device > .hh-screen {
+          position: absolute;
+          aspect-ratio: auto;
+          border: none;
+          border-radius: 0;
+          box-shadow: none;
+          background: #242842;
+          z-index: 1;
+        }
+        .hh-logo {
+          position: absolute;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1;
+          pointer-events: none;
+        }
+        .hh-logo .hh-bricks {
+          width: 100%;
+          height: 100%;
+        }
+        .hh-led2 {
+          position: absolute;
+          z-index: 1;
+          background: transparent;
+        }
+        .hh-led2.hh-led-on {
+          background: #d63cc8;
+          box-shadow: 0 0 8px #d63cc8;
+          animation: wheelGlow var(--beat) ease-in-out infinite;
+        }
+        /* Invisible buttons over the drawn ones; they flash pink when pressed */
+        .hh-hit {
+          position: absolute;
+          z-index: 2;
+          border: none;
+          padding: 0;
+          background: transparent;
+          cursor: pointer;
+          touch-action: none;
+        }
+        .hh-hit:hover {
+          background: rgba(214, 60, 200, 0.18);
+        }
+        .hh-hit:active {
+          background: rgba(214, 60, 200, 0.5);
+        }
+        .hh-hit-round {
+          border-radius: 30%;
+        }
+        .hh-portrait-pad {
+          display: none;
+        }
+        .hh-under {
+          position: relative;
+          z-index: 1;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: #fff;
+          font-size: 8px;
+          text-shadow: 1px 1px 0 #000;
         }
 
         /* Shoulder buttons on top */
         .hh-shoulder {
-          position: absolute;
-          top: -10px;
-          width: 18%;
-          height: 16px;
+          position: absolute !important;
+          z-index: 0 !important;
+          top: -8px;
+          width: 20%;
+          height: 12px;
           border: 3px solid #111;
           border-bottom: none;
-          background: #e9e3ec;
+          background: #efe9f3;
+          clip-path: polygon(0 4px, 4px 4px, 4px 0, calc(100% - 4px) 0, calc(100% - 4px) 4px, 100% 4px, 100% 100%, 0 100%);
           color: #8a1f86;
           font-family: inherit;
           font-size: 8px;
@@ -1714,12 +1878,10 @@ activeGame === "maze" ? (
           color: #fff;
         }
         .hh-shoulder-l {
-          left: 9%;
-          border-radius: 14px 6px 0 0;
+          left: 16%;
         }
         .hh-shoulder-r {
-          right: 9%;
-          border-radius: 6px 14px 0 0;
+          right: 16%;
         }
 
         .hh-body {
@@ -1749,7 +1911,7 @@ activeGame === "maze" ? (
           aspect-ratio: 256 / 160;
           background: #000;
           border: clamp(5px, 1vw, 12px) solid #111;
-          border-radius: 6px;
+          border-radius: 0;
           overflow: hidden;
           box-sizing: border-box;
           box-shadow: 0 0 0 2px #6c6474;
@@ -1785,23 +1947,33 @@ activeGame === "maze" ? (
           aspect-ratio: 1;
           padding: 8%;
           box-sizing: border-box;
-          border-radius: 50%;
           background: #b3a9bf;
-          box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.35);
+          clip-path: polygon(30% 0, 70% 0, 70% 8%, 86% 8%, 86% 14%, 92% 14%, 92% 30%, 100% 30%, 100% 70%, 92% 70%, 92% 86%, 86% 86%, 86% 92%, 70% 92%, 70% 100%, 30% 100%, 30% 92%, 14% 92%, 14% 86%, 8% 86%, 8% 70%, 0 70%, 0 30%, 8% 30%, 8% 14%, 14% 14%, 14% 8%, 30% 8%);
         }
         .hh-d {
-          border: 2px solid #111;
+          border: 3px solid #111;
           background: #efeaf2;
           color: #8a1f86;
           font-size: clamp(8px, 1.2vw, 14px);
           cursor: pointer;
           touch-action: none;
           padding: 0;
-          border-radius: 5px;
+          border-radius: 0;
+          box-shadow: inset -3px -3px 0 #c7bdd1;
         }
         .hh-d:active {
           background: #d63cc8;
           color: #fff;
+        }
+        .hh-d {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .hh-arrow {
+          width: 55%;
+          height: 55%;
+          display: block;
         }
         .hh-up {
           grid-column: 2;
@@ -1829,25 +2001,34 @@ activeGame === "maze" ? (
           position: relative;
           width: clamp(70px, 11vw, 150px);
           aspect-ratio: 1;
+          margin-top: clamp(20px, 5vw, 80px);
         }
         .hh-btn {
           position: absolute;
           width: 32%;
           aspect-ratio: 1;
-          border-radius: 50%;
-          border: 2px solid #111;
+          border: none;
+          padding: 3px;
+          background: #111;
+          cursor: pointer;
+          touch-action: manipulation;
+          clip-path: polygon(30% 0, 70% 0, 70% 10%, 90% 10%, 90% 30%, 100% 30%, 100% 70%, 90% 70%, 90% 90%, 70% 90%, 70% 100%, 30% 100%, 30% 90%, 10% 90%, 10% 70%, 0 70%, 0 30%, 10% 30%, 10% 10%, 30% 10%);
+        }
+        .hh-btn-in {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          height: 100%;
           background: #efeaf2;
           color: #8a1f86;
           font-family: inherit;
           font-size: clamp(8px, 1.2vw, 14px);
-          cursor: pointer;
-          box-shadow: 0 3px 0 #111;
-          touch-action: manipulation;
-          padding: 0;
+          box-shadow: inset -4px -4px 0 rgba(0, 0, 0, 0.18);
+          clip-path: polygon(30% 0, 70% 0, 70% 10%, 90% 10%, 90% 30%, 100% 30%, 100% 70%, 90% 70%, 90% 90%, 70% 90%, 70% 100%, 30% 100%, 30% 90%, 10% 90%, 10% 70%, 0 70%, 0 30%, 10% 30%, 10% 10%, 30% 10%);
         }
-        .hh-btn:active {
-          transform: translateY(2px);
-          box-shadow: 0 1px 0 #111;
+        .hh-btn:active .hh-btn-in {
+          box-shadow: inset 4px 4px 0 rgba(0, 0, 0, 0.25);
         }
         .hh-top {
           left: 34%;
@@ -1865,11 +2046,11 @@ activeGame === "maze" ? (
           left: 34%;
           bottom: 0;
         }
-        .hh-ok {
+        .hh-ok .hh-btn-in {
           background: #d63cc8;
           color: #fff;
         }
-        .hh-back {
+        .hh-back .hh-btn-in {
           background: #8a1f86;
           color: #fff;
         }
@@ -1890,11 +2071,11 @@ activeGame === "maze" ? (
         .hh-grill {
           width: clamp(26px, 4vw, 52px);
           aspect-ratio: 1;
-          border-radius: 50%;
-          background-color: #b3a9bf;
-          background-image: radial-gradient(#3d3644 32%, transparent 36%);
-          background-size: 5px 5px;
-          box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+          background-color: #c7bdd1;
+          background-image: linear-gradient(90deg, transparent 50%, #c7bdd1 50%),
+            linear-gradient(#3d3644 50%, transparent 50%);
+          background-size: 6px 6px, 6px 6px;
+          clip-path: polygon(25% 0, 75% 0, 75% 12%, 88% 12%, 88% 25%, 100% 25%, 100% 75%, 88% 75%, 88% 88%, 75% 88%, 75% 100%, 25% 100%, 25% 88%, 12% 88%, 12% 75%, 0 75%, 0 25%, 12% 25%, 12% 12%, 25% 12%);
         }
 
         /* Bottom row */
@@ -1920,8 +2101,10 @@ activeGame === "maze" ? (
           min-width: clamp(22px, 2.8vw, 36px);
           padding: 0 6px;
           border: 2px solid #111;
-          border-radius: 999px;
+          border-radius: 0;
           background: #efeaf2;
+          box-shadow: inset -2px -2px 0 #c7bdd1;
+          clip-path: polygon(0 3px, 3px 3px, 3px 0, calc(100% - 3px) 0, calc(100% - 3px) 3px, 100% 3px, 100% calc(100% - 3px), calc(100% - 3px) calc(100% - 3px), calc(100% - 3px) 100%, 3px 100%, 3px calc(100% - 3px), 0 calc(100% - 3px));
           color: #8a1f86;
           font-family: inherit;
           font-size: clamp(8px, 1vw, 12px);
@@ -1946,15 +2129,13 @@ activeGame === "maze" ? (
 
         /* PINKMANE wordmark, sleek and wide */
         .hh-wordmark {
-          font-family: "Arial Black", "Helvetica Neue", Arial, sans-serif;
-          font-weight: 900;
-          font-style: italic;
-          font-size: clamp(12px, 2vw, 26px);
-          letter-spacing: 0.28em;
-          color: #2a2330;
-          text-shadow: 1px 1px 0 #ffffff, 0 0 10px rgba(214, 60, 200, 0.35);
-          transform: scaleX(1.15);
-          white-space: nowrap;
+          display: flex;
+          justify-content: center;
+        }
+        .hh-bricks {
+          width: clamp(110px, 19vw, 280px);
+          height: auto;
+          display: block;
         }
 
         .hh-hint {
@@ -1972,9 +2153,17 @@ activeGame === "maze" ? (
 
         /* Phones held upright: screen on top, controls underneath */
         @media (orientation: portrait) {
-          .hh-shell {
-            width: min(96vw, 560px);
-            border-radius: 30px;
+          .hh-device {
+            width: 96vw;
+          }
+          .hh-portrait-pad {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            width: min(92vw, 420px);
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 6px;
           }
           .hh-body {
             grid-template-columns: 1fr 1fr;
@@ -1991,6 +2180,9 @@ activeGame === "maze" ? (
           .hh-dpad,
           .hh-face {
             width: min(34vw, 150px);
+          }
+          .hh-face {
+            margin-top: 0;
           }
           .hh-d,
           .hh-btn {
