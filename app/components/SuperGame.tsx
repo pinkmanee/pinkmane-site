@@ -1617,25 +1617,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.mode = "running";
     if (s.stuttersOn) stuttersRef.current?.play().catch(() => {});
   };
-  // Dev hack: press 9 to jump straight to the start of the first cover-art field, so you
-  // can check backgrounds without actually running the whole level to get there.
-  const teleportToFirstField = () => {
-    const s = state.current;
-    if (s.mode !== "running" || s.inBonus || s.bossState === "fight") return;
-    const targetCol = FIELD_ZONE_START * ZONE_LEN + 2;
-    generateUpTo(targetCol + Math.ceil(W / T) + 4);
-    s.eggOpen = false;
-    s.x = targetCol * T;
-    s.y = 8 * T - SPRITE_H;
-    s.vx = 0;
-    s.vy = 0;
-    s.camY = 0;
-    s.cam = Math.max(0, targetCol * T - 40);
-    s.farthest = Math.max(s.farthest, s.x);
-    s.score = Math.floor(s.farthest / T) + s.bonus;
-    popup(s.x + 10, s.y - 10, "TELEPORT!");
-  };
-
   // Leaves the game the same way the handheld's own Back button does
   const goHome = () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace" }));
@@ -3638,7 +3619,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (k === "ArrowDown" || k === "s" || k === "S") down();
       if (k === "f" || k === "F" || k === "x" || k === "X") shoot();
       if (k === "m" || k === "M") toggleSfx();
-      if (k === "9") teleportToFirstField();
     };
     const keyUp = (e: KeyboardEvent) => {
       const k = e.key;
