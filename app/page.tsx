@@ -34,12 +34,6 @@ const ITEM_ICONS: Record<string, string> = {
   Extras: "/icons/extras.gif",
   Games: "/icons/games.gif",
   "Pink Run": "/icons/pinkrun.gif",
-  "Pink Hexagon": "/icons/pinkhex.gif",
-  "Pink Vortex": "/icons/pinkvortex.gif",
-  "Pink Maze": "/icons/pinkmaze.gif", 
-  "Pink Snake": "/icons/pinksnake.gif",  
-  "Pink Bird": "/icons/pinkbird.gif",
-  "Super Pinkmane": "/icons/superpinkmane.gif", 
   Back: "/icons/arrow.gif",
 };
 
@@ -273,10 +267,10 @@ export default function Home() {
     releases: ["TOPSHELF", "Back"],
     extras: ["Releases", "Games", "Back"],
     games: [
-      "Pink Hexagon",
-      "Pink Vortex",
-      "Pink Maze",
       "Super Pinkmane",
+      "Pink Hexagon",
+      "Pink Maze",
+      "Pink Vortex",
       "Pink Snake",
       "Pink Bird",
       "Pink Run",
@@ -363,7 +357,7 @@ export default function Home() {
     if (playing) {
       setPlaying(false);
       setMenu("games");
-      setSelected({ hex: 0, vortex: 1, maze: 2, super: 3, snake: 4, bird: 5, pinkrun: 6 }[activeGame]);
+      setSelected({ super: 0, hex: 1, maze: 2, vortex: 3, snake: 4, bird: 5, pinkrun: 6 }[activeGame]);
       return;
     }
     // Games and Releases live inside Extras, so going back returns there
