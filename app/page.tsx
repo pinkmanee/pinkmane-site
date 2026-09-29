@@ -19,6 +19,102 @@ const pixelFont = Press_Start_2P({
 
 const GLYPH_IMAGES = ["/glyphs/heart.gif", "/glyphs/sparkle.gif"];
 
+// PINKMANE flying with a jetpack: made from the same pixels as the game character (pinkdude.png),
+// with a jetpack on his back. O / Y are the flame.
+// These fly across the background behind the handheld (Super Pinkmane / Pink Maze).
+const JET_DUDE = [
+  ".............A.....A..........",
+  ".......A.....AB...AB..........",
+  "........AB...ABB.ABB..A.......",
+  "...A.....ABB.ABBABBB.AB.......",
+  "....AAB...ABBABBBBBBABA.......",
+  "......AABBBABBBBBBBBBA........",
+  "....ABBBBBBBBBBBBBBBAA........",
+  "......AAAABBBBBBAAAA..........",
+  "..........ABBAAAAAAA..........",
+  "...........AAFFFFFFFA.........",
+  "...........AFFCCCFCCCA........",
+  "...........AFCCCACCCACA.......",
+  "...........AFCCCACCCACA.......",
+  "...........AFFCCCFCCCFA.......",
+  "..........AFFFFFFFFFAFFA......",
+  "..........AFGFGFFFFAAAA.......",
+  "...........AGFGFFAAFHHHHH.H...",
+  "........AAA.AAAAAA............",
+  ".......ABBBA.AIA..............",
+  ".......ABCBAAAAAAA............",
+  ".......AAAAAAAAAAAAA..........",
+  ".......AABBAAACCAAA.AA........",
+  "......AABBBAAAJCJAA..AA.......",
+  ".....AAADDDAAAACAAA...AA......",
+  ".....A.AEEEAAAAAAAA....A......",
+  "........AEA.AAAAAAA...........",
+  ".........O.IIKKKKKII..........",
+  "........OYIKKLKKKKKKI.........",
+  ".........OIKKKKI.IKKKI........",
+  ".........IKKLKI...IKKKI.......",
+  ".........IKKKKI...IKLKKI......",
+  "........IKKKKI.....IKKKKI.....",
+  "........IKKKKI.....IKKKKI.....",
+  "........AAAAAA.....AAAAAAA....",
+  ".......AAAAAAA.....AAAAAAA....",
+];
+const JET_DUDE_COLORS: Record<string, string> = {
+  A: "#111111",
+  B: "#d63cc8",
+  C: "#ffffff",
+  D: "#8a1f86",
+  E: "#787882",
+  F: "#ffc800",
+  G: "#c88c00",
+  H: "#c8c8c8",
+  I: "#3c3c3c",
+  J: "#d21e1e",
+  K: "#787878",
+  L: "#a5a5a5",
+  O: "#ff7a00",
+  Y: "#ffc800",
+};
+
+// Turns the pixel rows into a small animated SVG picture: the flame flickers and smoke rises from the joint
+function makeJetDudeImage() {
+  const body: string[] = [];
+  const flame: string[] = [];
+  JET_DUDE.forEach((row, y) => {
+    let x = 0;
+    while (x < row.length) {
+      const ch = row[x];
+      let end = x + 1;
+      while (end < row.length && row[end] === ch) end++;
+      const color = JET_DUDE_COLORS[ch];
+      if (color) {
+        const rect = `<rect x="${x}" y="${y}" width="${end - x}" height="1" fill="${color}"/>`;
+        if (ch === "O" || ch === "Y") flame.push(rect);
+        else body.push(rect);
+      }
+      x = end;
+    }
+  });
+  const puffs = [0, 0.7, 1.4]
+    .map(
+      (delay) =>
+        `<rect x="26" y="14" width="2" height="2" fill="#e8e0ee" opacity="0">` +
+        `<animate attributeName="y" values="14;4" dur="2.1s" begin="${delay}s" repeatCount="indefinite"/>` +
+        `<animate attributeName="x" values="26;27;29" dur="2.1s" begin="${delay}s" repeatCount="indefinite"/>` +
+        `<animate attributeName="opacity" values="0.9;0" dur="2.1s" begin="${delay}s" repeatCount="indefinite"/>` +
+        `</rect>`
+    )
+    .join("");
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -2 32 37" width="32" height="37" shape-rendering="crispEdges">` +
+    body.join("") +
+    `<g>${flame.join("")}<animate attributeName="opacity" values="1;0.35;1" dur="0.2s" repeatCount="indefinite"/></g>` +
+    puffs +
+    `</svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+const JET_DUDE_IMAGE = makeJetDudeImage();
+
 const ITEM_ICONS: Record<string, string> = {
   Music: "/icons/music.gif",
   Socials: "/icons/socials.gif",
@@ -34,6 +130,12 @@ const ITEM_ICONS: Record<string, string> = {
   Extras: "/icons/extras.gif",
   Games: "/icons/games.gif",
   "Pink Run": "/icons/pinkrun.gif",
+  "Super Pinkmane": "/icons/superpinkmane.gif",
+  "Pink Hexagon": "/icons/pinkhex.gif",
+  "Pink Maze": "/icons/pinkmaze.gif",
+  "Pink Vortex": "/icons/pinkvortex.gif",
+  "Pink Bird": "/icons/pinkbird.gif",
+  "Pink Snake": "/icons/pinksnake.gif",
   Back: "/icons/arrow.gif",
 };
 
@@ -210,6 +312,36 @@ const hhBox = (x1: number, y1: number, x2: number, y2: number): React.CSSPropert
   width: `${((x2 - x1 + 1) / HH.w) * 100}%`,
   height: `${((y2 - y1 + 1) / HH.h) * 100}%`,
 });
+
+// Little pixel icons for the handheld's bottom buttons (pink with a dark shadow, like the logo)
+const PIXEL_ICONS: Record<string, string[]> = {
+  home: ["..1..", ".111.", "11111", ".111.", ".1.1."],
+  minus: [".....", ".....", "11111", ".....", "....."],
+  plus: ["..1..", "..1..", "11111", "..1..", "..1.."],
+  prev: ["1..11", "1.111", "11111", "1.111", "1..11"],
+  next: ["11..1", "111.1", "11111", "111.1", "11..1"],
+  play: ["1....", "111..", "11111", "111..", "1...."],
+  pause: ["11.11", "11.11", "11.11", "11.11", "11.11"],
+  sound: ["..1....", ".11..1.", "111...1", ".11..1.", "..1...."],
+  muted: ["..1....", ".11.1.1", "111..1.", ".11.1.1", "..1...."],
+};
+
+const PixelIcon = ({ name }: { name: string }) => {
+  const rows = PIXEL_ICONS[name];
+  const w = rows[0].length;
+  const px: { x: number; y: number }[] = [];
+  rows.forEach((row, y) => row.split("").forEach((c, x) => c === "1" && px.push({ x, y })));
+  return (
+    <svg viewBox={`0 0 ${w + 1} 6`} className="hh-icon" shapeRendering="crispEdges" aria-hidden="true">
+      {px.map((p, i) => (
+        <rect key={`s${i}`} x={p.x + 1} y={p.y + 1} width={1.02} height={1.02} fill="#4a1447" />
+      ))}
+      {px.map((p, i) => (
+        <rect key={`p${i}`} x={p.x} y={p.y} width={1.02} height={1.02} fill="#d63cc8" />
+      ))}
+    </svg>
+  );
+};
 
 // Equal-size triangles for the handheld's D-pad
 const DpadArrow = ({ dir }: { dir: "up" | "down" | "left" | "right" }) => {
@@ -390,6 +522,26 @@ export default function Home() {
       audio.pause();
     }
   };
+
+  // Super Pinkmane asks the page to pause your music while the secret Stutters track plays, then resume it
+  const pausedForGameRef = useRef(false);
+  useEffect(() => {
+    const onGameMusic = (e: Event) => {
+      const audio = songRef.current;
+      const what = (e as CustomEvent<string>).detail;
+      if (what === "pause") {
+        if (audio && !audio.paused) {
+          audio.pause();
+          pausedForGameRef.current = true;
+        }
+      } else if (what === "resume") {
+        if (audio && pausedForGameRef.current) audio.play().catch(() => {});
+        pausedForGameRef.current = false;
+      }
+    };
+    window.addEventListener("pinkmane-music", onGameMusic);
+    return () => window.removeEventListener("pinkmane-music", onGameMusic);
+  }, []);
 
   const playScrollSound = () => {
     if (scrollSoundRef.current) {
@@ -902,6 +1054,11 @@ activeGame === "maze" ? (
   const padKey = (key: string, type: "keydown" | "keyup") => {
     document.body.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true }));
   };
+  // A quick press + release of one key (for the fire button)
+  const tapKey = (key: string) => {
+    padKey(key, "keydown");
+    padKey(key, "keyup");
+  };
   const padProps = (key: string) => ({
     onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
       e.preventDefault();
@@ -913,6 +1070,34 @@ activeGame === "maze" ? (
     onLostPointerCapture: () => padKey(key, "keyup"),
     onMouseDown: noFocus,
   });
+
+  // Popup on the handheld screen when you change volume, mute or skip
+  const [osd, setOsd] = useState<{ kind: "vol" | "text"; value: number; text: string } | null>(null);
+  const osdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showOsd = (next: { kind: "vol" | "text"; value: number; text: string }) => {
+    setOsd(next);
+    if (osdTimer.current) clearTimeout(osdTimer.current);
+    osdTimer.current = setTimeout(() => setOsd(null), 1300);
+  };
+  const hhVolume = (delta: number) => {
+    const v = Math.round(Math.max(0, Math.min(1, volume + delta)) * 20) / 20;
+    changeVolume(v);
+    showOsd({ kind: "vol", value: v, text: "VOL" });
+  };
+  const hhMute = () => {
+    showOsd({ kind: "text", value: 0, text: isMuted ? "SOUND ON" : "MUTED" });
+    toggleMute();
+  };
+  const hhSong = (dir: 1 | -1) => {
+    const idx = (((trackRef.current + dir) % TRACKS.length) + TRACKS.length) % TRACKS.length;
+    if (dir > 0) nextTrack();
+    else prevTrack();
+    showOsd({ kind: "text", value: 0, text: `♪ ${TRACKS[dir > 0 ? idx : trackRef.current].title.toUpperCase()}` });
+  };
+  const hhPlay = () => {
+    showOsd({ kind: "text", value: 0, text: isPaused ? "PLAY" : "PAUSE" });
+    togglePlay();
+  };
 
   // The drawn analog stick: press and drag, it holds the arrow key in that direction
   const stickKey = useRef<string | null>(null);
@@ -1218,8 +1403,14 @@ activeGame === "maze" ? (
 
                   {selected === index && ITEM_ICONS[item] && (
                     <img
+                      key={ITEM_ICONS[item]}
                       src={ITEM_ICONS[item]}
                       alt=""
+                      onError={(e) => {
+                        const img = e.currentTarget;
+                        if (img.src.endsWith(".gif")) img.src = img.src.replace(/\.gif$/, ".png");
+                        else img.style.display = "none";
+                      }}
                       style={{
                         position: "absolute",
                         right: "10px",
@@ -1432,25 +1623,26 @@ activeGame === "maze" ? (
       {/* The PINKMANE handheld: a wide screen for Pink Maze and Super Pinkmane */}
       {handheld && (
         <div className="hh-overlay">
-          {/* Same background as the main page, with the floating hearts and sparkles */}
+          {/* Flying PINKMANEs with jetpacks in the background, some going right, some going left */}
           <div className="hh-glyphs">
-            {glyphs.map((g) => (
-              <img
+            {glyphs.slice(0, 8).map((g) => (
+              <div
                 key={`hh-${g.id}`}
-                src={g.src}
-                alt=""
-                className="floating-glyph"
-                style={
-                  {
-                    left: `${g.left}%`,
-                    width: `${g.size}px`,
-                    height: `${g.size}px`,
-                    animationDuration: `${g.duration}s`,
-                    animationDelay: `${g.delay}s`,
-                    "--wobble": `${g.wobble}px`,
-                  } as React.CSSProperties
-                }
-              />
+                className={`hh-jet ${g.id % 2 === 1 ? "hh-jet-left" : ""}`}
+                style={{
+                  top: `${5 + g.left * 0.8}%`,
+                  animationDuration: `${g.duration}s`,
+                  animationDelay: `-${g.delay}s`,
+                }}
+              >
+                <img
+                  src={JET_DUDE_IMAGE}
+                  alt=""
+                  className="hh-jet-img"
+                  draggable={false}
+                  style={{ width: `${Math.round(g.size * 1.4)}px`, animationDuration: `${1.4 + (g.wobble % 10) / 10}s` }}
+                />
+              </div>
             ))}
           </div>
 
@@ -1469,11 +1661,27 @@ activeGame === "maze" ? (
                   <SegmentedBar duration={1.4} active={handheldBoot} />
                 </div>
               )}
+              {osd && (
+                <div className="hh-osd">
+                  {osd.kind === "vol" ? (
+                    <>
+                      <span>VOL</span>
+                      <span className="hh-osd-bar">
+                        {Array.from({ length: 10 }).map((_, i) => (
+                          <span key={i} className={i < Math.round(osd.value * 10) ? "on" : ""} />
+                        ))}
+                      </span>
+                    </>
+                  ) : (
+                    <span>{osd.text}</span>
+                  )}
+                </div>
+              )}
               <div className="crt-overlay" />
             </div>
 
             {/* PINKMANE on the bottom edge */}
-            <div className="hh-logo" style={hhBox(34, 34.6, 58, 37.4)}>
+            <div className="hh-logo" style={hhBox(41.7, 35.82, 50.3, 36.38)}>
               <BrickWord text="PINKMANE" />
             </div>
 
@@ -1503,21 +1711,41 @@ activeGame === "maze" ? (
               onMouseDown={noFocus}
             />
 
-            <button className="hh-hit hh-hit-round" style={hhBox(83, 8, 89, 13)} onClick={togglePlay} onMouseDown={noFocus} aria-label="Play or pause music" />
-            <button className="hh-hit hh-hit-round" style={hhBox(79, 13, 85, 18)} onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song" />
+            <button className="hh-hit hh-hit-round" style={hhBox(83, 8, 89, 13)} onClick={hhPlay} onMouseDown={noFocus} aria-label="Play or pause music" />
+            <button
+              className="hh-hit hh-hit-round"
+              style={hhBox(79, 13, 85, 18)}
+              onClick={() => (activeGame === "super" ? tapKey("f") : hhSong(1))}
+              onMouseDown={noFocus}
+              aria-label={activeGame === "super" ? "Fire" : "Next song"}
+            />
             <button className="hh-hit hh-hit-round" style={hhBox(87, 13, 93, 18)} onClick={goBack} onMouseDown={noFocus} aria-label="Back" />
             <button className="hh-hit hh-hit-round" style={hhBox(83, 17, 89, 23)} onClick={selectItem} onMouseDown={noFocus} aria-label="A" />
 
-            <button className="hh-hit" style={hhBox(4, 0, 13, 3)} onClick={prevTrack} onMouseDown={noFocus} aria-label="Previous song" />
-            <button className="hh-hit" style={hhBox(80, 0, 89, 3)} onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song" />
+            <button className="hh-hit" style={hhBox(4, 0, 13, 3)} onClick={() => hhSong(-1)} onMouseDown={noFocus} aria-label="Previous song" />
+            <button className="hh-hit" style={hhBox(80, 0, 89, 3)} onClick={() => hhSong(1)} onMouseDown={noFocus} aria-label="Next song" />
 
-            <button className="hh-hit" style={hhBox(14, 34, 20, 38)} onClick={goHome} onMouseDown={noFocus} aria-label="Home" />
-            <button className="hh-hit" style={hhBox(22, 34, 25, 38)} onClick={() => stepVolume(-0.1)} onMouseDown={noFocus} aria-label="Volume down" />
-            <button className="hh-hit" style={hhBox(26, 34, 30, 38)} onClick={() => stepVolume(0.1)} onMouseDown={noFocus} aria-label="Volume up" />
-            <button className="hh-hit" style={hhBox(60, 34, 63, 38)} onClick={prevTrack} onMouseDown={noFocus} aria-label="Previous song" />
-            <button className="hh-hit" style={hhBox(64, 34, 67, 38)} onClick={togglePlay} onMouseDown={noFocus} aria-label="Play or pause music" />
-            <button className="hh-hit" style={hhBox(68, 34, 72, 38)} onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song" />
-            <button className="hh-hit" style={hhBox(73, 34, 78, 38)} onClick={toggleMute} onMouseDown={noFocus} aria-label={isMuted ? "Unmute music" : "Mute music"} />
+            <button className="hh-hit hh-bar" style={hhBox(14, 34, 20, 38)} onClick={goHome} onMouseDown={noFocus} aria-label="Home">
+              <PixelIcon name="home" />
+            </button>
+            <button className="hh-hit hh-bar" style={hhBox(22, 34, 25, 38)} onClick={() => hhVolume(-0.1)} onMouseDown={noFocus} aria-label="Volume down">
+              <PixelIcon name="minus" />
+            </button>
+            <button className="hh-hit hh-bar" style={hhBox(26, 34, 30, 38)} onClick={() => hhVolume(0.1)} onMouseDown={noFocus} aria-label="Volume up">
+              <PixelIcon name="plus" />
+            </button>
+            <button className="hh-hit hh-bar" style={hhBox(60, 34, 63, 38)} onClick={() => hhSong(-1)} onMouseDown={noFocus} aria-label="Previous song">
+              <PixelIcon name="prev" />
+            </button>
+            <button className="hh-hit hh-bar" style={hhBox(64, 34, 67, 38)} onClick={hhPlay} onMouseDown={noFocus} aria-label="Play or pause music">
+              <PixelIcon name={isPaused ? "play" : "pause"} />
+            </button>
+            <button className="hh-hit hh-bar" style={hhBox(68, 34, 72, 38)} onClick={() => hhSong(1)} onMouseDown={noFocus} aria-label="Next song">
+              <PixelIcon name="next" />
+            </button>
+            <button className="hh-hit hh-bar" style={hhBox(73, 34, 78, 38)} onClick={hhMute} onMouseDown={noFocus} aria-label={isMuted ? "Unmute music" : "Mute music"}>
+              <PixelIcon name={isMuted ? "muted" : "sound"} />
+            </button>
           </div>
 
           {/* Phones held upright: big thumb controls under the device */}
@@ -1541,8 +1769,13 @@ activeGame === "maze" ? (
               <button className="hh-btn hh-top" onClick={togglePlay} onMouseDown={noFocus} aria-label="Play or pause music">
                 <span className="hh-btn-in">♪</span>
               </button>
-              <button className="hh-btn hh-left-b" onClick={nextTrack} onMouseDown={noFocus} aria-label="Next song">
-                <span className="hh-btn-in">✦</span>
+              <button
+                className="hh-btn hh-left-b"
+                onClick={() => (activeGame === "super" ? tapKey("f") : nextTrack())}
+                onMouseDown={noFocus}
+                aria-label={activeGame === "super" ? "Fire" : "Next song"}
+              >
+                <span className="hh-btn-in">{activeGame === "super" ? "F" : "✦"}</span>
               </button>
               <button className="hh-btn hh-right-b hh-back" onClick={goBack} onMouseDown={noFocus} aria-label="Back">
                 <span className="hh-btn-in">B</span>
@@ -1570,9 +1803,39 @@ activeGame === "maze" ? (
             />
           </div>
 
+          {/* Keys you use, drawn as white key outlines (only on computers) */}
+          <div className={`hh-keys ${pixelFont.className}`}>
+            {(activeGame === "super"
+              ? [
+                  [["←", "→"], "walk"],
+                  [["SPACE", "↑"], "jump"],
+                  [["S"], "shoot / pipe"],
+                  [["M"], "sounds"],
+                  [["BACKSPACE"], "menu"],
+                ]
+              : [
+                  [["↑", "↓", "←", "→"], "move"],
+                  [["SPACE"], "start"],
+                  [["M"], "sounds"],
+                  [["BACKSPACE"], "menu"],
+                ]
+            ).map(([keys, label]) => (
+              <span className="hh-keygroup" key={label as string}>
+                {(keys as string[]).map((k) => (
+                  <span className="hh-key" key={k}>
+                    {k}
+                  </span>
+                ))}
+                <span className="hh-keylabel">{label as string}</span>
+              </span>
+            ))}
+          </div>
+
           <div className={`hh-hint ${pixelFont.className}`}>
-            d-pad / stick = move · bottom button = {activeGame === "super" ? "jump" : "start"} · right button = back ·
-            top button = play/pause · bottom bars: home, vol −, vol + | songs, play, next, mute
+            best played on a laptop with a keyboard ·{" "}
+            {activeGame === "super"
+              ? "d-pad / stick = walk · bottom button = jump · left button = fire · d-pad down = go into pipes · right button = back"
+              : "d-pad / stick = move · bottom button = start · right button = back · top button = play/pause"}
             <span className="hh-rotate"> · turn your phone sideways for a bigger screen</span>
           </div>
         </div>
@@ -1751,7 +2014,8 @@ activeGame === "maze" ? (
           padding: 12px;
           box-sizing: border-box;
           overflow: hidden;
-          background-image: url("/topshelf.png");
+          /* Your handheld background: public/handheld-bg.png (or .jpg). Until it's there, the normal one shows. */
+          background-image: url("/handheld-bg.png"), url("/handheld-bg.jpg"), url("/topshelf.png");
           background-size: cover;
           background-position: center;
           animation: hhFadeIn 0.25s ease-out;
@@ -1763,6 +2027,59 @@ activeGame === "maze" ? (
           pointer-events: none;
           overflow: hidden;
           z-index: 0;
+        }
+
+        .hh-jet {
+          position: absolute;
+          left: 0;
+          animation-name: hhJetRight;
+          animation-timing-function: linear;
+          animation-iteration-count: infinite;
+          will-change: transform;
+        }
+
+        .hh-jet-left {
+          animation-name: hhJetLeft;
+        }
+
+        .hh-jet-img {
+          display: block;
+          height: auto;
+          image-rendering: pixelated;
+          filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.4));
+          animation: hhJetBob ease-in-out infinite alternate;
+        }
+
+        /* the ones flying left are mirrored so they face the way they fly */
+        .hh-jet-left .hh-jet-img {
+          scale: -1 1;
+        }
+
+        @keyframes hhJetRight {
+          from {
+            transform: translateX(-20vw);
+          }
+          to {
+            transform: translateX(110vw);
+          }
+        }
+
+        @keyframes hhJetLeft {
+          from {
+            transform: translateX(110vw);
+          }
+          to {
+            transform: translateX(-20vw);
+          }
+        }
+
+        @keyframes hhJetBob {
+          from {
+            translate: 0 -10px;
+          }
+          to {
+            translate: 0 10px;
+          }
         }
 
         @keyframes hhFadeIn {
@@ -1845,6 +2162,51 @@ activeGame === "maze" ? (
         }
         .hh-portrait-pad {
           display: none;
+        }
+        /* Icons on the drawn bottom bars */
+        .hh-bar {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .hh-icon {
+          height: 50%;
+          width: auto;
+          display: block;
+          pointer-events: none;
+          filter: drop-shadow(0.5px 0 0 #fff) drop-shadow(-0.5px 0 0 #fff) drop-shadow(0 0.5px 0 #fff) drop-shadow(0 -0.5px 0 #fff);
+        }
+        /* Popup on the screen for volume / mute / songs */
+        .hh-osd {
+          position: absolute;
+          left: 50%;
+          bottom: 8%;
+          transform: translateX(-50%);
+          z-index: 25;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          max-width: 90%;
+          padding: 6px 10px;
+          background: rgba(17, 17, 17, 0.85);
+          color: #fff;
+          font-size: clamp(7px, 1vw, 12px);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          border: 2px solid #d63cc8;
+        }
+        .hh-osd-bar {
+          display: flex;
+          gap: 2px;
+        }
+        .hh-osd-bar span {
+          width: clamp(4px, 0.6vw, 8px);
+          height: clamp(8px, 1.1vw, 14px);
+          background: #444;
+        }
+        .hh-osd-bar span.on {
+          background: #d63cc8;
         }
         .hh-under {
           position: relative;
@@ -2149,6 +2511,50 @@ activeGame === "maze" ? (
         }
         .hh-rotate {
           display: none;
+        }
+        /* White key outlines under the handheld */
+        .hh-keys {
+          position: relative;
+          z-index: 1;
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: center;
+          gap: 8px 18px;
+          max-width: 96vw;
+        }
+        .hh-keygroup {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .hh-key {
+          min-width: 22px;
+          padding: 5px 7px;
+          border: 2px solid #fff;
+          border-radius: 4px;
+          box-shadow: 0 3px 0 #fff;
+          color: #fff;
+          font-size: 9px;
+          text-align: center;
+          background: rgba(0, 0, 0, 0.35);
+        }
+        .hh-keylabel {
+          color: #fff;
+          font-size: 8px;
+          margin-left: 4px;
+          text-shadow: 1px 1px 0 #000;
+        }
+        .hh-hint {
+          display: none;
+        }
+        /* Touch screens: no keyboard, so show the text hint instead of keys */
+        @media (hover: none) {
+          .hh-keys {
+            display: none;
+          }
+          .hh-hint {
+            display: block;
+          }
         }
 
         /* Phones held upright: screen on top, controls underneath */

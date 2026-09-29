@@ -81,12 +81,17 @@ export async function POST(req: Request) {
       // Only you (with the owner code) can use PINKMANE
       if (!owner) return fail("name reserved");
     } else {
-      // Every other name belongs to the first device that used it (same across all games)
+      // Every other name belongs to one device (the same across all games).
+      // Someone else can take the name over, but only by beating its best score in this game.
       const lockKey = OWNER_PREFIX + clean;
       const deviceHash = hash(device);
       await redis.set(lockKey, deviceHash, { nx: true });
       const lockedTo = await redis.get<string>(lockKey);
-      if (lockedTo !== deviceHash && !owner) return fail("name taken");
+      if (lockedTo !== deviceHash && !owner) {
+        const theirs = await redis.zscore(game.key, clean);
+        if (theirs !== null && s <= Number(theirs)) return fail("beat their score to take this name");
+        await redis.set(lockKey, deviceHash); // the name is yours now
+      }
     }
 
     // One save every 10 seconds per visitor

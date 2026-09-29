@@ -13,7 +13,8 @@ type Props = {
   muted: boolean;
 };
 
-type Mode = "ready" | "running" | "pipe" | "hurt" | "dying" | "entry" | "board";
+// golden = paused on the golden leaf screen, choose = picking your spell before a boss, paused = Esc
+type Mode = "ready" | "running" | "pipe" | "hurt" | "dying" | "entry" | "board" | "golden" | "choose" | "paused";
 
 // One column of the level
 type Column = {
@@ -28,6 +29,8 @@ type Column = {
   pipe: number; // 0 = no pipe, 1 = left half, 2 = right half
   pipeOut: boolean; // pipe that leads back out of the bonus room
   pipeUsed: boolean;
+  fragile: number; // thin line that vanishes after you touch it: seconds it lasts (0 = normal line)
+  crumble: number; // counting down once touched (-1 = not touched)
   zone: number; // which zone look this column has (99 = SoundCloud Void)
 };
 
@@ -42,10 +45,11 @@ type Enemy = {
   alive: boolean;
   squash: number;
 };
-type Leaf = { x: number; y: number; taken: boolean };
+type Leaf = { x: number; y: number; taken: boolean; small?: boolean }; // small = half size, used to spell words
 type Heart = { x: number; y: number; taken: boolean };
-type PowerUp = { x: number; y: number; vx: number; vy: number };
-type Fireball = { x: number; y: number; vx: number; vy: number; life: number };
+type PowerKind = "fire" | "ice" | "double";
+type PowerUp = { x: number; y: number; vx: number; vy: number; kind: PowerKind };
+type Fireball = { x: number; y: number; vx: number; vy: number; life: number; ice: boolean };
 type Particle = { x: number; y: number; vx: number; vy: number; color: string; life: number };
 type Popup = { x: number; y: number; text: string; life: number };
 type Entry = { name: string; score: number };
@@ -79,13 +83,60 @@ const MAX_LIVES = 4;
 
 // Zones change every this many tiles, each with its own look and harder jumping
 const ZONE_LEN = 150;
-const ZONE_NAMES = ["PINK FIELDS", "SPEAKER HILLS", "ROOFTOPS", "PINK CLOUDS"];
+const ZONE_NAMES = ["PINK FIELDS", "SPEAKER HILLS", "ROOFTOPS", "PINK CLOUDS", "TWISTED TREES", "SMOKE OCEAN"];
+const Z_CLOUDS = 3;
+// Colours of each zone on the progress line at the bottom
+const ZONE_COLORS = ["#ff5fe0", "#ff9a3c", "#8e3fb0", "#fbd3f3", "#b06ce0", "#c6b9d6"];
+const Z_TREES = 4;
+const Z_SMOKE = 5;
 const VOID_ZONE = 99;
 
 // Fire power: 5 fireballs, and a timer bar at the bottom. Picking up another one refills, it doesn't stack.
 const FIRE_AMMO = 5;
 const FIRE_TIME = 15;
 const FIREBALL_SPEED = 170;
+// Ice leaf (blue, rarer): 5 ice shots that fly straight, no timer
+const ICE_AMMO = 5;
+const ICE_SPEED = 230;
+// Double-jump leaf (turquoise, rarest): 3 extra jumps in mid-air
+const DOUBLE_JUMPS = 3;
+
+// Secret at the very start: walk LEFT instead of right. There's a jetpack and a sign.
+// Hold jump to fly. It runs out once you reach this score.
+const EGG_COLS = 16; // how many tiles the hidden area has to the left of the start
+const JET_UNTIL = 2000;
+const JET_THRUST = 1900;
+const JET_MAX_UP = -165;
+// ---------- Golden leaf (secret Stutters track) ----------
+// From this score on, the next SoundCloud Void has a spinning golden leaf (once per game).
+const GOLD_AT = 8000;
+const PTS_GOLD = 500;
+// Put the mp3 in public/sounds/ with this name. It plays while you're in the Void after finding the leaf.
+const STUTTERS_TRACK = "/sounds/stutters-remix.mp3";
+// Paste your private SoundCloud link between the quotes. Leave it empty to hide the link button.
+const STUTTERS_LINK = "";
+const GOLD_KEY = "pinksuper-golden"; // remembers you've found it before
+
+// ---------- Boss: the troll ----------
+const BOSS_EVERY = 10000; // a troll at 10k, 20k, 30k ...
+const BOSS_HP_START = 8; // hits the first troll takes
+const BOSS_HP_STEP = 3; // each next troll takes this many more
+const BOSS_SPEED_STEP = 0.25; // each next troll is 25% faster
+const BOSS_SPARE_SHOTS = 2; // you get this many more shots than he needs
+const TROLL_DEATH_SOUND = "/sounds/trolldeath.mp3";
+const BOSS_ARENA = 16; // tiles wide (exactly one screen)
+const TROLL_SPEED = 38; // slower than you (you run at 100)
+const TROLL_JUMP = -330;
+const PTS_BOSS = 1000;
+// Troll hitbox inside his 44 x 48 picture
+const TR_W = 44;
+const TR_H = 48;
+const TR_HX = 8;
+const TR_HY = 10;
+const TR_HW = 28;
+const TR_HH = 38;
+
+const MY_GOATS = ["LIL PEEP", "YUNG LEAN", "GHOSTEMANE", "SMOKEDOPE2016", "TOMBFELL", "LEOHWASFOUND"];
 
 // Points
 const PTS_LEAF = 10;
@@ -115,8 +166,31 @@ const ROOF_LINE = "#8e3fb0";
 const CLOUD = "#fdeefb";
 const CLOUD_SKY = "#f3d3ee";
 const VOID_BG = "#160c1d";
+// Twisted Trees
+const TREE_SKY = "#c9a9e8";
+const TREE_FAR = "#a57fcf";
+const TREE_NEAR = "#5b3a86";
+const TREE_SOIL = "#2a1640";
+const TREE_TOP = "#b06ce0";
+const TREE_ROOT = "#4a2a6a";
+// Smoke Ocean
+const SMOKE_SKY = "#a797ba";
+const SMOKE_SEA = "#c6b9d6"; // the sea of smoke (you fall through it)
+const SMOKE_SEA_DARK = "#b2a2c6";
+const SMOKE_STREAK = "#d9cfe6";
+const SMOKE_LIGHT = "#fbf8fd"; // smoke you can stand on
+const SMOKE_SHADE = "#e6ddf0";
+const SMOKE_EDGE = "#7f6a9a";
 const BOOM = [PINK, "#ffc800", INK, "#777777", "#ffffff"];
 const FIRE = ["#ff7a00", "#ffc800", "#d21e1e", "#ffffff"];
+const ICE = ["#4aa3ff", "#bfe3ff", "#1d4fa8", "#ffffff"];
+const TURQ = ["#3de0c8", "#b8fff3", "#138a7a", "#ffffff"];
+// Leaf colours for each power-up: [main, dark]
+const POWER_COLORS: Record<PowerKind, [string, string]> = {
+  fire: ["#ff7a00", "#d21e1e"],
+  ice: ["#4aa3ff", "#1d4fa8"],
+  double: ["#3de0c8", "#138a7a"],
+};
 
 // Haters: grumpy grey clouds that walk around (drawn 2x bigger)
 const HATER = [
@@ -166,6 +240,104 @@ const HEART = [
   "..PPP..",
   "...P...",
 ];
+// The jetpack you can find at the start (drawn 2x bigger). O/Y = flames.
+const JETPACK = [
+  "..K...K..",
+  ".KPK.KPK.",
+  "KPPPKPPPK",
+  "KPWPKPWPK",
+  "KPPPKPPPK",
+  "KPPPKPPPK",
+  "KpppKpppK",
+  "KgggKgggK",
+  ".KgK.KgK.",
+];
+// Small version worn on your back, with its flame
+const JET_SMALL = [".KKK.", "KPPPK", "KPWPK", "KPPPK", "KPPPK", "KpppK", "KgggK", ".KgK."];
+const JET_SMALL_FLAME = ["..O..", ".OYO.", "..O..", "..Y.."];
+// Ghost ship on the Smoke Ocean: a boat full of skeletons (drawn 2x bigger)
+const BOAT = [
+  "...............M..............",
+  "...............MSSSS..........",
+  "...............MSSSSS.........",
+  "...............MSS.SS.........",
+  "...............MSSSS..........",
+  "...............MS.SS..........",
+  "...............MS..S..........",
+  "...............M..............",
+  "...WWW.........M.......WWW....",
+  "..WKWKW..WWW...M......WKWKW...",
+  "..WWWWW.WKWKW..M......WWWWW...",
+  "...W.W..WWWWW..M.......W.W....",
+  ".W..W....W.W...M........W..W..",
+  "..WWWWW...W....M......WWWWW...",
+  "....W...WWWWW..M........W.....",
+  "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
+  ".KbbbbbbbbbbbbbbbbbbbbbbbbbbK.",
+  "..KBBBBBBBBBBBBBBBBBBBBBBBBK..",
+  "...KbbbbbbbbbbbbbbbbbbbbbbK...",
+  "....KKKKKKKKKKKKKKKKKKKKKK....",
+];
+// The troll boss (drawn 2x bigger, faces left). T = his tongue sticking out.
+const TROLL = [
+  "......KKKKKK..........",
+  "....KKGGGGGGKK........",
+  "...KGGLLGGGGGGK.......",
+  "..KGGLGGGGGGGGGK......",
+  ".KGGWWKGGGWWKGGgK.....",
+  ".KGGWEKGGGWEKGGgK.....",
+  "KgGGGGGGGGGGGGGgK.....",
+  "KGGKKKKKKKGGGGgK......",
+  "KGKTTTTTTKGGGgKK......",
+  ".KTTTTttTKKKKKRRK.....",
+  ".KTTTttTKGRRBBBRRK....",
+  "..KTTtTKGGRBBbBBRgK...",
+  "..KKTTKGGRBBBBBBRGGK..",
+  ".KGGKKGGRRBBbBBBRRGGK.",
+  ".KGGGGKGRLLLLLLLRRGGK.",
+  "KCCKGGKRLLGGGGGLLRRGK.",
+  "KCcCKKRRLGGGgGGGLRRK..",
+  ".KCcCKRLGGGGGGGgGLRK..",
+  "..KCcKNNNNNNNNNNNNNK..",
+  "...KCKGGGGGbbbGGGGGK..",
+  "...KCcKGGGK...KGGGK...",
+  "....KCKGGGK...KGGGK...",
+  "....KCKgGGGK..KgGGGK..",
+  "....KKKKKKKK..KKKKKK..",
+];
+const TROLL_RIGHT = TROLL.map((r) => r.split("").reverse().join(""));
+const TROLL_COLORS: Record<string, string> = {
+  K: "#111111",
+  G: "#6aa84f",
+  g: "#3e6e30",
+  L: "#96cd6e",
+  W: "#ffffff",
+  E: "#c81428",
+  R: "#b02828",
+  r: "#781414",
+  B: "#5a788c",
+  b: "#3c5564",
+  T: "#a0e65a",
+  t: "#5aaa32",
+  C: "#8c5232",
+  c: "#5f3720",
+  N: "#5a321e",
+};
+// Tiny letters for spelling words with weed leaves in the SoundCloud Void
+const LEAF_FONT: Record<string, string[]> = {
+  F: ["###", "#..", "##.", "#..", "#.."],
+  O: [".#.", "#.#", "#.#", "#.#", ".#."],
+  L: ["#..", "#..", "#..", "#..", "###"],
+  W: ["#.#", "#.#", "#.#", "###", "#.#"],
+  M: ["#.#", "###", "#.#", "#.#", "#.#"],
+  E: ["###", "#..", "##.", "#..", "###"],
+  N: ["##.", "#.#", "#.#", "#.#", "#.#"],
+  S: [".##", "#..", ".#.", "..#", "##."],
+  U: ["#.#", "#.#", "#.#", "#.#", "###"],
+  D: ["##.", "#.#", "#.#", "#.#", "##."],
+  C: [".##", "#..", "#..", "#..", ".##"],
+  "!": ["#", "#", "#", ".", "#"],
+};
 
 function rand(min: number, max: number) {
   return min + Math.random() * (max - min);
@@ -192,6 +364,11 @@ function drawPixels(
       }
     }
   }
+}
+
+// Draws a picture at whole pixels (keeps pixel art sharp)
+function drawImageSafe(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number) {
+  ctx.drawImage(img, Math.round(x), Math.round(y));
 }
 
 // Small repeatable "random" number for background decorations
@@ -228,14 +405,20 @@ function getOwnerCode() {
 export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const spriteRef = useRef<HTMLImageElement | null>(null);
+  const shipRef = useRef<HTMLImageElement | null>(null); // your ghost ship drawing: /public/game/ghostship.png
   const firstSignal = useRef(actionSignal);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
   const audioCtxRef = useRef<AudioContext | null>(null);
   const deathSoundRef = useRef<HTMLAudioElement | null>(null);
+  const stuttersRef = useRef<HTMLAudioElement | null>(null); // the secret Stutters remix
+  if (stuttersRef.current) stuttersRef.current.muted = muted; // follows the iPod mute button
+  const [showGolden, setShowGolden] = useState(false); // the golden leaf pause screen
+  const [goldBefore, setGoldBefore] = useState(false); // found it in an earlier game already
   const sfxOnRef = useRef(true);
-  const heldRef = useRef({ left: false, right: false });
+  const heldRef = useRef({ left: false, right: false, up: false }); // up = jump held (for the jetpack)
   const touchRef = useRef(0); // -1 holding left side, 1 holding right side
+  const touchUpRef = useRef(false); // holding the middle of the screen (jetpack on phones)
   const wheelRef = useRef({ dir: 0, timer: 0 });
 
   // Scoreboard (shared online) and name entry
@@ -270,8 +453,45 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     fireballs: [] as Fireball[],
     particles: [] as Particle[],
     popups: [] as Popup[],
+    power: "none" as "none" | "fire" | "ice",
     ammo: 0,
     fireTime: 0,
+    doubleJumps: 0,
+    airJumped: false,
+    // Secret area to the left of the start, with the jetpack
+    eggCols: [] as Column[],
+    eggOpen: true,
+    jetItem: null as null | { x: number; y: number },
+    jetpack: false,
+    flying: false,
+    lastVoid: -1, // which Void map you saw last, so you get a different one next time
+    // Golden leaf
+    goldDone: false,
+    goldLeaf: null as null | { x: number; y: number },
+    stuttersOn: false,
+    // Boss
+    bossState: "none" as "none" | "placed" | "fight",
+    bossCount: 0, // trolls beaten this game
+    bossSpell: "fire" as PowerKind, // the spell you picked for this fight
+    spellChoice: 0, // 0 = fire, 1 = ice (on the pick screen)
+    zoneMarks: [] as { score: number; zone: number }[], // score when you entered each zone (for the progress line)
+    bossCol: 0, // first column of the arena
+    bossRefill: 0,
+    boss: null as null | {
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      hp: number;
+      maxHp: number;
+      hit: number; // flashes white after being hit
+      jumpTimer: number;
+      facing: number;
+      dead: number; // counts down while he's falling apart
+    },
+    hinted: [] as string[], // which "how to use it" hints were already shown this game
+    hintText: "",
+    hintTime: 0,
     auraTimer: 0,
     zoneShown: 0,
     flash: 0,
@@ -350,6 +570,52 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const playFireball = () => beep(900, 300, 0.07, 0.035, "sawtooth");
   const playPowerDown = () => beep(700, 200, 0.35, 0.07, "square");
   const playEmpty = () => beep(140, 110, 0.05, 0.05, "square");
+  const playIce = () => beep(1600, 2400, 0.08, 0.03, "triangle");
+  const playDoubleJump = () => beep(500, 1100, 0.1, 0.045, "triangle");
+
+  // ---------- The secret Stutters track ----------
+
+  // Starts the remix (and asks the page to pause your music while it plays)
+  const startStutters = () => {
+    const s = state.current;
+    if (s.stuttersOn) return;
+    try {
+      if (!stuttersRef.current) {
+        stuttersRef.current = new Audio(STUTTERS_TRACK);
+        stuttersRef.current.loop = true;
+        stuttersRef.current.volume = 0.8;
+      }
+      const a = stuttersRef.current;
+      a.muted = mutedRef.current;
+      a.currentTime = 0;
+      window.dispatchEvent(new CustomEvent("pinkmane-music", { detail: "pause" }));
+      a.play().catch(() => {});
+      s.stuttersOn = true;
+    } catch {}
+  };
+
+  // Stops it and lets your music carry on
+  const stopStutters = () => {
+    const s = state.current;
+    if (!s.stuttersOn) return;
+    s.stuttersOn = false;
+    try {
+      stuttersRef.current?.pause();
+      window.dispatchEvent(new CustomEvent("pinkmane-music", { detail: "resume" }));
+    } catch {}
+  };
+
+  // Closing the golden leaf screen (with the link button or skip)
+  const closeGolden = (openLink: boolean) => {
+    const s = state.current;
+    if (openLink && STUTTERS_LINK) window.open(STUTTERS_LINK, "_blank", "noopener,noreferrer");
+    setShowGolden(false);
+    if (s.mode === "golden") s.mode = "running";
+    s.flash = 3;
+    s.flashText = "SHOUT OUT STUTTERS!";
+    s.invuln = Math.max(s.invuln, 0.5);
+  };
+  const playCrumble = () => beep(300, 90, 0.2, 0.05, "sawtooth");
   const playHeart = () => [659, 784, 988, 1319].forEach((f, i) => beep(f, f, 0.09, 0.055, "triangle", i * 0.07));
   const playPipe = () => [520, 390, 260, 180].forEach((f, i) => beep(f, f * 0.9, 0.08, 0.05, "square", i * 0.08));
   const playDeath = () => {
@@ -454,18 +720,29 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     pipe: 0,
     pipeOut: false,
     pipeUsed: false,
+    fragile: 0,
+    crumble: -1,
     zone,
     ...extra,
   });
 
   const zoneOf = (i: number) => Math.floor(i / ZONE_LEN) % ZONE_NAMES.length;
 
+  // Gets harder at 12k, 15k and 20k: faster monsters, and more of them
+  const hardness = () => {
+    const sc = state.current.score;
+    if (sc >= 20000) return 1.6;
+    if (sc >= 15000) return 1.35;
+    if (sc >= 12000) return 1.15;
+    return 1;
+  };
+
   const addWalker = (i: number, ground: number, progress: number) => {
     state.current.enemies.push({
       kind: "walker",
       x: i * T,
       y: ground * T - 14,
-      vx: -(28 + progress * 24),
+      vx: -(28 + progress * 24) * hardness(),
       vy: 0,
       baseY: 0,
       phase: 0,
@@ -480,7 +757,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       kind: "flyer",
       x: i * T,
       y: baseY,
-      vx: -(30 + progress * 22),
+      vx: -(30 + progress * 22) * hardness(),
       vy: 0,
       baseY,
       phase: Math.random() * Math.PI * 2,
@@ -519,6 +796,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const gapW = 6 + Math.floor(Math.random() * 4);
     const lineLen = Math.max(1, 3 - Math.floor(progress * 3));
     const th = Math.max(2, 5 - Math.floor(progress * 4));
+    // After 10k the lines vanish a few seconds after you touch them (faster after 15k)
+    const fragile = s.score >= 15000 ? 1.4 : s.score >= 10000 ? 3 : 0;
     for (let k = 0; k < gapW; k++) s.cols.push(makeCol(-1, zone));
     let row = s.genGround - 2;
     let o = 1;
@@ -527,6 +806,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         const c = s.cols[i0 + o + k];
         c.line = row;
         c.lineTh = th;
+        c.fragile = fragile;
       }
       if (Math.random() < 0.5) s.leaves.push({ x: (i0 + o) * T + 1, y: (row - 1) * T + 1, taken: false });
       o += lineLen + 1 + (Math.random() < progress ? 1 : 0);
@@ -565,12 +845,29 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (s.genFlat > 0) {
         s.genFlat -= 1;
         s.cols.push(makeCol(s.genGround, zone));
-        if (s.genFlat > 1 && zone !== 3 && Math.random() < 0.05 + progress * 0.09 + (zone === 1 ? 0.03 : 0)) {
+        const more = hardness();
+        if (s.genFlat > 1 && zone !== Z_CLOUDS && Math.random() < (0.05 + progress * 0.09 + (zone === 1 ? 0.03 : 0)) * more) {
           addWalker(i, s.genGround, progress);
         }
-        if (progress > 0.06 && Math.random() < 0.015 + progress * 0.035 + (zone === 3 ? 0.03 : 0)) {
+        if (progress > 0.06 && Math.random() < (0.015 + progress * 0.035 + (zone === Z_CLOUDS || zone === Z_TREES ? 0.03 : 0)) * more) {
           addFlyer(i, s.genGround, progress);
         }
+        continue;
+      }
+
+      // The troll's arena: a flat screen-wide floor with two bonus blocks (they refill during the fight)
+      if (s.bossState === "none" && s.score >= BOSS_EVERY * (s.bossCount + 1) - 300) {
+        s.bossState = "placed";
+        s.genGround = 8;
+        for (let k = 0; k < 3; k++) s.cols.push(makeCol(8, zoneOf(s.cols.length)));
+        s.bossCol = s.cols.length;
+        for (let k = 0; k < BOSS_ARENA; k++) {
+          const c = makeCol(8, zoneOf(s.cols.length));
+          if (k === 4 || k === 11) c.bonus = 5;
+          if (k === 7 || k === 8) c.block = 4;
+          s.cols.push(c);
+        }
+        s.genFlat = 4;
         continue;
       }
 
@@ -583,7 +880,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
 
       const r = Math.random();
-      const lineChance = progress < 0.1 ? 0 : zone === 3 ? 0.3 : 0.14;
+      const lineChance = progress < 0.1 ? 0 : zone === Z_CLOUDS ? 0.3 : zone === Z_SMOKE ? 0.2 : 0.14;
 
       if (r < lineChance) {
         addLineBridge(zone, progress);
@@ -614,8 +911,25 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         continue;
       }
 
-      if (zone === 3) {
+      if (zone === Z_TREES && r < lineChance + 0.3) {
+        // TWISTED TREES: a gap with a crooked branch floating in the middle
+        const gapW = 3 + Math.floor(Math.random() * (progress > 0.5 ? 3 : 2));
+        const i0 = s.cols.length;
+        for (let k = 0; k < gapW; k++) s.cols.push(makeCol(-1, zone));
+        const mid = i0 + Math.floor(gapW / 2) - 1;
+        const row = s.genGround - 1 - Math.floor(Math.random() * 2);
+        s.cols[mid].block = row;
+        s.cols[mid + 1].block = row;
+        if (Math.random() < 0.6) s.leaves.push({ x: mid * T + 9, y: (row - 1) * T + 1, taken: false });
+        const delta = Math.floor(rand(-1, 1.99));
+        s.genGround = Math.max(6, Math.min(8, s.genGround + delta));
+        s.genFlat = 3 + Math.floor(Math.random() * 3);
+        continue;
+      }
+
+      if (zone === Z_CLOUDS || zone === Z_SMOKE) {
         // PINK CLOUDS: fluffy islands floating in the sky
+        // SMOKE OCEAN: puffs of smoke floating on a sea of smoke
         const count = 2 + Math.floor(Math.random() * 3);
         for (let k = 0; k < count; k++) {
           const gap = 1 + Math.floor(Math.random() * (progress > 0.5 ? 3 : 2));
@@ -654,51 +968,154 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
   };
 
-  // The bonus room: SoundCloud Void. Weed leaves everywhere, one bonus heart, and a pipe out.
-  const buildVoid = () => {
+  // Spells a word with small weed leaves. x, y = top-left corner in pixels. Returns the width.
+  const spellLeaves = (leaves: Leaf[], text: string, x: number, y: number) => {
+    let cx = x;
+    for (const ch of text) {
+      if (ch === " ") {
+        cx += 16;
+        continue;
+      }
+      const glyph = LEAF_FONT[ch];
+      if (!glyph) continue;
+      for (let r = 0; r < glyph.length; r++) {
+        for (let c = 0; c < glyph[r].length; c++) {
+          if (glyph[r][c] === "#") leaves.push({ x: cx + c * 8, y: y + r * 8, taken: false, small: true });
+        }
+      }
+      cx += (glyph[0].length + 1) * 8;
+    }
+    return cx - x;
+  };
+
+  const textWidth = (text: string) => {
+    let w = 0;
+    for (const ch of text) w += ch === " " ? 16 : ((LEAF_FONT[ch]?.[0].length ?? 0) + 1) * 8;
+    return w;
+  };
+
+  // The bonus room: SoundCloud Void. There are several different rooms, you get a random one
+  // (never the same one twice in a row). Each has a pipe out at the end.
+  const VOID_MAPS = 5;
+  const buildVoid = (which: number) => {
     const cols: Column[] = [];
     const leaves: Leaf[] = [];
     const hearts: Heart[] = [];
-    const len = 36;
-    for (let i = 0; i < len; i++) {
-      if (i === 0 || i === len - 1) {
-        cols.push(makeCol(0, VOID_ZONE)); // walls
-        continue;
+
+    // Empty room: walls at both ends, floor at row 8, and the pipe out near the end
+    const room = (len: number) => {
+      for (let i = 0; i < len; i++) {
+        if (i === 0 || i === len - 1) cols.push(makeCol(0, VOID_ZONE));
+        else cols.push(makeCol(8, VOID_ZONE));
       }
-      const c = makeCol(8, VOID_ZONE);
-      if (i >= 8 && i <= 12) c.block = 5;
-      if (i >= 20 && i <= 24) c.block = 5;
-      if (i >= 14 && i <= 18) {
-        c.line = 3;
-        c.lineTh = 3;
+      for (const [k, half] of [
+        [len - 4, 1],
+        [len - 3, 2],
+      ]) {
+        cols[k].ground = 6;
+        cols[k].pipe = half;
+        cols[k].pipeOut = true;
       }
-      if (i === len - 4) {
-        c.ground = 6;
-        c.pipe = 1;
-        c.pipeOut = true;
+    };
+    const floorLeaves = (from: number, to: number) => {
+      for (let i = from; i < to; i++) leaves.push({ x: i * T + 1, y: 7 * T + 1, taken: false });
+    };
+
+    if (which === 1) {
+      // THE STAIRS: a staircase up to the heart and back down
+      const len = 38;
+      room(len);
+      const steps = [7, 6, 5, 4, 3, 3, 4, 5, 6, 7];
+      steps.forEach((row, k) => {
+        for (let j = 0; j < 2; j++) {
+          const i = 6 + k * 2 + j;
+          cols[i].block = row;
+          leaves.push({ x: i * T + 1, y: (row - 1) * T + 1, taken: false });
+        }
+      });
+      floorLeaves(2, 6);
+      floorLeaves(27, len - 5);
+      hearts.push({ x: 15 * T + 9, y: 1 * T + 4, taken: false });
+    } else if (which === 2) {
+      // FOLLOW ME ON SOUNDCLOUD! spelled in leaves, jump through the letters to grab them
+      const text = "FOLLOW ME ON SOUNDCLOUD!";
+      const len = Math.ceil(textWidth(text) / T) + 14;
+      room(len);
+      spellLeaves(leaves, text, 4 * T, 56);
+      // a thin line near the end with the heart on it
+      for (let i = len - 9; i <= len - 7; i++) {
+        cols[i].line = 4;
+        cols[i].lineTh = 3;
       }
-      if (i === len - 3) {
-        c.ground = 6;
-        c.pipe = 2;
-        c.pipeOut = true;
+      hearts.push({ x: (len - 8) * T + 1, y: 3 * T + 2, taken: false });
+    } else if (which === 3) {
+      // ZIGZAG: thin lines going up and down like a sound wave
+      const len = 40;
+      room(len);
+      const rows = [6, 5, 4, 3, 2, 3, 4, 5, 6];
+      rows.forEach((row, k) => {
+        for (let j = 0; j < 3; j++) {
+          const i = 5 + k * 3 + j;
+          cols[i].line = row;
+          cols[i].lineTh = 3;
+          leaves.push({ x: i * T + 1, y: (row - 1) * T + 1, taken: false });
+        }
+      });
+      floorLeaves(2, len - 5);
+      hearts.push({ x: 18 * T + 1, y: 1 * T + 4, taken: false });
+    } else if (which === 4) {
+      // Two lines of words: FOLLOW ME up on a ledge, ON SOUNDCLOUD down below
+      const low = "ON SOUNDCLOUD";
+      const high = "FOLLOW ME";
+      const len = Math.ceil(textWidth(low) / T) + 12;
+      room(len);
+      spellLeaves(leaves, low, 4 * T, 80);
+      const hx = 4 * T + Math.floor((textWidth(low) - textWidth(high)) / 2 / 8) * 8;
+      spellLeaves(leaves, high, hx, 16);
+      // the ledge under FOLLOW ME, with brick steps up to it
+      const l0 = Math.floor(hx / T) - 1;
+      const l1 = Math.ceil((hx + textWidth(high)) / T);
+      for (let i = l0; i <= l1; i++) {
+        cols[i].line = 4;
+        cols[i].lineTh = 3;
       }
-      cols.push(c);
+      cols[l0 - 2].block = 6;
+      cols[l0 - 3].block = 6;
+      hearts.push({ x: (l1 + 2) * T + 1, y: 5 * T + 4, taken: false });
+      cols[l1 + 2].block = 6;
+    } else {
+      // THE CLASSIC: bricks, a thin line up high and a wave of leaves
+      const len = 36;
+      room(len);
+      for (let i = 8; i <= 12; i++) cols[i].block = 5;
+      for (let i = 20; i <= 24; i++) cols[i].block = 5;
+      for (let i = 14; i <= 18; i++) {
+        cols[i].line = 3;
+        cols[i].lineTh = 3;
+      }
+      floorLeaves(3, len - 6);
+      for (let i = 8; i <= 12; i++) leaves.push({ x: i * T + 1, y: 4 * T + 1, taken: false });
+      for (let i = 20; i <= 24; i++) leaves.push({ x: i * T + 1, y: 4 * T + 1, taken: false });
+      for (let i = 14; i <= 18; i++) leaves.push({ x: i * T + 1, y: 2 * T + 1, taken: false });
+      for (let i = 3; i < 7; i++) leaves.push({ x: i * T + 1, y: (5 - Math.abs(i - 5)) * T, taken: false });
+      hearts.push({ x: 16 * T + 1, y: 1 * T + 4, taken: false });
     }
-    // Leaves: a row along the floor, on the bricks, and a wave in the air
-    for (let i = 3; i < len - 6; i++) leaves.push({ x: i * T + 1, y: 7 * T + 1, taken: false });
-    for (let i = 8; i <= 12; i++) leaves.push({ x: i * T + 1, y: 4 * T + 1, taken: false });
-    for (let i = 20; i <= 24; i++) leaves.push({ x: i * T + 1, y: 4 * T + 1, taken: false });
-    for (let i = 14; i <= 18; i++) leaves.push({ x: i * T + 1, y: 2 * T + 1, taken: false });
-    for (let i = 3; i < 7; i++) leaves.push({ x: i * T + 1, y: (5 - Math.abs(i - 5)) * T, taken: false });
-    // The bonus life, up on the thin line
-    hearts.push({ x: 16 * T + 1, y: 1 * T + 4, taken: false });
     return { cols, leaves, hearts };
+  };
+
+  // The secret area left of the start: flat ground, a sign, and the jetpack on a little brick shelf
+  const buildEgg = () => {
+    const cols: Column[] = [];
+    for (let k = 0; k < EGG_COLS; k++) cols.push(makeCol(8, 0)); // index 0 = column -1, 1 = column -2 ...
+    cols[12].block = 6; // column -13
+    cols[13].block = 6; // column -14
+    return cols;
   };
 
   const colAt = (col: number): Column => {
     const s = state.current;
-    if (col < 0) return makeCol(0, 0);
     if (s.inBonus) return s.cols[col] || makeCol(0, VOID_ZONE);
+    if (col < 0) return s.eggCols[-col - 1] || makeCol(0, 0); // secret area, then a wall
     generateUpTo(col + 2);
     return s.cols[col];
   };
@@ -771,8 +1188,30 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.particles = [];
     s.popups = [];
     s.pipeZones = [];
+    s.power = "none";
     s.ammo = 0;
     s.fireTime = 0;
+    s.doubleJumps = 0;
+    s.airJumped = false;
+    s.hinted = [];
+    s.hintTime = 0;
+    s.eggCols = buildEgg();
+    s.eggOpen = true;
+    s.jetItem = { x: -14 * T + 7, y: 6 * T - 18 };
+    s.jetpack = false;
+    s.flying = false;
+    s.goldDone = false;
+    s.goldLeaf = null;
+    stopStutters();
+    s.bossState = "none";
+    s.bossCount = 0;
+    s.boss = null;
+    s.bossRefill = 0;
+    s.zoneMarks = [{ score: 0, zone: 0 }];
+    // reset the score first: the level builder looks at it (the old score made the troll appear right away)
+    s.score = 0;
+    s.farthest = 0;
+    s.bonus = 0;
     s.zoneShown = 0;
     s.flash = 0;
     s.genGround = 8;
@@ -799,7 +1238,15 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       s.vy = JUMP;
       s.onGround = false;
       s.coyote = 0;
+      s.airJumped = false;
       playJump();
+    } else if ((s.doubleJumps > 0 || s.bossState === "fight") && !s.airJumped) {
+      // Double jump (turquoise leaf): one extra jump per time in the air. Free during a boss fight.
+      if (s.bossState !== "fight") s.doubleJumps -= 1;
+      s.airJumped = true;
+      s.vy = JUMP * 0.92;
+      burst(s.x + SPRITE_W / 2, s.y + SPRITE_H, 12, TURQ, 50);
+      playDoubleJump();
     }
   };
 
@@ -821,30 +1268,44 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     state.current.popups.push({ x, y, text, life: 0.9 });
   };
 
+  // Do you have shots right now? (fire needs time left on its timer, ice doesn't have a timer)
   const hasFire = () => {
     const s = state.current;
-    return s.ammo > 0 && s.fireTime > 0;
+    if (s.power === "fire") return s.ammo > 0 && s.fireTime > 0;
+    if (s.power === "ice") return s.ammo > 0;
+    return false;
+  };
+
+  const showHint = (key: string, text: string) => {
+    const s = state.current;
+    if (s.hinted.includes(key)) return;
+    s.hinted.push(key);
+    s.hintText = text;
+    s.hintTime = 2.8;
   };
 
   // Shoot one fireball (F / X / ↓, or the handheld's fire button)
   const shoot = () => {
     const s = state.current;
     if (s.mode !== "running") return;
-    if (!hasFire()) {
-      if (s.fireTime > 0) playEmpty();
-      return;
-    }
+    if (!hasFire()) return;
     if (s.fireballs.length >= 2) return;
+    const ice = s.power === "ice";
     s.ammo -= 1;
     s.fireballs.push({
       x: s.x + (s.facing > 0 ? SPRITE_W - 4 : 0),
-      y: s.y + 16,
-      vx: s.facing * FIREBALL_SPEED,
-      vy: 40,
-      life: 1.6,
+      y: s.y + (ice ? 24 : 16), // ice flies straight at waist height
+      vx: s.facing * (ice ? ICE_SPEED : FIREBALL_SPEED),
+      vy: ice ? 0 : 40,
+      life: ice ? 1.2 : 1.6,
+      ice,
     });
-    playFireball();
-    if (s.ammo <= 0) s.fireTime = 0;
+    if (ice) playIce();
+    else playFireball();
+    if (s.ammo <= 0) {
+      s.power = "none";
+      s.fireTime = 0;
+    }
   };
 
   // Standing on a pipe and pressing down: into the SoundCloud Void (or back out)
@@ -889,7 +1350,20 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       cam: s.cam,
       pipeCol: s.pipeCol,
     };
-    const room = buildVoid();
+    // Golden leaf time? Then it's one of the rooms without words (0, 1 or 3)
+    const gold = !s.goldDone && s.score >= GOLD_AT;
+    let which = Math.floor(Math.random() * VOID_MAPS);
+    if (gold) {
+      const plain = [0, 1, 3].filter((m) => m !== s.lastVoid);
+      which = plain[Math.floor(Math.random() * plain.length)];
+    } else if (which === s.lastVoid) {
+      which = (which + 1 + Math.floor(Math.random() * (VOID_MAPS - 1))) % VOID_MAPS;
+    }
+    s.lastVoid = which;
+    const room = buildVoid(which);
+    // where the golden leaf floats in each room (high up, you have to work for it)
+    const goldSpot: Record<number, [number, number]> = { 0: [22, 2], 1: [21, 2], 3: [27, 2] };
+    s.goldLeaf = gold ? { x: goldSpot[which][0] * T + 1, y: goldSpot[which][1] * T } : null;
     s.inBonus = true;
     s.cols = room.cols;
     s.leaves = room.leaves;
@@ -902,7 +1376,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.y = -SPRITE_H;
     s.vx = 0;
     s.vy = 0;
-    s.flash = 2;
+    s.flash = which === 4 ? 0 : 2; // the two-line word room skips the title so it doesn't cover FOLLOW ME
     s.flashText = "SOUNDCLOUD VOID";
     s.mode = "running";
   };
@@ -911,6 +1385,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const s = state.current;
     const saved = s.saved;
     s.inBonus = false;
+    s.goldLeaf = null;
+    stopStutters(); // the Stutters track only plays inside the Void
     if (!saved) return;
     s.cols = saved.cols;
     s.enemies = saved.enemies;
@@ -932,20 +1408,122 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.mode = "running";
   };
 
+  // The fight starts once the camera reaches the arena: the screen locks and the troll walks in
+  const startBoss = () => {
+    const s = state.current;
+    s.bossState = "fight";
+    s.cam = s.bossCol * T;
+    s.bossRefill = 0;
+    for (const e of s.enemies) {
+      e.alive = false;
+      e.squash = 0;
+    }
+    const hp = BOSS_HP_START + s.bossCount * BOSS_HP_STEP;
+    s.boss = { x: s.cam + W - 50, y: 8 * T - TR_H, vx: 0, vy: 0, hp, maxHp: hp, hit: 0, jumpTimer: 2.2, facing: -1, dead: 0 };
+    // Freeze and let the player pick a spell
+    heldRef.current = { left: false, right: false, up: false };
+    touchRef.current = 0;
+    s.vx = 0;
+    s.spellChoice = 0;
+    s.mode = "choose";
+  };
+
+  // How fast this troll is (each next one is faster)
+  const bossSpeed = () => 1 + BOSS_SPEED_STEP * state.current.bossCount;
+
+  // Picked a spell: you get it with a couple more shots than he needs, and free double jumps
+  const pickSpell = (choice: number) => {
+    const s = state.current;
+    if (s.mode !== "choose" || !s.boss) return;
+    const kind: PowerKind = choice === 1 ? "ice" : "fire";
+    s.bossSpell = kind;
+    s.power = kind;
+    s.ammo = s.boss.maxHp + BOSS_SPARE_SHOTS;
+    s.fireTime = kind === "fire" ? 999 : 0; // no timer in a boss fight
+    s.mode = "running";
+    s.flash = 1.6;
+    s.flashText = s.bossCount === 0 ? "FIGHT THE TROLL!" : `TROLL #${s.bossCount + 1}!`;
+    s.hinted = s.hinted.filter((h) => h !== "bossjump");
+    showHint("bossjump", "FREE DOUBLE JUMPS HERE!");
+    s.hintTime = 4;
+    playPowerUp();
+  };
+
+  // ---------- Pause (Esc) ----------
+  const pauseGame = () => {
+    const s = state.current;
+    if (s.mode !== "running") return;
+    s.mode = "paused";
+    heldRef.current = { left: false, right: false, up: false };
+    touchRef.current = 0;
+    touchUpRef.current = false;
+    if (s.stuttersOn) stuttersRef.current?.pause();
+  };
+  const resumeGame = () => {
+    const s = state.current;
+    if (s.mode !== "paused") return;
+    s.mode = "running";
+    if (s.stuttersOn) stuttersRef.current?.play().catch(() => {});
+  };
+
+  const playTrollDeath = () => {
+    try {
+      const a = new Audio(TROLL_DEATH_SOUND);
+      a.muted = mutedRef.current;
+      const resume = () => window.dispatchEvent(new CustomEvent("pinkmane-music", { detail: "resume" }));
+      a.addEventListener("ended", resume);
+      a.addEventListener("error", resume);
+      window.dispatchEvent(new CustomEvent("pinkmane-music", { detail: "pause" }));
+      a.play().catch(resume);
+    } catch {}
+  };
+
+  // A fireball or ice shot hits the troll
+  const hitBoss = (ice: boolean) => {
+    const s = state.current;
+    const b = s.boss;
+    if (!b || b.dead > 0) return;
+    const cx = b.x + TR_W / 2;
+    const cy = b.y + TR_H / 2;
+    if (b.hit > 0.3) {
+      burst(cx, cy, 5, ice ? ICE : FIRE, 30);
+      return;
+    }
+    b.hp -= 1;
+    b.hit = 0.5;
+    b.vx = -b.facing * 60;
+    burst(cx, cy, 18, ice ? ICE : FIRE, 70);
+    s.shake = 0.12;
+    playStomp();
+    if (b.hp <= 0) {
+      b.dead = 1.6;
+      popup(cx, b.y - 6, "BYE TROLL!");
+      playTrollDeath();
+    } else {
+      popup(cx, b.y - 6, `${b.hp} LEFT`);
+    }
+  };
+
   const hurt = (pit = false) => {
     const s = state.current;
-    if (hasFire() && !pit) {
-      // Getting hit while you have fire only takes the fire away
+    const inFight = s.bossState === "fight";
+    if (hasFire() && !pit && !inFight) {
+      // Getting hit while you have fire or ice only takes the power away
+      burst(s.x + SPRITE_W / 2, s.y + 8, 16, s.power === "ice" ? ICE : FIRE, 60);
+      s.power = "none";
       s.ammo = 0;
       s.fireTime = 0;
       s.invuln = 1.5;
       s.shake = 0.15;
-      burst(s.x + SPRITE_W / 2, s.y + 8, 16, FIRE, 60);
       playPowerDown();
       return;
     }
-    s.ammo = 0;
-    s.fireTime = 0;
+    if (!inFight) {
+      // (in a boss fight you keep your spell and lose a heart instead)
+      s.power = "none";
+      s.ammo = 0;
+      s.fireTime = 0;
+    }
     s.lives -= 1;
     s.shake = 0.3;
     burst(s.x + SPRITE_W / 2, s.y + SPRITE_H / 2, 34, BOOM, 100);
@@ -982,7 +1560,13 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const press = () => {
     const s = state.current;
     getAudio(); // browsers only allow sound after a click, so wake it up here
-    if (s.mode === "ready") {
+    if (s.mode === "golden") {
+      closeGolden(false);
+    } else if (s.mode === "choose") {
+      pickSpell(s.spellChoice);
+    } else if (s.mode === "paused") {
+      resumeGame();
+    } else if (s.mode === "ready") {
       s.mode = "running";
     } else if (s.mode === "running") {
       jump();
@@ -1004,11 +1588,16 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       return;
     }
     c.used = true;
+    // Fire is the most common, ice is rarer, double jump is the rarest
+    const r = Math.random();
+    const kind: PowerKind =
+      s.bossState === "fight" ? s.bossSpell : r < 0.6 ? "fire" : r < 0.85 ? "ice" : "double";
     s.powerups.push({
       x: col * T + 1,
       y: (c.bonus - 1) * T + 2,
       vx: s.facing >= 0 ? 45 : -45,
       vy: -140,
+      kind,
     });
     burst(col * T + 8, c.bonus * T, 8, FIRE, 40);
     playPowerAppear();
@@ -1056,12 +1645,16 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
 
     if (s.mode === "dying") {
-      if (s.t - s.deadAt > 1.6) finishDeath();
+      if (s.t - s.deadAt > 3) finishDeath();
       return;
     }
     if (s.mode === "hurt") {
       if (s.t - s.hurtAt > 1.2) {
         placeOnGroundNear(s.cam + 48);
+        if (s.boss && s.bossState === "fight") {
+          s.boss.x = s.cam + W - 50; // the troll backs off so you get a fair restart
+          s.boss.vx = 0;
+        }
         s.invuln = 1.5;
         s.mode = "running";
       }
@@ -1082,12 +1675,15 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.runTime += dt;
     if (s.invuln > 0) s.invuln -= dt;
 
-    // Fire power runs out when the timer bar is empty
-    if (s.fireTime > 0) {
+    if (s.hintTime > 0) s.hintTime -= dt;
+
+    // Fire power runs out when the timer bar is empty (ice has no timer)
+    if (s.power === "fire" && s.fireTime > 0 && s.bossState !== "fight") {
       s.fireTime -= dt;
       if (s.fireTime <= 0) {
         s.fireTime = 0;
         s.ammo = 0;
+        s.power = "none";
         playPowerDown();
       }
     }
@@ -1103,6 +1699,22 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (s.vx < target) s.vx = Math.min(target, s.vx + ACCEL * dt);
     if (s.vx > target) s.vx = Math.max(target, s.vx - ACCEL * dt);
     s.vy = Math.min(420, s.vy + GRAVITY * dt);
+
+    // Jetpack: hold jump to fly up
+    s.flying = s.jetpack && (heldRef.current.up || touchUpRef.current);
+    if (s.flying) {
+      s.vy = Math.max(JET_MAX_UP, s.vy - JET_THRUST * dt);
+      if (Math.random() < 0.7) {
+        s.particles.push({
+          x: s.x + (s.facing > 0 ? 5 : SPRITE_W - 7),
+          y: s.y + 27,
+          vx: rand(-15, 15),
+          vy: rand(40, 90),
+          color: FIRE[Math.floor(Math.random() * 3)],
+          life: rand(0.15, 0.3),
+        });
+      }
+    }
 
     // Move sideways, then up/down, stopping at solid tiles
     const hx = () => s.x + HB_X;
@@ -1136,6 +1748,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
       s.vy = 0;
     }
+    // Top of the screen is a ceiling (only matters with the jetpack)
+    if (s.y < -6) {
+      s.y = -6;
+      if (s.vy < 0) s.vy = 0;
+    }
     // Landing on bricks or thin lines from above
     if (!s.onGround && s.vy >= 0) {
       const bottom = hy() + HB_H;
@@ -1147,13 +1764,23 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
             s.vy = 0;
             s.onGround = true;
             landed = true;
+            // Touched a vanishing line: the whole line starts blinking
+            const col = Math.floor(fx / T);
+            const c = colAt(col);
+            if (c.fragile > 0 && c.crumble < 0 && c.line * T === top) {
+              for (let k = col; colAt(k).line === c.line && colAt(k).fragile > 0; k--) colAt(k).crumble = c.fragile;
+              for (let k = col + 1; colAt(k).line === c.line && colAt(k).fragile > 0; k++) colAt(k).crumble = c.fragile;
+            }
             break;
           }
         }
         if (landed) break;
       }
     }
-    if (s.onGround) s.coyote = 0.09;
+    if (s.onGround) {
+      s.coyote = 0.09;
+      s.airJumped = false;
+    }
     else if (s.coyote > 0) s.coyote -= dt;
 
     if (Math.abs(s.vx) > 5 && s.onGround) s.runAnim += dt;
@@ -1161,14 +1788,70 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     // Camera follows you forward only (in the Void it stays inside the room)
     if (s.inBonus) {
       s.cam = Math.max(0, Math.min(s.cols.length * T - W, s.x - 110));
+    } else if (s.bossState === "fight") {
+      // Boss fight: the screen stays put, you can't leave until he's down
+      s.cam = s.bossCol * T;
+      if (s.x + HB_X + HB_W > s.cam + W) s.x = s.cam + W - HB_X - HB_W;
+    } else if (s.eggOpen) {
+      // At the very start you can also walk back left, into the secret area
+      if (s.x - s.cam > 90) s.cam = s.x - 90;
+      if (s.x - s.cam < 40) s.cam = Math.max(-EGG_COLS * T, s.x - 40);
+      if (s.farthest > 30 * T) s.eggOpen = false; // once you've run on, the way back is gone
+      generateUpTo(Math.floor((s.cam + W) / T) + 4);
     } else {
       s.cam = Math.max(s.cam, s.x - 90);
       generateUpTo(Math.floor((s.cam + W) / T) + 4);
+      if (s.bossState === "placed" && s.cam >= s.bossCol * T) startBoss();
     }
 
     // Score: distance + bonus
     if (!s.inBonus) s.farthest = Math.max(s.farthest, s.x);
     s.score = Math.floor(s.farthest / T) + s.bonus;
+
+    // Picking up the secret jetpack
+    const ji = s.jetItem;
+    if (ji && hx() + HB_W > ji.x && hx() < ji.x + 18 && hy() + HB_H > ji.y && hy() < ji.y + 18) {
+      s.jetItem = null;
+      s.jetpack = true;
+      s.bonus += 100;
+      popup(ji.x + 9, ji.y - 4, "JETPACK!");
+      showHint("jet", "HOLD SPACE TO FLY");
+      burst(ji.x + 9, ji.y + 9, 22, [PINK, "#ffc800", "#ffffff"], 70);
+      playPowerUp();
+    }
+    // The golden leaf: +500, the game pauses on the Stutters screen and his remix starts playing
+    const gl = s.goldLeaf;
+    if (gl && hx() + HB_W > gl.x && hx() < gl.x + 14 && hy() + HB_H > gl.y && hy() < gl.y + 14) {
+      s.goldLeaf = null;
+      s.goldDone = true;
+      s.bonus += PTS_GOLD;
+      s.score = Math.floor(s.farthest / T) + s.bonus;
+      popup(gl.x + 7, gl.y - 4, `+${PTS_GOLD}`);
+      burst(gl.x + 7, gl.y + 7, 34, ["#ffd700", "#fff3a0", "#b8860b", "#ffffff"], 90);
+      playPowerUp();
+      let before = false;
+      try {
+        before = localStorage.getItem(GOLD_KEY) === "1";
+        localStorage.setItem(GOLD_KEY, "1");
+      } catch {}
+      setGoldBefore(before);
+      heldRef.current = { left: false, right: false, up: false };
+      touchRef.current = 0;
+      s.vx = 0;
+      startStutters();
+      s.mode = "golden";
+      setShowGolden(true);
+      return;
+    }
+
+    // The jetpack runs out of fuel at 2000
+    if (s.jetpack && s.score >= JET_UNTIL) {
+      s.jetpack = false;
+      s.flying = false;
+      popup(s.x + SPRITE_W / 2, s.y - 6, "JETPACK EMPTY");
+      burst(s.x + SPRITE_W / 2, s.y + 20, 16, ["#8a8a8a", "#ffffff", INK], 55);
+      playPowerDown();
+    }
 
     // Fell in a pit
     if (s.y > H + 10) {
@@ -1181,16 +1864,28 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       const zoneIndex = Math.floor(Math.floor(s.x / T) / ZONE_LEN);
       if (zoneIndex > s.zoneShown) {
         s.zoneShown = zoneIndex;
+        s.zoneMarks.push({ score: s.score, zone: zoneIndex % ZONE_NAMES.length });
         s.flash = 2;
         s.flashText = `ZONE ${zoneIndex + 1}: ${ZONE_NAMES[zoneIndex % ZONE_NAMES.length]}`;
       }
     }
 
-    // Bonus block bounce animation
+    // Bonus block bounce animation, and vanishing lines counting down
+    let crumbled = false;
     for (let col = Math.floor(s.cam / T); col <= Math.floor((s.cam + W) / T); col++) {
       const c = colAt(col);
       if (c.bump > 0) c.bump -= dt;
+      if (c.crumble > 0) {
+        c.crumble -= dt;
+        if (c.crumble <= 0) {
+          burst(col * T + 8, c.line * T, 8, [PINK, "#ffffff", DARK_PINK], 40);
+          c.line = -1;
+          c.crumble = -1;
+          crumbled = true;
+        }
+      }
     }
+    if (crumbled) playCrumble();
 
     // Flaming weed leaves slide along and bounce off walls
     for (const pu of s.powerups) {
@@ -1204,12 +1899,32 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         pu.vy = 0;
       }
       if (hx() + HB_W > pu.x && hx() < pu.x + 14 && hy() + HB_H > pu.y && hy() < pu.y + 14) {
-        // 5 fireballs and a full timer. Doesn't stack: it just refills.
-        s.ammo = FIRE_AMMO;
-        s.fireTime = FIRE_TIME;
+        // Power-ups don't stack: picking one up just refills it
+        if (s.bossState === "fight" && pu.kind !== "double") {
+          // in the arena the blocks top up your spell
+          s.power = pu.kind;
+          s.ammo += 3;
+          if (pu.kind === "fire") s.fireTime = 999;
+          popup(pu.x + 7, pu.y - 4, "+3 SHOTS");
+        } else if (pu.kind === "fire") {
+          s.power = "fire";
+          s.ammo = FIRE_AMMO;
+          s.fireTime = FIRE_TIME;
+          popup(pu.x + 7, pu.y - 4, "FIRE!");
+          showHint("shoot", "PRESS S TO SHOOT");
+        } else if (pu.kind === "ice") {
+          s.power = "ice";
+          s.ammo = ICE_AMMO;
+          s.fireTime = 0;
+          popup(pu.x + 7, pu.y - 4, "ICE!");
+          showHint("shoot", "PRESS S TO SHOOT");
+        } else {
+          s.doubleJumps = DOUBLE_JUMPS;
+          popup(pu.x + 7, pu.y - 4, "DOUBLE JUMP!");
+          showHint("double", "JUMP AGAIN IN THE AIR!");
+        }
         s.bonus += 100;
-        popup(pu.x + 7, pu.y - 4, "FIRE!");
-        burst(pu.x + 7, pu.y + 7, 20, FIRE, 70);
+        burst(pu.x + 7, pu.y + 7, 20, pu.kind === "fire" ? FIRE : pu.kind === "ice" ? ICE : TURQ, 70);
         playPowerUp();
         pu.y = 999;
       }
@@ -1226,7 +1941,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           y: s.y + rand(0, 10),
           vx: rand(-10, 10),
           vy: rand(-60, -30),
-          color: FIRE[Math.floor(Math.random() * 3)],
+          color: (s.power === "ice" ? ICE : FIRE)[Math.floor(Math.random() * 3)],
           life: rand(0.2, 0.4),
         });
       }
@@ -1235,17 +1950,24 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     // Fireballs bounce along the ground and burn monsters
     for (const f of s.fireballs) {
       f.life -= dt;
-      f.vy = Math.min(300, f.vy + 900 * dt);
+      if (!f.ice) f.vy = Math.min(300, f.vy + 900 * dt);
       f.x += f.vx * dt;
       if (solidAt(f.x + (f.vx > 0 ? 4 : 0), f.y + 2)) {
         f.life = 0;
-        burst(f.x, f.y, 6, FIRE, 40);
+        burst(f.x, f.y, 6, f.ice ? ICE : FIRE, 40);
         continue;
       }
-      f.y += f.vy * dt;
-      if (solidAt(f.x + 2, f.y + 4)) {
-        f.y = Math.floor((f.y + 4) / T) * T - 4;
-        f.vy = -170;
+      if (f.ice) {
+        // little frost trail
+        if (Math.random() < 0.5) {
+          s.particles.push({ x: f.x, y: f.y + rand(0, 4), vx: 0, vy: rand(-10, 10), color: ICE[Math.floor(Math.random() * 4)], life: 0.25 });
+        }
+      } else {
+        f.y += f.vy * dt;
+        if (solidAt(f.x + 2, f.y + 4)) {
+          f.y = Math.floor((f.y + 4) / T) * T - 4;
+          f.vy = -170;
+        }
       }
       if (f.x < s.cam - 10 || f.x > s.cam + W + 10 || f.y > H) f.life = 0;
       for (const e of s.enemies) {
@@ -1255,6 +1977,15 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           killEnemy(e, e.kind === "flyer" ? PTS_FLYER : PTS_WALKER);
           f.life = 0;
           break;
+        }
+      }
+      const tb = s.boss;
+      if (f.life > 0 && tb && tb.dead <= 0) {
+        const bx1 = tb.x + TR_HX;
+        const by1 = tb.y + TR_HY;
+        if (f.x + 4 > bx1 && f.x < bx1 + TR_HW && f.y + 4 > by1 && f.y < by1 + TR_HH) {
+          f.life = 0;
+          hitBoss(f.ice);
         }
       }
     }
@@ -1309,17 +2040,90 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
     s.enemies = s.enemies.filter((e) => e.alive || e.squash > 0);
 
+    // The troll: walks at you (slower than you), sometimes jumps at you. Only shots hurt him.
+    const b = s.boss;
+    if (s.bossState === "fight" && b) {
+      if (b.dead > 0) {
+        b.dead -= dt;
+        b.y += 30 * dt;
+        if (Math.random() < 0.5) burst(b.x + rand(6, TR_W - 6), b.y + rand(10, TR_H), 2, [LIGHT_GREEN, GREEN, "#ffffff"], 40);
+        if (b.dead <= 0) {
+          s.boss = null;
+          s.bossState = "none";
+          s.bossCount += 1; // the next one comes 10k later, faster and tougher
+          s.bonus += PTS_BOSS;
+          s.flash = 2.5;
+          s.flashText = `TROLL DOWN! +${PTS_BOSS}`;
+          // leftover shots stay, but back to normal rules
+          if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
+          s.ammo = Math.min(s.ammo, 5);
+        }
+      } else {
+        if (b.hit > 0) b.hit -= dt;
+        const pc = s.x + HB_X + HB_W / 2;
+        const tc = b.x + TR_HX + TR_HW / 2;
+        const dir = pc < tc ? -1 : 1;
+        const onGround = b.y >= 8 * T - TR_H - 0.5;
+        if (onGround && b.hit <= 0.2) {
+          b.facing = dir;
+          b.vx = dir * TROLL_SPEED * bossSpeed();
+          b.jumpTimer -= dt;
+          if (b.jumpTimer <= 0 && Math.abs(pc - tc) < 120) {
+            b.vy = TROLL_JUMP;
+            b.vx = dir * 75 * bossSpeed();
+            b.jumpTimer = rand(1.8, 3.2) / bossSpeed();
+            playBump();
+          }
+        }
+        b.vy = Math.min(420, b.vy + GRAVITY * dt);
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        if (b.y > 8 * T - TR_H) {
+          if (b.vy > 200) s.shake = 0.12; // heavy landing
+          b.y = 8 * T - TR_H;
+          b.vy = 0;
+        }
+        b.x = Math.max(s.cam - TR_HX, Math.min(s.cam + W - TR_W + TR_HX, b.x));
+        // Touching him hurts, unless you land on top of him (he's too big to squash, you just bounce off)
+        const bx1 = b.x + TR_HX;
+        const by1 = b.y + TR_HY;
+        if (hx() + HB_W > bx1 && hx() < bx1 + TR_HW && hy() + HB_H > by1 && hy() < by1 + TR_HH) {
+          if (s.vy > 0 && hy() + HB_H - by1 < 12) {
+            s.vy = STOMP_BOUNCE;
+            popup(b.x + TR_W / 2, b.y - 6, "NOPE!");
+            playBump();
+          } else if (s.invuln <= 0) {
+            hurt();
+            return;
+          }
+        }
+      }
+      // The two bonus blocks in the arena refill every few seconds
+      s.bossRefill += dt;
+      if (s.bossRefill > 10) {
+        s.bossRefill = 0;
+        for (let k = 0; k < BOSS_ARENA; k++) {
+          const c = colAt(s.bossCol + k);
+          if (c.bonus >= 0 && c.used) {
+            c.used = false;
+            c.bump = 0.15;
+          }
+        }
+      }
+    }
+
     // Weed leaves: points
     for (const l of s.leaves) {
       if (l.taken) continue;
-      if (hx() + HB_W > l.x && hx() < l.x + 14 && hy() + HB_H > l.y && hy() < l.y + 14) {
+      const size = l.small ? 8 : 14;
+      if (hx() + HB_W > l.x && hx() < l.x + size && hy() + HB_H > l.y && hy() < l.y + size) {
         l.taken = true;
         s.bonus += PTS_LEAF;
         burst(l.x + 7, l.y + 7, 8, [GREEN, DARK_GREEN, "#ffffff"], 45);
         playLeaf();
       }
     }
-    s.leaves = s.leaves.filter((l) => !l.taken && l.x > s.cam - 40);
+    s.leaves = s.leaves.filter((l) => !l.taken && (s.inBonus || l.x > s.cam - 40)); // the Void keeps everything, you can walk back
 
     // Hearts: an extra life (max 4)
     for (const h of s.hearts) {
@@ -1337,7 +2141,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         playHeart();
       }
     }
-    s.hearts = s.hearts.filter((h) => !h.taken && h.x > s.cam - 40);
+    s.hearts = s.hearts.filter((h) => !h.taken && (s.inBonus || h.x > s.cam - 40));
   };
 
   // ---------- Drawing ----------
@@ -1381,7 +2185,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
     if (status !== "ok") {
       ctx.fillText("GAME OVER", W / 2, 40);
-      ctx.fillText(`SCORE ${pad(s.score)}`, W / 2, 58);
+      ctx.fillText(`YOU SMOKED ${Math.floor(s.score)} GRAMS`, W / 2, 58);
       ctx.fillText(status === "loading" ? "LOADING SCORES..." : "SCOREBOARD OFFLINE", W / 2, 80);
     } else {
       ctx.fillText("TOP 10", W / 2, 8);
@@ -1400,10 +2204,53 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         ctx.fillText(pad(e.score), W - 28, y);
       });
       ctx.textAlign = "center";
-      ctx.fillText(`YOU ${pad(s.score)}`, W / 2, 134);
+      ctx.fillText(`YOU SMOKED ${Math.floor(s.score)} GRAMS`, W / 2, 134);
     }
 
     if (Math.floor(s.t * 2) % 2 === 0) ctx.fillText("OK TO PLAY AGAIN", W / 2, 148);
+  };
+
+  // One twisted tree, drawn as outlines. Its branches sway a little in the wind.
+  const drawTree = (ctx: CanvasRenderingContext2D, x: number, baseY: number, height: number, seed: number, sway: number) => {
+    const t = state.current.t;
+    const branch = (x1: number, y1: number, len: number, angle: number, depth: number, id: number) => {
+      const a = angle + Math.sin(t * 0.9 + seed * 3 + id) * 0.05 * (5 - depth) * sway;
+      const x2 = x1 + Math.cos(a) * len;
+      const y2 = y1 + Math.sin(a) * len;
+      // bend each branch sideways so it looks crooked
+      const bend = (hash(seed * 13 + id) - 0.5) * len * 0.8;
+      ctx.lineWidth = depth >= 3 ? 2 : 1;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.quadraticCurveTo((x1 + x2) / 2 + bend, (y1 + y2) / 2, x2, y2);
+      ctx.stroke();
+      if (depth <= 0) return;
+      const spread = 0.45 + hash(seed + id * 7) * 0.5;
+      branch(x2, y2, len * 0.72, a - spread, depth - 1, id * 2 + 1);
+      branch(x2, y2, len * 0.66, a + spread * 0.85, depth - 1, id * 2 + 2);
+    };
+    branch(x, baseY, height, -Math.PI / 2 + (hash(seed) - 0.5) * 0.3, 4, 0);
+  };
+
+  // The sign in the secret area at the start
+  const drawGoatsSign = (ctx: CanvasRenderingContext2D, cam: number) => {
+    const w = 124;
+    const h = 74;
+    const x = Math.round(-10 * T - cam);
+    const y = 22;
+    ctx.fillStyle = INK;
+    ctx.fillRect(x + 14, y + h, 4, 8 * T - y - h);
+    ctx.fillRect(x + w - 18, y + h, 4, 8 * T - y - h);
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = DARK_PINK;
+    ctx.fillRect(x + 2, y + 2, w - 4, h - 4);
+    ctx.font = `8px ${fontFamily}`;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffc800";
+    ctx.fillText("MY GOATS:", x + w / 2, y + 6);
+    ctx.fillStyle = "#ffffff";
+    MY_GOATS.forEach((n, i) => ctx.fillText(n, x + w / 2, y + 18 + i * 9));
   };
 
   // Background for each zone (moves slower than the level, so it feels far away)
@@ -1423,7 +2270,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       return;
     }
 
-    ctx.fillStyle = zone === 3 ? CLOUD_SKY : SCREEN;
+    ctx.fillStyle = zone === Z_CLOUDS ? CLOUD_SKY : zone === Z_TREES ? TREE_SKY : zone === Z_SMOKE ? SMOKE_SKY : SCREEN;
     ctx.fillRect(-4, -4, W + 8, H + 8);
 
     if (zone === 0) {
@@ -1469,6 +2316,51 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           }
         }
       }
+    } else if (zone === Z_TREES) {
+      // Twisted trees: a far row (light) and a near row (dark), both swaying
+      ctx.lineCap = "round";
+      ctx.strokeStyle = TREE_FAR;
+      let base = Math.floor((cam * 0.15) / 46);
+      for (let i = -1; i < W / 46 + 2; i++) {
+        const idx = base + i;
+        const x = idx * 46 - cam * 0.15 + hash(idx + 40) * 16;
+        drawTree(ctx, x, 150, 22 + hash(idx + 5) * 14, idx + 100, 1);
+      }
+      ctx.strokeStyle = TREE_NEAR;
+      base = Math.floor((cam * 0.35) / 80);
+      for (let i = -1; i < W / 80 + 2; i++) {
+        const idx = base + i;
+        const x = idx * 80 - cam * 0.35 + hash(idx + 9) * 24;
+        drawTree(ctx, x, 160, 30 + hash(idx + 2) * 16, idx, 1.6);
+      }
+      ctx.lineCap = "butt";
+    } else if (zone === Z_SMOKE) {
+      // Smoke Ocean: a sea of smoke on the horizon, with the ghost ship drifting by
+      const sea = 104;
+      const trip = W + 90;
+      const bx = Math.round(W + 10 - ((cam * 0.08 + s.t * 7) % trip));
+      const bob = Math.round(Math.sin(s.t * 1.6) * 2);
+      const ship = shipRef.current;
+      if (ship && ship.complete && ship.naturalWidth > 0) {
+        // your drawing: the ship sits on its own smoke, which sinks into the sea
+        drawImageSafe(ctx, ship, bx, sea - 50 + bob);
+      } else {
+        // backup boat if the picture isn't there
+        drawPixels(ctx, BOAT, bx, sea - 38 + bob, { K: INK, b: "#7a4a3a", B: "#543028", W: "#f5f0e6", S: "#8f8499", M: "#3c2822" }, 2);
+      }
+      for (let xx = -2; xx < W + 4; xx += 4) {
+        const wave = Math.sin(s.t * 1.5 + (xx + cam * 0.3) * 0.08) * 2;
+        ctx.fillStyle = SMOKE_SEA_DARK;
+        ctx.fillRect(xx, Math.round(sea + wave - 2), 4, H);
+        ctx.fillStyle = SMOKE_SEA;
+        ctx.fillRect(xx, Math.round(sea + wave), 4, H);
+      }
+      // slow smoke streaks on the sea
+      ctx.fillStyle = SMOKE_STREAK;
+      for (let k = 0; k < 6; k++) {
+        const sx = Math.round((((hash(k) * 400 - cam * 0.3 - s.t * 12) % 300) + 300) % 300) - 22;
+        ctx.fillRect(sx, sea + 10 + k * 8, 18 + Math.round(hash(k + 3) * 14), 2);
+      }
     } else {
       // Pink clouds drifting in the sky
       const base = Math.floor((cam * 0.2) / 70);
@@ -1487,6 +2379,75 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
   };
 
+  // One floating cloud island from screen x0 to x1, standing surface at gy.
+  // The top puffs slowly breathe and the whole cloud bobs a tiny bit.
+  const drawCloud = (ctx: CanvasRenderingContext2D, x0: number, x1: number, gy: number, seed: number) => {
+    const t = state.current.t;
+    const w = x1 - x0;
+    const top = gy + Math.round(Math.sin(t * 1.3 + seed) * 1);
+    const thick = Math.min(30, 17 + Math.round(w * 0.12));
+    const tops: [number, number, number][] = [];
+    const topCount = Math.max(2, Math.round(w / 10));
+    for (let k = 0; k < topCount; k++) {
+      const cx = x0 + 5 + (k * (w - 10)) / (topCount - 1);
+      const r = 6 + hash(seed * 7 + k) * 3 + Math.sin(t * 1.8 + k * 1.3 + seed) * 0.8;
+      tops.push([cx, top + r - 1, r]);
+    }
+    const bottoms: [number, number, number][] = [];
+    const botCount = Math.max(1, Math.round(w / 14));
+    for (let k = 0; k < botCount; k++) {
+      const cx = botCount === 1 ? x0 + w / 2 : x0 + 7 + (k * (w - 14)) / (botCount - 1);
+      const r = 5 + hash(seed * 3 + k + 50) * 3 + Math.sin(t * 1.4 + k + seed) * 0.6;
+      bottoms.push([cx, top + thick - r, r]);
+    }
+    const shape = (grow: number) => {
+      ctx.beginPath();
+      for (const [cx, cy, r] of [...tops, ...bottoms]) {
+        ctx.moveTo(cx + r + grow, cy);
+        ctx.arc(cx, cy, r + grow, 0, Math.PI * 2);
+      }
+      ctx.rect(x0 + 2 - grow, top + 5 - grow, w - 4 + grow * 2, thick - 9 + grow * 2);
+      ctx.fill();
+    };
+    ctx.fillStyle = PINK; // outline
+    shape(1);
+    ctx.fillStyle = CLOUD;
+    shape(0);
+    // soft pink shadow along the bottom, little white shine on top
+    ctx.fillStyle = "#f3c6ec";
+    for (const [cx, cy, r] of bottoms) {
+      ctx.beginPath();
+      ctx.arc(cx, cy + 1, Math.max(1, r - 2), 0, Math.PI);
+      ctx.fill();
+    }
+    ctx.fillStyle = "#ffffff";
+    for (let k = 0; k < tops.length; k += 2) {
+      const [cx, cy, r] = tops[k];
+      ctx.fillRect(Math.round(cx - 3), Math.round(cy - r + 3), 2, 2);
+    }
+  };
+
+  // Finds every cloud island on screen (in PINK CLOUDS) and draws each one as a single cloud
+  const drawCloudIslands = (ctx: CanvasRenderingContext2D, cam: number) => {
+    const isCloud = (c: Column) => c.zone === Z_CLOUDS && c.ground >= 0 && !c.pipe;
+    const first = Math.floor(cam / T);
+    const last = first + Math.ceil(W / T) + 1;
+    let col = first;
+    // start from the beginning of an island that sticks out on the left
+    while (col > first - 30 && isCloud(colAt(col - 1)) && colAt(col - 1).ground === colAt(col).ground && isCloud(colAt(col))) col--;
+    while (col <= last) {
+      const c = colAt(col);
+      if (!isCloud(c)) {
+        col++;
+        continue;
+      }
+      let end = col + 1;
+      while (end < col + 40 && isCloud(colAt(end)) && colAt(end).ground === c.ground) end++;
+      drawCloud(ctx, col * T - cam, end * T - cam, c.ground * T, col);
+      col = end;
+    }
+  };
+
   const drawGround = (ctx: CanvasRenderingContext2D, c: Column, col: number, x: number) => {
     const s = state.current;
     const gy = c.ground * T;
@@ -1500,17 +2461,44 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (gy < H - 12) drawPixels(ctx, LEAF, x + 4, gy + 6, { G: DARK_GREEN, D: "#10401a" });
       return;
     }
-    if (c.zone === 3) {
-      // Fluffy cloud islands
-      ctx.fillStyle = CLOUD;
-      ctx.fillRect(x, gy + 4, T, H - gy);
+    if (c.zone === Z_TREES) {
+      // Dark soil with crooked roots
+      ctx.fillStyle = TREE_SOIL;
+      ctx.fillRect(x, gy, T, H - gy);
+      ctx.fillStyle = TREE_ROOT;
+      const o = (col * 5) % 8;
+      ctx.fillRect(x + o, gy + 5, 5, 1);
+      ctx.fillRect(x + o + 4, gy + 6, 1, 4);
+      const o2 = (col * 3) % 9;
+      ctx.fillRect(x + o2 + 2, gy + 16, 6, 1);
+      ctx.fillRect(x + o2 + 2, gy + 17, 1, 3);
+      ctx.fillStyle = TREE_TOP;
+      ctx.fillRect(x, gy, T, 2);
+      return;
+    }
+    if (c.zone === Z_SMOKE) {
+      // A floor made of smoke, gently puffing
+      const wob = Math.sin(s.t * 2 + col * 0.9) * 1.5;
+      ctx.fillStyle = SMOKE_SHADE;
+      ctx.fillRect(x, gy + 5, T, H - gy);
+      ctx.fillStyle = SMOKE_EDGE;
       ctx.beginPath();
-      ctx.arc(x + 8, gy + 6, 7, Math.PI, 0);
+      ctx.arc(x + 4, gy + 4 + wob, 5, 0, Math.PI * 2);
+      ctx.arc(x + 12, gy + 4 - wob, 5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = PINK;
-      ctx.fillRect(x, gy + 4, T, 1);
-      ctx.fillStyle = "#f3c6ec";
-      ctx.fillRect(x + ((col * 5) % 10) + 2, gy + 12, 3, 2);
+      ctx.fillStyle = SMOKE_LIGHT;
+      ctx.beginPath();
+      ctx.arc(x + 4, gy + 5 + wob, 5, 0, Math.PI * 2);
+      ctx.arc(x + 12, gy + 5 - wob, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(x, gy + 5, T, 4);
+      ctx.fillStyle = SMOKE_LIGHT;
+      ctx.fillRect(x + ((col * 7 + Math.floor(s.t * 6)) % 14), gy + 15, 3, 1);
+      ctx.fillRect(x + ((col * 11 + Math.floor(s.t * 4)) % 13), gy + 24, 4, 1);
+      return;
+    }
+    if (c.zone === 3) {
+      // Cloud islands are drawn as whole floating clouds in drawCloudIslands
       return;
     }
     if (c.zone === 2) {
@@ -1550,6 +2538,26 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   };
 
   const drawBrick = (ctx: CanvasRenderingContext2D, x: number, by: number, zone: number) => {
+    if (zone === Z_TREES) {
+      // a crooked branch
+      ctx.fillStyle = INK;
+      ctx.fillRect(x, by, T, 7);
+      ctx.fillStyle = TREE_ROOT;
+      ctx.fillRect(x, by + 1, T, 5);
+      ctx.fillStyle = TREE_TOP;
+      ctx.fillRect(x, by, T, 1);
+      ctx.fillStyle = TREE_SOIL;
+      ctx.fillRect(x + ((x & 8) ? 3 : 10), by + 2, 2, 2);
+      return;
+    }
+    if (zone === Z_SMOKE) {
+      // a puff of smoke
+      ctx.fillStyle = SMOKE_EDGE;
+      ctx.fillRect(x, by + 1, T, T - 4);
+      ctx.fillStyle = SMOKE_LIGHT;
+      ctx.fillRect(x, by + 2, T, T - 6);
+      return;
+    }
     if (zone === 3 || zone === VOID_ZONE) {
       // cloud puffs / void blocks
       ctx.fillStyle = zone === 3 ? CLOUD : "#2d1838";
@@ -1595,6 +2603,136 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
   };
 
+  // Thin line at the bottom: the zones you ran through (solid), the zones coming up (faded),
+  // you (pink marker) and the next troll (green face at the end)
+  const drawProgress = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    const lo = s.bossCount * BOSS_EVERY;
+    const hi = lo + BOSS_EVERY;
+    const x0 = 10;
+    const x1 = W - 20;
+    const y = H - 4;
+    const px = (v: number) => Math.round(x0 + Math.max(0, Math.min(1, (v - lo) / (hi - lo))) * (x1 - x0));
+    ctx.fillStyle = INK;
+    ctx.fillRect(x0 - 1, y - 1, x1 - x0 + 2, 4);
+    ctx.fillStyle = "#4a3d55";
+    ctx.fillRect(x0, y, x1 - x0, 2);
+    // zones already done
+    const marks = s.zoneMarks;
+    for (let i = 0; i < marks.length; i++) {
+      const from = px(marks[i].score);
+      const to = px(Math.min(i + 1 < marks.length ? marks[i + 1].score : s.score, s.score));
+      if (to > from) {
+        ctx.fillStyle = ZONE_COLORS[marks[i].zone % ZONE_COLORS.length];
+        ctx.fillRect(from, y, to - from, 2);
+      }
+    }
+    // zones coming up (a guess: they're far away in distance, your points add on top)
+    const curZone = Math.floor(Math.floor(s.farthest / T) / ZONE_LEN);
+    let segStart = s.score;
+    ctx.globalAlpha = 0.4;
+    for (let k = 0; k < 12 && segStart < hi; k++) {
+      const zoneIdx = curZone + k;
+      const end = Math.min(hi, (zoneIdx + 1) * ZONE_LEN + s.bonus);
+      if (end > segStart) {
+        ctx.fillStyle = ZONE_COLORS[zoneIdx % ZONE_COLORS.length];
+        ctx.fillRect(px(segStart), y, px(end) - px(segStart), 2);
+        if (end < hi) {
+          ctx.fillStyle = INK;
+          ctx.fillRect(px(end), y - 1, 1, 4);
+        }
+      }
+      segStart = Math.max(segStart, end);
+    }
+    ctx.globalAlpha = 1;
+    // you
+    const me = px(s.score);
+    ctx.fillStyle = INK;
+    ctx.fillRect(me - 2, y - 5, 5, 4);
+    ctx.fillStyle = PINK;
+    ctx.fillRect(me - 1, y - 4, 3, 2);
+    // the troll waiting at the end
+    const tx = x1 + 3;
+    ctx.fillStyle = INK;
+    ctx.fillRect(tx - 1, y - 5, 9, 8);
+    ctx.fillStyle = s.bossState === "fight" && Math.floor(s.t * 6) % 2 === 0 ? "#ffffff" : "#6aa84f";
+    ctx.fillRect(tx, y - 4, 7, 6);
+    ctx.fillStyle = "#c81428";
+    ctx.fillRect(tx + 1, y - 3, 1, 1);
+    ctx.fillRect(tx + 4, y - 3, 1, 1);
+    ctx.fillStyle = "#a0e65a";
+    ctx.fillRect(tx + 1, y, 3, 2);
+  };
+
+  // Frozen screen before a boss fight: pick the fireball or the ice ray (shown flying for real)
+  const drawSpellPick = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    const b = s.boss;
+    ctx.fillStyle = "rgba(22, 12, 29, 0.95)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.font = `8px ${fontFamily}`;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText("PICK YOUR SPELL", W / 2, 14);
+    ctx.fillStyle = "#ffc800";
+    const shots = b ? b.maxHp + BOSS_SPARE_SHOTS : 0;
+    ctx.fillText(`${shots} SHOTS, HE TAKES ${b ? b.maxHp : 0}`, W / 2, 26);
+    for (let i = 0; i < 2; i++) {
+      const bx = i === 0 ? W / 2 - 78 : W / 2 + 14;
+      const by = 42;
+      const bw = 64;
+      const bh = 58;
+      const picked = s.spellChoice === i;
+      ctx.fillStyle = picked ? (Math.floor(s.t * 4) % 2 === 0 ? PINK : "#ff5fe0") : "#555555";
+      ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+      ctx.fillStyle = "#111111";
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(bx, by, bw, bh);
+      ctx.clip();
+      // a little floor
+      ctx.fillStyle = "#333333";
+      ctx.fillRect(bx, by + bh - 8, bw, 8);
+      if (i === 0) {
+        // the real fireball, bouncing along
+        const t = (s.t * 0.9) % 1;
+        const fx = Math.round(bx + 4 + t * (bw - 12));
+        const fy = Math.round(by + bh - 14 - Math.abs(Math.sin(s.t * 7)) * 22);
+        ctx.fillStyle = "#ff7a00";
+        ctx.fillRect(fx, fy, 5, 5);
+        ctx.fillStyle = "#ffc800";
+        ctx.fillRect(fx + 1, fy + 1, 3, 3);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(fx + 2, fy + 2, 1, 1);
+      } else {
+        // the real ice ray, flying straight
+        const t = (s.t * 1.3) % 1;
+        const ix = Math.round(bx - 6 + t * (bw + 12));
+        const iy = by + bh - 24;
+        ctx.fillStyle = "#1d4fa8";
+        ctx.fillRect(ix - 3, iy, 10, 4);
+        ctx.fillStyle = "#4aa3ff";
+        ctx.fillRect(ix - 2, iy + 1, 8, 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(ix + 4, iy + 1, 2, 2);
+        for (let k = 1; k < 5; k++) {
+          ctx.fillStyle = ICE[k % 4];
+          ctx.fillRect(ix - 3 - k * 4, iy + ((k * 3) % 4), 2, 1);
+        }
+      }
+      ctx.restore();
+      ctx.fillStyle = picked ? "#ffffff" : "#9b8fa6";
+      ctx.fillText(i === 0 ? "FIRE" : "ICE", bx + bw / 2, by + bh + 6);
+      ctx.fillText(i === 0 ? "BOUNCES" : "STRAIGHT", bx + bw / 2, by + bh + 16);
+    }
+    if (Math.floor(s.t * 2) % 2 === 0) {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText("< > PICK, OK TO FIGHT", W / 2, H - 20);
+    }
+  };
+
   const draw = (ctx: CanvasRenderingContext2D) => {
     const s = state.current;
 
@@ -1610,6 +2748,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (s.shake > 0) ctx.translate(Math.round(rand(-2, 2)), Math.round(rand(-2, 2)));
 
     drawBackground(ctx, viewZone);
+    if (!s.inBonus && cam < 0) drawGoatsSign(ctx, cam);
+    if (!s.inBonus) drawCloudIslands(ctx, cam);
 
     const firstCol = Math.floor(cam / T);
 
@@ -1623,10 +2763,17 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (c.block2 >= 0) drawBrick(ctx, x, c.block2 * T, c.zone);
       if (c.line >= 0) {
         const ly = c.line * T;
+        const blinking = c.crumble > 0 && Math.floor(s.t * (c.crumble < 1 ? 16 : 8)) % 2 === 0;
         ctx.fillStyle = INK;
         ctx.fillRect(x, ly, T, c.lineTh + 1);
-        ctx.fillStyle = c.zone === VOID_ZONE ? LIGHT_GREEN : PINK;
+        ctx.fillStyle = blinking ? "#ffffff" : c.zone === VOID_ZONE ? LIGHT_GREEN : c.fragile > 0 ? "#ff5fe0" : PINK;
         ctx.fillRect(x, ly, T, c.lineTh);
+        // vanishing lines get little dashes so you can spot them
+        if (c.fragile > 0 && !blinking) {
+          ctx.fillStyle = INK;
+          ctx.fillRect(x + 4, ly, 1, c.lineTh);
+          ctx.fillRect(x + 11, ly, 1, c.lineTh);
+        }
       }
       if (c.bonus >= 0) {
         const by = c.bonus * T - (c.bump > 0 ? Math.round(Math.sin((c.bump / 0.15) * Math.PI) * 4) : 0);
@@ -1650,7 +2797,24 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
     // Leaves and hearts
     for (const l of s.leaves) {
-      drawPixels(ctx, LEAF, l.x - cam, l.y + Math.round(Math.sin(s.t * 4 + l.x) * 2), { G: GREEN, D: DARK_GREEN }, 2);
+      if (l.small) {
+        drawPixels(ctx, LEAF, l.x - cam, l.y + Math.round(Math.sin(s.t * 4 + l.x * 0.05)), { G: LIGHT_GREEN, D: GREEN }, 1);
+      } else {
+        drawPixels(ctx, LEAF, l.x - cam, l.y + Math.round(Math.sin(s.t * 4 + l.x) * 2), { G: GREEN, D: DARK_GREEN }, 2);
+      }
+    }
+    // The secret jetpack, floating on its shelf
+    if (s.jetItem) {
+      const ji = s.jetItem;
+      const jx = Math.round(ji.x - cam);
+      const jy = ji.y - Math.round(Math.abs(Math.sin(s.t * 3)) * 3);
+      drawPixels(ctx, JETPACK, jx, jy, { K: INK, P: PINK, p: DARK_PINK, W: "#ffffff", g: "#78788a" }, 2);
+      if (Math.floor(s.t * 4) % 2 === 0) {
+        ctx.fillStyle = "#ffc800";
+        ctx.fillRect(jx - 4, jy + 2, 2, 2);
+        ctx.fillRect(jx + 20, jy + 8, 2, 2);
+        ctx.fillRect(jx + 8, jy - 5, 2, 2);
+      }
     }
     for (const h of s.hearts) {
       const bob = Math.round(Math.sin(s.t * 5 + h.x) * 2);
@@ -1658,12 +2822,33 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       drawPixels(ctx, HEART, h.x - cam, h.y + bob, { P: Math.floor(s.t * 4) % 2 === 0 ? PINK : "#ff5fe0" }, 2);
     }
 
+    // The golden leaf: spins (squashes side to side) and sparkles
+    if (s.goldLeaf) {
+      const gl = s.goldLeaf;
+      const spin = Math.cos(s.t * 3);
+      const cx = gl.x - cam + 7;
+      const cy = gl.y + 7 + Math.round(Math.sin(s.t * 2.5) * 2);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(Math.max(0.15, Math.abs(spin)), 1);
+      drawPixels(ctx, LEAF, -8, -8, { G: "#b8860b", D: "#b8860b" }, 2); // dark edge
+      drawPixels(ctx, LEAF, -7, -7, { G: spin > 0 ? "#ffd700" : "#ffe866", D: "#b8860b" }, 2);
+      ctx.restore();
+      ctx.fillStyle = "#fff3a0";
+      for (let k = 0; k < 4; k++) {
+        const a = s.t * 2 + (k * Math.PI) / 2;
+        if ((Math.floor(s.t * 6) + k) % 2 === 0) ctx.fillRect(Math.round(cx + Math.cos(a) * 12), Math.round(cy + Math.sin(a) * 12), 2, 2);
+      }
+    }
+
     // Flaming weed leaves (the power-up)
     for (const pu of s.powerups) {
       const x = pu.x - cam;
-      drawPixels(ctx, LEAF, x, pu.y, { G: "#ff7a00", D: "#d21e1e" }, 2);
+      const [main, dark] = POWER_COLORS[pu.kind];
+      const sparks = pu.kind === "fire" ? FIRE : pu.kind === "ice" ? ICE : TURQ;
+      drawPixels(ctx, LEAF, x, pu.y, { G: main, D: dark }, 2);
       for (let k = 0; k < 3; k++) {
-        ctx.fillStyle = FIRE[(Math.floor(s.t * 12) + k) % 3];
+        ctx.fillStyle = sparks[(Math.floor(s.t * 12) + k) % 3];
         ctx.fillRect(Math.round(x + 2 + k * 4 + rand(-1, 1)), Math.round(pu.y - 3 - rand(0, 3)), 2, 2);
       }
     }
@@ -1672,6 +2857,16 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     for (const f of s.fireballs) {
       const x = Math.round(f.x - cam);
       const y = Math.round(f.y);
+      if (f.ice) {
+        // a straight icy streak
+        ctx.fillStyle = "#1d4fa8";
+        ctx.fillRect(x - 3, y, 10, 4);
+        ctx.fillStyle = "#4aa3ff";
+        ctx.fillRect(x - 2, y + 1, 8, 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(f.vx > 0 ? x + 4 : x - 2, y + 1, 2, 2);
+        continue;
+      }
       ctx.fillStyle = "#ff7a00";
       ctx.fillRect(x, y, 5, 5);
       ctx.fillStyle = "#ffc800";
@@ -1700,9 +2895,44 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
     }
 
+    // The troll, with wiggly green stink lines around him
+    if (s.boss) {
+      const b = s.boss;
+      const bx = Math.round(b.x - cam);
+      const walking = Math.abs(b.vx) > 5 && b.vy === 0;
+      const by = Math.round(b.y) - (walking && Math.floor(s.t * 6) % 2 === 0 ? 1 : 0);
+      for (let k = 0; k < 4; k++) {
+        const lx = bx + 2 + k * 13;
+        const rise = (s.t * 14 + k * 5) % 10;
+        for (let j = 0; j < 7; j++) {
+          ctx.fillStyle = j % 2 === 0 ? "#7fc24a" : "#4e8f2a";
+          ctx.fillRect(Math.round(lx + Math.sin(s.t * 7 + j * 0.9 + k) * 2), Math.round(by + 4 - rise - j * 2), 1, 2);
+        }
+      }
+      const flash = (b.hit > 0 && Math.floor(s.t * 20) % 2 === 0) || (b.dead > 0 && Math.floor(s.t * 14) % 2 === 0);
+      const colors = flash ? Object.fromEntries(Object.keys(TROLL_COLORS).map((k) => [k, "#ffffff"])) : TROLL_COLORS;
+      drawPixels(ctx, b.facing > 0 ? TROLL_RIGHT : TROLL, bx, by, colors, 2);
+      // little health bar over his head
+      if (b.dead <= 0) {
+        ctx.fillStyle = INK;
+        ctx.fillRect(bx + 6, by - 7, 32, 4);
+        ctx.fillStyle = "#9b8fa6";
+        ctx.fillRect(bx + 7, by - 6, 30, 2);
+        ctx.fillStyle = LIGHT_GREEN;
+        ctx.fillRect(bx + 7, by - 6, Math.round((30 * Math.max(0, b.hp)) / b.maxHp), 2);
+      }
+      // a drip hanging off his tongue now and then
+      if (!flash && Math.floor(s.t * 3) % 2 === 0) {
+        ctx.fillStyle = TROLL_COLORS.T;
+        const tx = b.facing > 0 ? bx + TR_W - 12 : bx + 6;
+        ctx.fillRect(tx, by + 26, 6, 2);
+      }
+    }
+
     // You
     const blinking = s.invuln > 0 && Math.floor(s.t * 12) % 2 === 0;
-    if ((s.mode === "ready" || s.mode === "running" || s.mode === "pipe") && !blinking) {
+    const showYou = ["ready", "running", "pipe", "golden", "choose", "paused"].includes(s.mode);
+    if (showYou && !blinking) {
       const sprite = spriteRef.current;
       const frame = s.onGround && Math.abs(s.vx) > 5 ? Math.floor(s.runAnim * 10) % 2 : 0;
       const x = Math.round(s.x - cam);
@@ -1714,6 +2944,15 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         ctx.beginPath();
         ctx.rect(0, 0, W, c.ground * T);
         ctx.clip();
+      }
+      // Jetpack on your back
+      if (s.jetpack) {
+        const bx = s.facing > 0 ? x + 2 : x + SPRITE_W - 7;
+        const by = y + 13;
+        drawPixels(ctx, JET_SMALL, bx, by, { K: INK, P: PINK, p: DARK_PINK, W: "#ffffff", g: "#78788a" }, 1);
+        if (s.flying && Math.floor(s.t * 20) % 2 === 0) {
+          drawPixels(ctx, JET_SMALL_FLAME, bx, by + 8, { O: "#ff7a00", Y: "#ffc800" }, 1);
+        }
       }
       if (sprite && sprite.complete && sprite.naturalWidth > 0) {
         if (s.facing < 0) {
@@ -1765,26 +3004,71 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
 
     // Fire power: 5 fireball icons + a blinking orange timer bar along the bottom
-    if (hasFire()) {
-      for (let i = 0; i < FIRE_AMMO; i++) {
-        const x = W / 2 - 15 + i * 6;
-        ctx.fillStyle = i < s.ammo ? "#ff7a00" : "#9b8fa6";
+    if (hasFire() && s.ammo > 5) {
+      // lots of shots (boss fight): one icon and the number
+      const ice = s.power === "ice";
+      ctx.fillStyle = ice ? "#4aa3ff" : "#ff7a00";
+      ctx.fillRect(W / 2 - 36, 14, 4, 4);
+      ctx.fillStyle = ice ? "#ffffff" : "#ffc800";
+      ctx.fillRect(W / 2 - 35, 15, 2, 2);
+      ctx.fillStyle = hudInk;
+      ctx.textAlign = "left";
+      ctx.fillText(`x${s.ammo}`, W / 2 - 30, 13);
+    } else if (hasFire()) {
+      const ice = s.power === "ice";
+      for (let i = 0; i < 5; i++) {
+        const x = W / 2 - 36 + i * 6;
+        ctx.fillStyle = i < s.ammo ? (ice ? "#4aa3ff" : "#ff7a00") : "#9b8fa6";
         ctx.fillRect(x, 14, 4, 4);
         if (i < s.ammo) {
-          ctx.fillStyle = "#ffc800";
+          ctx.fillStyle = ice ? "#ffffff" : "#ffc800";
           ctx.fillRect(x + 1, 15, 2, 2);
         }
       }
+    }
+    // Double jumps left: turquoise cubes
+    for (let i = 0; i < s.doubleJumps; i++) {
+      const x = W / 2 + 10 + i * 7;
+      ctx.fillStyle = "#138a7a";
+      ctx.fillRect(x, 14, 5, 5);
+      ctx.fillStyle = "#3de0c8";
+      ctx.fillRect(x, 14, 4, 4);
+    }
+    // Troll health bar
+    if (s.boss && s.bossState === "fight") {
+      const b = s.boss;
+      ctx.fillStyle = hudInk;
+      ctx.textAlign = "left";
+      ctx.fillText(s.bossCount === 0 ? "TROLL" : `TROLL ${s.bossCount + 1}`, W / 2 - 60, 25);
+      const bw = 72;
+      const bx = W / 2 + 6;
+      ctx.fillStyle = INK;
+      ctx.fillRect(bx - 1, 25, bw + 2, 8);
+      ctx.fillStyle = "#9b8fa6";
+      ctx.fillRect(bx, 26, bw, 6);
+      const part = Math.max(0, b.hp) / b.maxHp;
+      ctx.fillStyle = part > 0.5 ? LIGHT_GREEN : part > 0.25 ? "#ffc800" : "#e0303a";
+      ctx.fillRect(bx, 26, Math.round(bw * part), 6);
+      ctx.fillStyle = "rgba(255,255,255,0.5)";
+      ctx.fillRect(bx, 26, Math.round(bw * part), 1);
+    }
+    // Jetpack: a little icon under the score while you have it
+    if (s.jetpack) {
+      drawPixels(ctx, JETPACK, 22, 16, { K: hudInk, P: PINK, p: DARK_PINK, W: "#ffffff", g: "#78788a" }, 1);
+    }
+    if (hasFire() && s.power === "fire" && s.bossState !== "fight") {
       const left = s.fireTime / FIRE_TIME;
       const low = s.fireTime < 4;
       const barOn = !low || Math.floor(s.t * 8) % 2 === 0;
       ctx.fillStyle = INK;
-      ctx.fillRect(8, H - 6, W - 16, 4);
+      ctx.fillRect(8, H - 12, W - 16, 4);
       if (barOn) {
         ctx.fillStyle = Math.floor(s.t * 6) % 2 === 0 ? "#ff7a00" : "#ffc800";
-        ctx.fillRect(9, H - 5, Math.max(0, Math.round((W - 18) * left)), 2);
+        ctx.fillRect(9, H - 11, Math.max(0, Math.round((W - 18) * left)), 2);
       }
     }
+
+    if (s.mode !== "ready") drawProgress(ctx);
 
     // Messages
     const blink = Math.floor(s.t * 2) % 2 === 0;
@@ -1796,13 +3080,29 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (boardStatusRef.current === "ok" && top) textBox(ctx, `#1 ${top.name} ${pad(top.score)}`, 70);
     } else if ((s.mode === "running" || s.mode === "pipe") && s.flash > 0) {
       textBox(ctx, s.flashText, 36);
+    } else if (s.mode === "dying") {
+      textBox(ctx, "GAME OVER", 40);
+      if (s.t - s.deadAt > 0.4) textBox(ctx, "OH MY GOD, THEY KILLED PINKMANE!", 58);
+      if (s.t - s.deadAt > 1.2) textBox(ctx, "YOU BASTARDS!", 72);
     } else if (s.mode === "entry") {
       textBox(ctx, "NEW TOP 10 SCORE!", 30);
-      textBox(ctx, pad(s.score), 44);
+      textBox(ctx, `YOU SMOKED ${Math.floor(s.score)} GRAMS`, 44);
+    }
+    // "How to use it" hint the first time you get a power-up
+    if (s.mode === "running" && s.hintTime > 0 && s.flash <= 0) {
+      textBox(ctx, s.hintText, 52);
     }
     // Hint on top of an unused pipe
     if (s.mode === "running" && pipeUnderFeet() >= 0 && blink) {
       textBox(ctx, s.inBonus ? "PRESS DOWN TO LEAVE" : "PRESS DOWN TO ENTER", 88);
+    }
+
+    if (s.mode === "choose") drawSpellPick(ctx);
+    if (s.mode === "paused") {
+      ctx.fillStyle = "rgba(22, 12, 29, 0.7)";
+      ctx.fillRect(0, 0, W, H);
+      textBox(ctx, "PAUSED", 60);
+      if (blink) textBox(ctx, "ESC TO CONTINUE", 80);
     }
   };
 
@@ -1817,6 +3117,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const sprite = new Image();
     sprite.src = "/game/pinkdude.png";
     spriteRef.current = sprite;
+    const ship = new Image();
+    ship.src = "/game/ghostship.png";
+    shipRef.current = ship;
     deathSoundRef.current = new Audio(DEATH_SOUND);
 
     // Owner code: open the site once with ?owner=YOURCODE on each of your devices
@@ -1851,8 +3154,22 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       const k = e.key;
+      const mode = state.current.mode;
+      // Esc (or P) pauses / unpauses
+      if (k === "Escape" || k === "p" || k === "P") {
+        if (mode === "running") pauseGame();
+        else if (mode === "paused") resumeGame();
+        return;
+      }
+      // Picking a spell before a boss fight
+      if (mode === "choose") {
+        if (k === "ArrowLeft" || k === "a" || k === "A") state.current.spellChoice = 0;
+        if (k === "ArrowRight" || k === "d" || k === "D") state.current.spellChoice = 1;
+        return;
+      }
       if (k === "ArrowLeft" || k === "a" || k === "A") heldRef.current.left = true;
       if (k === "ArrowRight" || k === "d" || k === "D") heldRef.current.right = true;
+      if (k === " " || k === "ArrowUp" || k === "w" || k === "W") heldRef.current.up = true;
       if (k === "ArrowUp" || k === "w" || k === "W") jump();
       if (k === "ArrowDown" || k === "s" || k === "S") down();
       if (k === "f" || k === "F" || k === "x" || k === "X") shoot();
@@ -1862,9 +3179,18 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       const k = e.key;
       if (k === "ArrowLeft" || k === "a" || k === "A") heldRef.current.left = false;
       if (k === "ArrowRight" || k === "d" || k === "D") heldRef.current.right = false;
+      if (k === " " || k === "ArrowUp" || k === "w" || k === "W") heldRef.current.up = false;
+    };
+    // Let go of everything if the window loses focus (so you don't keep flying or walking)
+    // (and pause the game if it was running)
+    const releaseAll = () => {
+      heldRef.current = { left: false, right: false, up: false };
+      touchUpRef.current = false;
+      pauseGame();
     };
     window.addEventListener("keydown", keyDown);
     window.addEventListener("keyup", keyUp);
+    window.addEventListener("blur", releaseAll);
 
     let raf = 0;
     let last = performance.now();
@@ -1880,7 +3206,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       cancelAnimationFrame(raf);
       window.removeEventListener("keydown", keyDown);
       window.removeEventListener("keyup", keyUp);
+      window.removeEventListener("blur", releaseAll);
       audioCtxRef.current?.close().catch(() => {});
+      stopStutters();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1918,6 +3246,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           }
           const mode = state.current.mode;
           if (mode === "entry") return;
+          if (mode === "choose") {
+            state.current.spellChoice = cx < W / 2 ? 0 : 1;
+            pickSpell(state.current.spellChoice);
+            return;
+          }
           if (mode !== "running") {
             press();
             return;
@@ -1931,14 +3264,19 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           } else if (cy > H * 0.6) {
             down();
           } else {
+            // tap = jump, keep holding = fly (with the jetpack)
+            e.currentTarget.setPointerCapture(e.pointerId);
+            touchUpRef.current = true;
             jump();
           }
         }}
         onPointerUp={() => {
           touchRef.current = 0;
+          touchUpRef.current = false;
         }}
         onPointerCancel={() => {
           touchRef.current = 0;
+          touchUpRef.current = false;
         }}
         style={{
           position: "absolute",
@@ -1952,6 +3290,44 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           cursor: "pointer",
         }}
       />
+
+      {showGolden && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 11,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "10px",
+            padding: "8px",
+            textAlign: "center",
+            background: "rgba(22, 12, 29, 0.88)",
+            fontFamily,
+            color: "#fff",
+          }}
+        >
+          <div style={{ fontSize: "clamp(10px, 3vw, 15px)", color: "#ffd700" }}>YOU FOUND THE GOLDEN LEAF!</div>
+          <div style={{ fontSize: "clamp(8px, 2.2vw, 11px)", color: "#ffd700" }}>+{PTS_GOLD} GRAMS</div>
+          <div style={{ fontSize: "clamp(8px, 2.2vw, 11px)", lineHeight: 1.6 }}>
+            SECRET TRACK: STUTTERS REMIX
+            <br />
+            NOW PLAYING IN THE VOID
+          </div>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
+            {STUTTERS_LINK && (
+              <button onClick={() => closeGolden(true)} style={{ ...buttonStyle, background: "#ffd700", color: INK }}>
+                GET THE PRIVATE LINK
+              </button>
+            )}
+            <button onClick={() => closeGolden(false)} style={{ ...buttonStyle, background: "#bbb", color: INK }}>
+              {goldBefore ? "SKIP, GOT IT ALREADY" : "SKIP"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {showEntry && (
         <div
