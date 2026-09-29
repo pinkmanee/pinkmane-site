@@ -101,9 +101,9 @@ const ICE_SPEED = 230;
 // Double-jump leaf (turquoise, rarest): 3 extra jumps in mid-air
 const DOUBLE_JUMPS = 3;
 
-// Secret at the very start: walk LEFT instead of right. There's a jetpack and a sign.
-// Hold jump to fly. It runs out once you reach this score.
-const EGG_COLS = 16; // how many tiles the hidden area has to the left of the start
+// Secret at the very start: walk LEFT instead of right. There's a jetpack and two signs
+// (one before the jetpack, one further left behind it). Hold jump to fly. It runs out once you reach this score.
+const EGG_COLS = 26; // how many tiles the hidden area has to the left of the start
 const JET_UNTIL = 2000;
 const JET_THRUST = 1900;
 const JET_MAX_UP = -165;
@@ -136,7 +136,9 @@ const TR_HY = 10;
 const TR_HW = 28;
 const TR_HH = 38;
 
-const MY_GOATS = ["LIL PEEP", "YUNG LEAN", "GHOSTEMANE", "SMOKEDOPE2016", "TOMBFELL", "LEOHWASFOUND"];
+const MY_GOATS = ["LIL PEEP", "YUNG LEAN", "GHOSTEMANE", "SMOKEDOPE2016", "DRIPPIN SO PRETTY"];
+// Second sign, further left behind the jetpack
+const SHOUT_OUTS = ["TOMBFELL", "O1M4DE", "LEOHWASFOUND", "STUTTERS", "SLITFACE", "SALADE", "LIL SAD K"];
 
 // Points
 const PTS_LEAF = 10;
@@ -2232,11 +2234,30 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     branch(x, baseY, height, -Math.PI / 2 + (hash(seed) - 0.5) * 0.3, 4, 0);
   };
 
-  // The sign in the secret area at the start
-  const drawGoatsSign = (ctx: CanvasRenderingContext2D, cam: number) => {
-    const w = 124;
-    const h = 74;
-    const x = Math.round(-10 * T - cam);
+  // A sign in the secret area at the start. colX is which tile column (negative = left of start)
+  // its left edge sits at. header is optional; without one the sign just shows the names.
+  const drawSecretSign = (
+    ctx: CanvasRenderingContext2D,
+    cam: number,
+    colX: number,
+    names: string[],
+    header?: string
+  ) => {
+    ctx.font = `8px ${fontFamily}`;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "center";
+    const padX = 16;
+    const lineH = 9;
+    const measureList = header ? [header, ...names] : names;
+    let maxW = 0;
+    measureList.forEach((n) => {
+      const mw = ctx.measureText(n).width;
+      if (mw > maxW) maxW = mw;
+    });
+    const w = Math.max(124, Math.ceil(maxW) + padX * 2);
+    const namesTop = header ? 18 : 8;
+    const h = namesTop + names.length * lineH + 8;
+    const x = Math.round(colX * T - cam);
     const y = 22;
     ctx.fillStyle = INK;
     ctx.fillRect(x + 14, y + h, 4, 8 * T - y - h);
@@ -2244,13 +2265,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     ctx.fillRect(x, y, w, h);
     ctx.fillStyle = DARK_PINK;
     ctx.fillRect(x + 2, y + 2, w - 4, h - 4);
-    ctx.font = `8px ${fontFamily}`;
-    ctx.textBaseline = "top";
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#ffc800";
-    ctx.fillText("MY GOATS:", x + w / 2, y + 6);
+    if (header) {
+      ctx.fillStyle = "#ffc800";
+      ctx.fillText(header, x + w / 2, y + 6);
+    }
     ctx.fillStyle = "#ffffff";
-    MY_GOATS.forEach((n, i) => ctx.fillText(n, x + w / 2, y + 18 + i * 9));
+    names.forEach((n, i) => ctx.fillText(n, x + w / 2, y + namesTop + i * lineH));
   };
 
   // Background for each zone (moves slower than the level, so it feels far away)
@@ -2748,7 +2768,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (s.shake > 0) ctx.translate(Math.round(rand(-2, 2)), Math.round(rand(-2, 2)));
 
     drawBackground(ctx, viewZone);
-    if (!s.inBonus && cam < 0) drawGoatsSign(ctx, cam);
+    if (!s.inBonus && cam < 0) {
+      drawSecretSign(ctx, cam, -10, MY_GOATS);
+      drawSecretSign(ctx, cam, -22, SHOUT_OUTS, "SHOUT OUT:");
+    }
     if (!s.inBonus) drawCloudIslands(ctx, cam);
 
     const firstCol = Math.floor(cam / T);
@@ -2808,6 +2831,17 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       const ji = s.jetItem;
       const jx = Math.round(ji.x - cam);
       const jy = ji.y - Math.round(Math.abs(Math.sin(s.t * 3)) * 3);
+      // Ghostly "MY GOATS" label floating above the jetpack, pulsing like a spirit
+      const ghostAlpha = 0.5 + Math.sin(s.t * 2) * 0.25;
+      ctx.save();
+      ctx.font = `8px ${fontFamily}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.shadowColor = "rgba(190,255,225,0.9)";
+      ctx.shadowBlur = 6;
+      ctx.fillStyle = `rgba(225,255,240,${ghostAlpha})`;
+      ctx.fillText("MY GOATS", jx + 9, jy - 8);
+      ctx.restore();
       drawPixels(ctx, JETPACK, jx, jy, { K: INK, P: PINK, p: DARK_PINK, W: "#ffffff", g: "#78788a" }, 2);
       if (Math.floor(s.t * 4) % 2 === 0) {
         ctx.fillStyle = "#ffc800";

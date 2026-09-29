@@ -458,11 +458,10 @@ export default function Home() {
   const rotationAccum = useRef(0);
 
   const menus = {
-    main: ["Music", "Socials", "Merch", "Extras"],
+    main: ["Music", "Socials", "Merch", "Games"],
     music: ["SoundCloud", "Spotify", "Apple Music", "Bandcamp", "Back"],
-    socials: ["Instagram", "Twitch", "Back"],
+    socials: ["Instagram", "Twitch", "Releases", "Back"],
     releases: ["TOPSHELF", "Back"],
-    extras: ["Releases", "Games", "Back"],
     games: [
       "Super Pinkmane",
       "Pink Hexagon",
@@ -577,15 +576,15 @@ export default function Home() {
       setSelected({ super: 0, hex: 1, maze: 2, vortex: 3, snake: 4, bird: 5, pinkrun: 6 }[activeGame]);
       return;
     }
-    // Games and Releases live inside Extras, so going back returns there
+    // Games lives on the main menu now; Releases lives inside Socials
     if (menu === "games") {
-      setMenu("extras");
-      setSelected(1);
+      setMenu("main");
+      setSelected(3);
       return;
     }
     if (menu === "releases") {
-      setMenu("extras");
-      setSelected(0);
+      setMenu("socials");
+      setSelected(2);
       return;
     }
     setMenu("main");
@@ -625,8 +624,8 @@ export default function Home() {
         setMenu("socials");
         setSelected(0);
       }
-      if (item === "Extras") {
-        setMenu("extras");
+      if (item === "Games") {
+        setMenu("games");
         setSelected(0);
       }
     }
@@ -660,22 +659,14 @@ export default function Home() {
       if (item === "Twitch") {
         window.open("https://www.twitch.tv/pinkmanee", "_blank");
       }
-      if (item === "Back") goBack();
-    }
-
-    if (menu === "releases") {
-      if (item === "Back") goBack();
-    }
-
-    if (menu === "extras") {
-      if (item === "Games") {
-        setMenu("games");
-        setSelected(0);
-      }
       if (item === "Releases") {
         setMenu("releases");
         setSelected(0);
       }
+      if (item === "Back") goBack();
+    }
+
+    if (menu === "releases") {
       if (item === "Back") goBack();
     }
 
@@ -1376,9 +1367,11 @@ activeGame === "maze" ? (
             >
               {visibleItems.map((item, i) => {
                 const index = listStart + i;
+                const isMane = item === "Super Pinkmane";
                 return (
                 <div
                   key={`${menu}-${index}`}
+                  className={isMane ? "mane-highlight" : undefined}
                   style={{
                     position: "relative",
                     padding: "10px",
@@ -1388,8 +1381,9 @@ activeGame === "maze" ? (
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
-                    background: selected === index ? "black" : "transparent",
-                    color: selected === index ? "white" : "black",
+                    background: selected === index ? "black" : isMane ? "#d63cc8" : "transparent",
+                    color: selected === index ? "white" : isMane ? "white" : "black",
+                    fontWeight: isMane ? "bold" : "normal",
                     borderBottom:
                       i !== visibleItems.length - 1
                         ? selected === index || selected === index + 1
@@ -1399,7 +1393,9 @@ activeGame === "maze" ? (
                   }}
                 >
                   {selected === index ? "> " : ""}
+                  {isMane ? "✦ " : ""}
                   {item}
+                  {isMane ? " ✦" : ""}
 
                   {selected === index && ITEM_ICONS[item] && (
                     <img
@@ -2748,6 +2744,25 @@ activeGame === "maze" ? (
           }
           to {
             transform: translateX(-50%);
+          }
+        }
+
+        /* The mane game (Super Pinkmane) in the Games menu: pink, glowing, unmissable */
+        .mane-highlight::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          box-shadow: inset 0 0 0 2px #ff8ff0, 0 0 10px 2px rgba(214, 60, 200, 0.65);
+          animation: manePulse 1.4s ease-in-out infinite;
+        }
+        @keyframes manePulse {
+          0%,
+          100% {
+            opacity: 0.55;
+          }
+          50% {
+            opacity: 1;
           }
         }
 
