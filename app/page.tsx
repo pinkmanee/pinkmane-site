@@ -139,21 +139,33 @@ const ITEM_ICONS: Record<string, string> = {
   Back: "/icons/arrow.gif",
 };
 
-// Sync visual effects to your track's tempo
-const BPM = 140;
-const BEAT_SECONDS = 60 / BPM; // ~0.429s per beat
+// BEAT SYNC: everything that wiggles on the site moves to the song that's playing.
+// For each song, fill in:
+//   bpm    = the tempo from your project (use half, e.g. 70 instead of 140, if you want half-time bounce)
+//   offset = seconds from the start of the file to the first beat (0 if the song starts right on the beat)
+// Songs without a bpm use DEFAULT_BPM.
+const DEFAULT_BPM = 140;
+// If everything feels a tiny bit early or late on your speakers, change this (in seconds).
+// Bigger number = the visuals hit later. Try steps of 0.02. Bluetooth headphones often need about 0.15.
+const SYNC_NUDGE = 0;
+// BASS QUAKE slider: 0 = off, 10 = max. Visitors can change it; this is where it starts.
+const QUAKE_DEFAULT = 5;
+// The shaking border around the screen: how thick it is (in screen pixels, ~57 = about 1.5 cm)
+const EDGE_BAND_PX = 57;
+// How far the border shakes on an 808 at level 10 (in screen pixels)
+const EDGE_MAX_SHAKE_PX = 10;
 
 // Your songs. Files go in public/music/ named 01.mp3, 02.mp3 ...
-const TRACKS = [
-  { title: "pinkmane's random ass beat", file: "/sounds/song.mp3" },
-  { title: "wet socks (w/ o1m4de)", file: "/music/06.mp3" },
-  { title: "hurricane of blades", file: "/music/07.mp3" },
-  { title: "cat piss kenny", file: "/music/10.mp3" },
-  { title: "gaf (ft. TOMBFELL)", file: "/music/05.mp3" },
-  { title: "snehulienka", file: "/music/03.mp3" },
-  { title: "small pretty titties", file: "/music/01.mp3" },
-  { title: "vomit trap", file: "/music/08.mp3" },
-  { title: "gods psp (ft. TOMBFELL)", file: "/music/09.mp3" },
+const TRACKS: { title: string; file: string; bpm?: number; offset?: number }[] = [
+  { title: "pinkmane's random ass beat", file: "/sounds/song.mp3", bpm: 140, offset: 0 },
+  { title: "wet socks (w/ o1m4de)", file: "/music/06.mp3", bpm: 82, offset: 0 },
+  { title: "hurricane of blades", file: "/music/07.mp3", bpm: 77, offset: 0 },
+  { title: "cat piss kenny", file: "/music/10.mp3", bpm: 142, offset: 0 },
+  { title: "gaf (ft. TOMBFELL)", file: "/music/05.mp3", bpm: 138, offset: 0 },
+  { title: "snehulienka", file: "/music/03.mp3", bpm: 140, offset: 0 },
+  { title: "small pretty titties", file: "/music/01.mp3", bpm: 140, offset: 0 },
+  { title: "vomit trap", file: "/music/08.mp3", bpm: 140, offset: 0 },
+  { title: "gods psp (ft. TOMBFELL)", file: "/music/09.mp3", bpm: 140, offset: 0 },
 ];
 
 // How many menu rows fit on the screen at once
@@ -177,7 +189,7 @@ const STRUCTURED_DATA = {
   url: "https://pinkmane.site",
   genre: ["Cloud rap", "Trap"],
   description:
-    "PINKMANE is a cloud rap and trap artist. Music on Spotify, Apple Music, SoundCloud and Bandcamp.",
+    "PINKMANE is an artist and producer who codes and makes music in their free time. Cloud rap and trap, made mostly with Serum 2. Music on Spotify, Apple Music, SoundCloud and Bandcamp.",
   sameAs: ARTIST_LINKS.map((link) => link.url),
 };
 
@@ -354,6 +366,196 @@ const DpadArrow = ({ dir }: { dir: "up" | "down" | "left" | "right" }) => {
 };
 
 // Small dancing bars next to the mute button, pulsing on the beat
+// WIGGLY BACKGROUND: the background picture gently wiggles like heat haze / water
+// (the same wiggle as the covers in Super Pinkmane), and a ~1.5 cm border around the
+// edge of the screen shakes when an 808 hits. The middle never shakes.
+// If a browser can't do it, the normal still picture just shows instead.
+// WIGGLE_PX: how far the wiggle moves the picture sideways (0 = no wiggle)
+const WIGGLE_PX = 5;
+const MAIN_BG_SOURCES = ["/topshelf.png"];
+// Handheld: your handheld-bg.png, or .jpg, or the normal one, whichever exists first
+const HH_BG_SOURCES = ["/handheld-bg.png", "/handheld-bg.jpg", "/topshelf.png"];
+
+type BeatState = { kick: number; sway: number; bass: number; quake: number };
+
+const LIQUID_VERT = `
+attribute vec2 pos;
+varying vec2 uv;
+void main() {
+  uv = pos * 0.5 + 0.5;
+  uv.y = 1.0 - uv.y;
+  gl_Position = vec4(pos, 0.0, 1.0);
+}`;
+
+const LIQUID_FRAG = `
+precision mediump float;
+varying vec2 uv;
+uniform sampler2D img;
+uniform vec2 res;
+uniform vec2 imgSize;
+uniform float t;
+uniform float pxScale;
+uniform float wiggle;
+uniform float band;
+uniform vec2 shake;
+void main() {
+  // work in screen pixels
+  vec2 px = uv * res / pxScale;
+  vec2 size = res / pxScale;
+
+  // wiggle: every row slides left/right a little on a slow wave (like the game covers)
+  vec2 off = vec2(sin(t * 1.6 + px.y * 0.023) * wiggle, 0.0);
+
+  // 808 border: only a band around the edge of the screen shakes, fading out towards the middle
+  float edgeDist = min(min(px.x, size.x - px.x), min(px.y, size.y - px.y));
+  float mask = 1.0 - smoothstep(band * 0.6, band, edgeDist);
+  off += shake * mask;
+
+  vec2 p = uv + off / size;
+  // zoom in a hair so the wiggle never shows the picture's edge
+  float pad = 1.0 - 2.0 * (wiggle + 12.0) / size.x;
+  p = (p - 0.5) * pad + 0.5;
+
+  // fit the picture to fill the screen (like background-size: cover)
+  float rs = res.x / res.y;
+  float ri = imgSize.x / imgSize.y;
+  vec2 sc = rs > ri ? vec2(1.0, ri / rs) : vec2(rs / ri, 1.0);
+  gl_FragColor = vec4(texture2D(img, (p - 0.5) * sc + 0.5).rgb, 1.0);
+}`;
+
+function LiquidBg({ sources, beat, active }: { sources: string[]; beat: { current: BeatState }; active: boolean }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const activeRef = useRef(active);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // A brand new canvas every time, so a closed one is never reused
+    // (this is why it didn't show up while testing locally before)
+    const canvas = document.createElement("canvas");
+    canvas.className = "liquid-canvas";
+    wrap.appendChild(canvas);
+    const gl = canvas.getContext("webgl", { alpha: false, antialias: false });
+    if (!gl) {
+      canvas.remove();
+      return;
+    }
+
+    const compile = (type: number, code: string) => {
+      const sh = gl.createShader(type);
+      if (!sh) return null;
+      gl.shaderSource(sh, code);
+      gl.compileShader(sh);
+      return gl.getShaderParameter(sh, gl.COMPILE_STATUS) ? sh : null;
+    };
+    const vs = compile(gl.VERTEX_SHADER, LIQUID_VERT);
+    const fs = compile(gl.FRAGMENT_SHADER, LIQUID_FRAG);
+    const prog = gl.createProgram();
+    if (!vs || !fs || !prog) return;
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return;
+    gl.useProgram(prog);
+
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const posLoc = gl.getAttribLocation(prog, "pos");
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    const u = (name: string) => gl.getUniformLocation(prog, name);
+    const uRes = u("res");
+    const uImg = u("imgSize");
+    const uT = u("t");
+    const uScale = u("pxScale");
+    const uWiggle = u("wiggle");
+    const uBand = u("band");
+    const uShake = u("shake");
+
+    let cancelled = false;
+    let frame = 0;
+
+    const start = (image: HTMLImageElement) => {
+      // Picture too big for this device's graphics chip: keep the normal still picture
+      const maxSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+      if (image.naturalWidth > maxSize || image.naturalHeight > maxSize) return;
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
+      if (gl.getError() !== gl.NO_ERROR) return;
+      gl.uniform2f(uImg, image.naturalWidth, image.naturalHeight);
+
+      let clock = 0;
+      let prev = performance.now();
+      let shown = false;
+      const draw = (now: number) => {
+        frame = requestAnimationFrame(draw);
+        const dt = Math.min(0.1, (now - prev) / 1000);
+        prev = now;
+        if (!activeRef.current) return; // hidden behind something else: don't waste battery
+        const b = beat.current;
+        clock += dt;
+        // keep it sharp but light: never draw more pixels than the screen shows
+        const w = Math.min(1600, Math.round(canvas.clientWidth * Math.min(1, window.devicePixelRatio || 1)));
+        const h = Math.round((w * canvas.clientHeight) / Math.max(1, canvas.clientWidth));
+        if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.uniform2f(uRes, canvas.width, canvas.height);
+        gl.uniform1f(uT, clock);
+        gl.uniform1f(uScale, canvas.width / Math.max(1, canvas.clientWidth));
+        gl.uniform1f(uWiggle, WIGGLE_PX);
+        gl.uniform1f(uBand, EDGE_BAND_PX);
+        // 808 shake: a new random nudge every frame while the hit lasts
+        const amount = b.bass * b.quake * EDGE_MAX_SHAKE_PX;
+        gl.uniform2f(uShake, (Math.random() * 2 - 1) * amount, (Math.random() * 2 - 1) * amount);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        if (!shown) {
+          shown = true;
+          setReady(true);
+        }
+      };
+      frame = requestAnimationFrame(draw);
+    };
+
+    // Try each picture in order until one loads
+    const load = (i: number) => {
+      if (cancelled || i >= sources.length) return;
+      // window.Image = the browser picture loader (plain "Image" here means the Next.js <Image> component)
+      const image = new window.Image();
+      image.onload = () => {
+        if (!cancelled) start(image);
+      };
+      image.onerror = () => load(i + 1);
+      image.src = sources[i];
+    };
+    load(0);
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      canvas.remove();
+      setReady(false);
+    };
+  }, [sources, beat]);
+
+  return <div ref={wrapRef} className={`liquid-bg ${ready ? "liquid-on" : ""}`} aria-hidden="true" />;
+}
+
 const VuBars = ({ active }: { active: boolean }) => (
   <div className="vu-bars">
     {[0, 1, 2, 3].map((i) => (
@@ -448,6 +650,14 @@ export default function Home() {
   const isFirstRender = useRef(true);
 
   const songRef = useRef<HTMLAudioElement | null>(null);
+  // The whole page; the beat clock writes the beat values onto it
+  const mainRef = useRef<HTMLElement>(null);
+  // The beat numbers, shared with the liquid background
+  const beatRef = useRef<BeatState>({ kick: 0, sway: 0, bass: 0, quake: QUAKE_DEFAULT / 10 });
+  // BASS QUAKE level (0-10) from the slider, and when it was last moved (for a test shake)
+  const [quake, setQuake] = useState(QUAKE_DEFAULT);
+  const quakeRef = useRef(QUAKE_DEFAULT);
+  const quakeTestRef = useRef(-10000);
   const scrollSoundRef = useRef<HTMLAudioElement | null>(null);
   const selectSoundRef = useRef<HTMLAudioElement | null>(null);
   const hasStartedSong = useRef(false);
@@ -828,6 +1038,214 @@ export default function Home() {
     setGlyphs(generated);
   }, []);
 
+  // BEAT CLOCK: about 60 times a second, reads exactly where the song is and turns that into
+  // numbers the CSS uses to move things:
+  //   --kick  jumps to 1 on every beat, then drops back to 0
+  //   --hat   same, but twice per beat (8th notes)
+  //   --sway  swings from 1 to -1 and back, landing on the beats (for side-to-side / up-down wiggles)
+  //   bass    jumps up when the bass actually hits in the song (the browser listens to the low end),
+  //           which makes the border around the screen shake
+  // When the music is paused or muted, things breathe slowly instead.
+  // Remember the visitor's BASS QUAKE level
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("pinkmane-quake");
+      if (saved !== null && !Number.isNaN(Number(saved))) {
+        const v = Math.max(0, Math.min(10, Math.round(Number(saved))));
+        setQuake(v);
+        quakeRef.current = v;
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let frame = 0;
+    let prev = performance.now();
+    let lastAudioTime = -1;
+    let lastAudioAt = 0;
+    let kick = 0;
+    let hat = 0;
+    let sway = 0;
+    // Smoke puffs: --phase goes 0 -> 1 during each beat (0 = right on the beat)
+    let smoke = 0;
+    const shown: Record<string, string> = {};
+
+    // Bass listener. It only switches on once the browser allows sound, so the music never goes quiet.
+    // If anything about it fails, the background just trembles on the beat instead.
+    let ctx: AudioContext | null = null;
+    let analyser: AnalyserNode | null = null;
+    let bins = new Uint8Array(0);
+    let hookedTo: HTMLAudioElement | null = null;
+    let hooking = false;
+    let giveUp = false;
+    let lastTry = -10000;
+    let bass = 0;
+    // Recent bass loudness, so a hit = "much louder than a split second ago"
+    const recent: { at: number; level: number }[] = [];
+    // Hits wait here until the moment you actually hear them (speakers lag behind a bit)
+    const waiting: { at: number; strength: number }[] = [];
+    const hookUpBass = async (audio: HTMLAudioElement) => {
+      hooking = true;
+      try {
+        const AC =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!AC) {
+          giveUp = true;
+          return;
+        }
+        if (!ctx) ctx = new AC();
+        if (ctx.state !== "running") await ctx.resume();
+        // Browser isn't allowing sound yet: don't touch the song, try again in a bit
+        if (ctx.state !== "running" || hookedTo) return;
+        const source = ctx.createMediaElementSource(audio);
+        const node = ctx.createAnalyser();
+        node.fftSize = 1024;
+        node.smoothingTimeConstant = 0;
+        source.connect(node);
+        node.connect(ctx.destination);
+        analyser = node;
+        bins = new Uint8Array(node.frequencyBinCount);
+        hookedTo = audio;
+      } catch {
+        giveUp = true;
+      } finally {
+        hooking = false;
+      }
+    };
+
+    // How loud the 808 range (about 30-100 Hz) is right now, 0 to 1
+    const bassLevel = () => {
+      if (!analyser || !ctx) return 0;
+      analyser.getByteFrequencyData(bins);
+      const hz = ctx.sampleRate / analyser.fftSize;
+      const lo = Math.max(1, Math.floor(30 / hz));
+      const hi = Math.max(lo, Math.floor(100 / hz));
+      let sum = 0;
+      for (let i = lo; i <= hi; i++) sum += bins[i];
+      return sum / ((hi - lo + 1) * 255);
+    };
+    const put = (name: string, value: string) => {
+      if (shown[name] !== value) {
+        shown[name] = value;
+        el.style.setProperty(name, value);
+      }
+    };
+
+    const tick = (now: number) => {
+      const dt = Math.min(0.1, (now - prev) / 1000);
+      prev = now;
+      const audio = songRef.current;
+      const track = TRACKS[trackRef.current] ?? TRACKS[0];
+      const secondsPerBeat = 60 / (track.bpm && track.bpm > 0 ? track.bpm : DEFAULT_BPM);
+      put("--beat", `${secondsPerBeat.toFixed(4)}s`);
+
+      const live = !!audio && !audio.paused && !audio.ended && !audio.muted && audio.readyState >= 2 && !calm.matches;
+
+      // Switch the bass listener on (tries again every 2 seconds until the browser allows it)
+      if (audio && !audio.paused && !giveUp && !hooking && hookedTo !== audio && now - lastTry > 2000) {
+        lastTry = now;
+        if (hookedTo) {
+          giveUp = true; // the song player was swapped out; stick with the beat
+        } else {
+          void hookUpBass(audio);
+        }
+      }
+      // Phones can pause the sound engine (e.g. after a call); wake it back up so the music keeps playing
+      if (ctx && hookedTo && audio && !audio.paused && ctx.state !== "running" && now - lastTry > 1000) {
+        lastTry = now;
+        ctx.resume().catch(() => {});
+      }
+      if (live && audio) {
+        // The browser only updates the song position every few milliseconds, so fill in the gaps smoothly
+        if (audio.currentTime !== lastAudioTime) {
+          lastAudioTime = audio.currentTime;
+          lastAudioAt = now;
+        }
+        const t = lastAudioTime + ((now - lastAudioAt) / 1000) * audio.playbackRate - (track.offset ?? 0) - SYNC_NUDGE;
+        const beats = t / secondsPerBeat;
+        if (beats >= 0) {
+          const phase = beats - Math.floor(beats); // 0 = right on the beat
+          smoke = phase;
+          const phase8 = beats * 2 - Math.floor(beats * 2);
+          kick = Math.pow(1 - phase, 3);
+          hat = Math.pow(1 - phase8, 4);
+          sway = Math.cos(beats * Math.PI);
+        } else {
+          // Before the first beat (intro silence): hold still
+          kick += (0 - kick) * Math.min(1, dt * 10);
+          hat += (0 - hat) * Math.min(1, dt * 10);
+          sway += (0 - sway) * Math.min(1, dt * 4);
+        }
+      } else if (calm.matches) {
+        // Visitor asked their device for less motion: keep everything still
+        kick = 0;
+        hat = 0;
+        sway = 0;
+      } else {
+        // Paused or muted: slow, gentle breathing
+        const s = now / 1000;
+        const breathe = (0.5 + 0.5 * Math.sin(s * 4.5)) * 0.35;
+        kick += (breathe - kick) * Math.min(1, dt * 6);
+        hat += (0 - hat) * Math.min(1, dt * 6);
+        sway += (Math.sin(s * 2.2) * 0.6 - sway) * Math.min(1, dt * 4);
+      }
+
+      // 808 hits: the low end jumps way up compared to the last ~70 milliseconds = an 808 just hit
+      const level10 = calm.matches ? 0 : quakeRef.current;
+      let hit = 0;
+      if (live && level10 > 0) {
+        if (analyser && ctx && hookedTo === audio) {
+          const level = bassLevel();
+          recent.push({ at: now, level });
+          while (recent.length && recent[0].at < now - 70) recent.shift();
+          let low = level;
+          for (const r of recent) low = Math.min(low, r.level);
+          const rise = level - low;
+          const strength = level > 0.2 ? Math.min(1, Math.max(0, (rise - 0.07) * 4.5)) : 0;
+          // Show it when it reaches your ears, not when the browser first sees it
+          const lag = ((ctx.baseLatency || 0) + ((ctx as AudioContext & { outputLatency?: number }).outputLatency || 0) + SYNC_NUDGE) * 1000;
+          if (strength > 0) waiting.push({ at: now + Math.min(400, Math.max(0, lag)), strength });
+        } else {
+          hit = kick * 0.6; // no bass listener: shake on the beat instead
+        }
+      } else {
+        recent.length = 0;
+        waiting.length = 0;
+      }
+      while (waiting.length && waiting[0].at <= now) hit = Math.max(hit, waiting.shift()!.strength);
+      // Moving the slider gives one test shake, even with the music paused
+      if (now - quakeTestRef.current < 60) hit = 1;
+      // kicks in on the hit, then settles quickly
+      bass = Math.max(hit, bass * Math.exp(-dt * 8));
+      if (bass < 0.01) bass = 0;
+
+      put("--kick", kick.toFixed(3));
+      put("--hat", hat.toFixed(3));
+      put("--sway", sway.toFixed(3));
+      // No music (or before the first beat): the smoke keeps drifting up slowly on its own
+      if (!live || !audio || audio.currentTime - (track.offset ?? 0) - SYNC_NUDGE < 0) {
+        smoke = calm.matches ? 0.4 : (smoke + dt * 0.5) % 1;
+      }
+      put("--phase", smoke.toFixed(3));
+      put("--phase2", ((smoke + 0.5) % 1).toFixed(3));
+      beatRef.current.kick = kick;
+      beatRef.current.sway = sway;
+      beatRef.current.bass = bass;
+      beatRef.current.quake = level10 / 10;
+      frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(frame);
+      ctx?.close().catch(() => {});
+    };
+  }, []);
+
   useEffect(() => {
     const audio = new Audio(TRACKS[0].file);
     let startVolume = 0.5;
@@ -958,6 +1376,16 @@ export default function Home() {
   // otherwise pressing Enter later would press that button again
   const noFocus = (e: React.MouseEvent) => {
     e.preventDefault();
+  };
+
+  const changeQuake = (value: number) => {
+    const v = Math.max(0, Math.min(10, Math.round(value)));
+    setQuake(v);
+    quakeRef.current = v;
+    quakeTestRef.current = performance.now(); // shake once so you can feel the new level
+    try {
+      localStorage.setItem("pinkmane-quake", String(v));
+    } catch {}
   };
 
   const changeVolume = (value: number) => {
@@ -1115,11 +1543,8 @@ activeGame === "maze" ? (
 
   return (
     <main
+      ref={mainRef}
       style={{
-        backgroundImage: "url('/topshelf.png')",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
         minHeight: "100dvh",
         width: "100%",
         display: "flex",
@@ -1129,9 +1554,41 @@ activeGame === "maze" ? (
         overflow: "hidden",
         padding: "20px",
         boxSizing: "border-box",
-        "--beat": `${BEAT_SECONDS}s`,
+        isolation: "isolate",
       } as React.CSSProperties}
     >
+      {/* The background picture, on its own layer so it can wiggle and shake */}
+      <div className="bg-shake" aria-hidden="true" style={{ backgroundImage: "url('/topshelf.png')" }}>
+        <LiquidBg sources={MAIN_BG_SOURCES} beat={beatRef} active={!handheld} />
+      </div>
+
+      {/* BASS QUAKE slider on the iPod view too (bottom left) */}
+      {!handheld && (
+        <div className={`quake quake-page ${pixelFont.className}`}>
+          <span className="quake-dude quake-dude-trippy" aria-hidden="true" />
+          <div className="quake-main">
+            <label className="quake-title" htmlFor="quake-ipod">
+              BASS QUAKE <span className="quake-num">{quake === 0 ? "OFF" : quake}</span>
+            </label>
+            <input
+              id="quake-ipod"
+              type="range"
+              min={0}
+              max={10}
+              step={1}
+              value={quake}
+              aria-label="How hard the screen border shakes on the 808s"
+              className="quake-slider"
+              style={{ "--fill": `${quake * 10}%` } as React.CSSProperties}
+              onChange={(e) => changeQuake(Number(e.target.value))}
+              onPointerUp={(e) => e.currentTarget.blur()}
+              onTouchEnd={(e) => e.currentTarget.blur()}
+            />
+          </div>
+          <span className="quake-dude quake-dude-chill" aria-hidden="true" />
+        </div>
+      )}
+
       {/* SEO: "I'm a musician" label for Google (invisible) */}
       <script
         type="application/ld+json"
@@ -1142,7 +1599,8 @@ activeGame === "maze" ? (
       <div className="sr-only">
         <h1>PINKMANE</h1>
         <p>
-          PINKMANE is a cloud rap and trap artist. Releases include TOPSHELF.
+          PINKMANE is an artist and producer who codes and makes music in their
+          free time. Cloud rap and trap, made mostly with Serum 2. Releases include TOPSHELF.
           Stream PINKMANE on Spotify, Apple Music and SoundCloud, get the music
           on Bandcamp, follow on Instagram and Twitch, and shop official merch.
         </p>
@@ -1197,7 +1655,7 @@ activeGame === "maze" ? (
       </div>
 
       <div
-        className="ipod-shell"
+        className={`ipod-shell ${!playing && !isPaused && !isMuted ? "beat-thump" : ""}`}
         style={{
           background: "#cfcfcf",
           width: "min(540px, 100%)",
@@ -1619,6 +2077,11 @@ activeGame === "maze" ? (
       {/* The PINKMANE handheld: a wide screen for Pink Maze and Super Pinkmane */}
       {handheld && (
         <div className="hh-overlay">
+          {/* Background picture: wiggles, and its border shakes on the 808s */}
+          <div className="hh-bg" aria-hidden="true">
+            <LiquidBg sources={HH_BG_SOURCES} beat={beatRef} active />
+          </div>
+
           {/* Flying PINKMANEs with jetpacks in the background, some going right, some going left */}
           <div className="hh-glyphs">
             {glyphs.slice(0, 8).map((g) => (
@@ -1640,6 +2103,31 @@ activeGame === "maze" ? (
                 />
               </div>
             ))}
+          </div>
+
+          {/* BASS QUAKE: how hard the screen border shakes on the 808s (above the handheld) */}
+          <div className={`quake quake-top ${pixelFont.className}`}>
+            <span className="quake-dude quake-dude-trippy" aria-hidden="true" />
+            <div className="quake-main">
+              <label className="quake-title" htmlFor="quake-hh">
+                BASS QUAKE <span className="quake-num">{quake === 0 ? "OFF" : quake}</span>
+              </label>
+              <input
+                id="quake-hh"
+                type="range"
+                min={0}
+                max={10}
+                step={1}
+                value={quake}
+                aria-label="How hard the screen border shakes on the 808s"
+                className="quake-slider"
+                style={{ "--fill": `${quake * 10}%` } as React.CSSProperties}
+                onChange={(e) => changeQuake(Number(e.target.value))}
+                onPointerUp={(e) => e.currentTarget.blur()}
+                onTouchEnd={(e) => e.currentTarget.blur()}
+              />
+            </div>
+            <span className="quake-dude quake-dude-chill" aria-hidden="true" />
           </div>
 
           <div className={`hh-device ${pixelFont.className}`}>
@@ -2011,11 +2499,183 @@ activeGame === "maze" ? (
           padding: 12px;
           box-sizing: border-box;
           overflow: hidden;
-          /* Your handheld background: public/handheld-bg.png (or .jpg). Until it's there, the normal one shows. */
+          animation: hhFadeIn 0.25s ease-out;
+        }
+
+        /* Your handheld background: public/handheld-bg.png (or .jpg). Until it's there, the normal one shows.
+           It sits on its own layer so it can wiggle and shake. */
+        .hh-bg {
+          position: absolute;
+          inset: 0;
+          z-index: -1;
+          pointer-events: none;
           background-image: url("/handheld-bg.png"), url("/handheld-bg.jpg"), url("/topshelf.png");
           background-size: cover;
           background-position: center;
-          animation: hhFadeIn 0.25s ease-out;
+        }
+
+        /* The wiggling background drawn on top of the still picture (fades in once it's ready) */
+        .liquid-bg {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          display: block;
+          opacity: 0;
+          transition: opacity 0.6s ease;
+        }
+        .liquid-bg.liquid-on {
+          opacity: 1;
+        }
+        .liquid-canvas {
+          display: block;
+          width: 100%;
+          height: 100%;
+        }
+
+        /* BASS QUAKE slider, bottom left, with a PINKMANE on each side */
+        .quake {
+          position: absolute;
+          left: clamp(12px, 2.5vw, 32px);
+          bottom: clamp(12px, 2.5vh, 28px);
+          z-index: 3;
+          display: flex;
+          align-items: flex-end;
+          gap: 10px;
+          color: #fff;
+          text-shadow: 2px 2px 0 #000;
+        }
+        .quake-main {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          width: clamp(150px, 16vw, 230px);
+        }
+        /* The little PINKMANEs: as tall as the BASS QUAKE title + slider.
+           The sprite sheets have 3 frames side by side; the 3rd one is standing with the joint. */
+        .quake-dude {
+          flex: none;
+          height: 40px;
+          width: 27px;
+          background-image: url("/game/pinkdude.png");
+          background-size: 300% 100%;
+          background-position: right;
+          background-repeat: no-repeat;
+          image-rendering: pixelated;
+          filter: drop-shadow(2px 2px 0 #000);
+        }
+        /* Left one: TRIPPY PINKMANE (the outfit from Super Pinkmane) */
+        .quake-dude-trippy {
+          background-image: url("/game/pinkdude-pinkfit.png");
+        }
+        /* Smoke from the joint: a new puff on every beat, rising until the next one.
+           If the smoke doesn't start at the joint, move it with --smoke-x / --smoke-y
+           (how far across / down the little PINKMANE it starts). */
+        .quake-dude {
+          position: relative;
+          --smoke-x: 78%;
+          --smoke-y: 36%;
+        }
+        .quake-dude::before,
+        .quake-dude::after {
+          content: "";
+          position: absolute;
+          left: var(--smoke-x);
+          top: var(--smoke-y);
+          width: 3px;
+          height: 3px;
+          background: #e8e0ee;
+          pointer-events: none;
+        }
+        .quake-dude::before {
+          translate: calc(var(--phase, 0) * 3px) calc(var(--phase, 0) * -18px);
+          scale: calc(1 + var(--phase, 0) * 0.8);
+          opacity: calc(0.9 - var(--phase, 0) * 0.9);
+        }
+        .quake-dude::after {
+          translate: calc(var(--phase2, 0) * -2px) calc(var(--phase2, 0) * -18px);
+          scale: calc(0.7 + var(--phase2, 0) * 0.8);
+          opacity: calc(0.6 - var(--phase2, 0) * 0.6);
+        }
+        /* Right one: chilling, turned to face the slider */
+        .quake-dude-chill {
+          scale: -1 1;
+        }
+        .quake-title {
+          display: flex;
+          justify-content: space-between;
+          font-size: 9px;
+          letter-spacing: 1px;
+        }
+        .quake-num {
+          color: #ff8ff0;
+        }
+        .quake-slider {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 100%;
+          height: 14px;
+          margin: 0;
+          cursor: pointer;
+          border: 2px solid #111;
+          background: linear-gradient(90deg, #d63cc8 var(--fill, 50%), rgba(0, 0, 0, 0.45) var(--fill, 50%));
+          box-shadow: 0 3px 0 #111;
+        }
+        .quake-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 16px;
+          height: 24px;
+          background: #fff;
+          border: 2px solid #111;
+          box-shadow: inset -3px -3px 0 #c7bdd1;
+        }
+        .quake-slider::-moz-range-thumb {
+          width: 14px;
+          height: 22px;
+          border-radius: 0;
+          background: #fff;
+          border: 2px solid #111;
+          box-shadow: inset -3px -3px 0 #c7bdd1;
+        }
+        .quake-slider:focus-visible {
+          outline: 2px solid #ff8ff0;
+          outline-offset: 3px;
+        }
+        /* On the handheld: centred above the device */
+        .quake-top {
+          position: relative;
+          left: auto;
+          bottom: auto;
+        }
+        .quake-top .quake-main {
+          width: clamp(180px, 22vw, 280px);
+        }
+        /* Upright phones: sit in the page flow instead of in the corner */
+        @media (orientation: portrait) {
+          .quake {
+            position: relative;
+            left: auto;
+            bottom: auto;
+          }
+          .quake .quake-main,
+          .quake-top .quake-main {
+            width: min(58vw, 240px);
+          }
+          .quake-page {
+            display: none;
+          }
+        }
+
+        /* The main background picture (wiggles, border shakes on the 808s) */
+        .bg-shake {
+          position: absolute;
+          inset: 0;
+          z-index: -1;
+          pointer-events: none;
+          background-size: cover;
+          background-position: center;
+          background-repeat: no-repeat;
         }
 
         .hh-glyphs {
@@ -2061,6 +2721,15 @@ activeGame === "maze" ? (
           }
         }
 
+        @keyframes hhJetBob {
+          from {
+            translate: 0 -10px;
+          }
+          to {
+            translate: 0 10px;
+          }
+        }
+
         @keyframes hhJetLeft {
           from {
             transform: translateX(110vw);
@@ -2070,14 +2739,6 @@ activeGame === "maze" ? (
           }
         }
 
-        @keyframes hhJetBob {
-          from {
-            translate: 0 -10px;
-          }
-          to {
-            translate: 0 10px;
-          }
-        }
 
         @keyframes hhFadeIn {
           from {
@@ -2094,7 +2755,7 @@ activeGame === "maze" ? (
         .hh-device {
           position: relative;
           z-index: 1;
-          width: min(96vw, 1300px, calc((100dvh - 120px) * 2.41));
+          width: min(96vw, 1300px, calc((100dvh - 170px) * 2.41));
           aspect-ratio: 94 / 39;
           filter: drop-shadow(0 12px 0 rgba(0, 0, 0, 0.3)) drop-shadow(0 0 24px rgba(214, 60, 200, 0.45));
         }
@@ -2135,8 +2796,7 @@ activeGame === "maze" ? (
         }
         .hh-led2.hh-led-on {
           background: #d63cc8;
-          box-shadow: 0 0 8px #d63cc8;
-          animation: wheelGlow var(--beat) ease-in-out infinite;
+          box-shadow: 0 0 calc(var(--kick, 0) * 14px) calc(var(--kick, 0) * 4px) rgba(215, 239, 188, calc(var(--kick, 0) * 0.55));
         }
         /* Invisible buttons over the drawn ones; they flash pink when pressed */
         .hh-hit {
@@ -2290,7 +2950,7 @@ activeGame === "maze" ? (
           width: 48px;
           height: 70px;
           background-image: url("/game/pinkdude.png");
-          background-size: 200% 100%;
+          background-size: 300% 100%;
           background-position: left;
           image-rendering: pixelated;
           animation: bootPulse 1s ease-in-out infinite;
@@ -2423,8 +3083,7 @@ activeGame === "maze" ? (
         }
         .hh-led-on {
           background: #d63cc8;
-          box-shadow: 0 0 0 2px #111, 0 0 8px #d63cc8;
-          animation: wheelGlow var(--beat) ease-in-out infinite;
+          box-shadow: 0 0 calc(var(--kick, 0) * 14px) calc(var(--kick, 0) * 4px) rgba(215, 239, 188, calc(var(--kick, 0) * 0.55));
         }
 
         .hh-grill {
@@ -2645,30 +3304,18 @@ activeGame === "maze" ? (
           border-radius: 1px;
         }
 
+        /* the little bars jump with the kick and the hi-hats */
         .vu-active.vu-bar-0 {
-          animation: vuPulse var(--beat) ease-in-out infinite;
+          height: calc(3px + var(--kick, 0) * 9px);
         }
         .vu-active.vu-bar-1 {
-          animation: vuPulse var(--beat) ease-in-out infinite;
-          animation-delay: calc(var(--beat) * 0.15);
+          height: calc(3px + var(--hat, 0) * 7px);
         }
         .vu-active.vu-bar-2 {
-          animation: vuPulse var(--beat) ease-in-out infinite;
-          animation-delay: calc(var(--beat) * 0.3);
+          height: calc(3px + var(--kick, 0) * 5px + var(--hat, 0) * 4px);
         }
         .vu-active.vu-bar-3 {
-          animation: vuPulse var(--beat) ease-in-out infinite;
-          animation-delay: calc(var(--beat) * 0.08);
-        }
-
-        @keyframes vuPulse {
-          0%,
-          100% {
-            height: 3px;
-          }
-          50% {
-            height: 12px;
-          }
+          height: calc(3px + var(--kick, 0) * 7px + var(--hat, 0) * 2px);
         }
 
         /* CRT scanlines + vignette */
@@ -2755,31 +3402,17 @@ activeGame === "maze" ? (
           inset: 0;
           pointer-events: none;
           box-shadow: inset 0 0 0 2px #ff8ff0, 0 0 10px 2px rgba(214, 60, 200, 0.65);
-          animation: manePulse 1.4s ease-in-out infinite;
-        }
-        @keyframes manePulse {
-          0%,
-          100% {
-            opacity: 0.55;
-          }
-          50% {
-            opacity: 1;
-          }
+          opacity: calc(0.55 + var(--kick, 0) * 0.45);
         }
 
         /* Click wheel LED pulse, synced to the beat */
         .wheel-led-pulse {
-          animation: wheelGlow var(--beat) ease-in-out infinite;
+          box-shadow: 0 0 calc(var(--kick, 0) * 14px) calc(var(--kick, 0) * 4px) rgba(215, 239, 188, calc(var(--kick, 0) * 0.55));
         }
 
-        @keyframes wheelGlow {
-          0%,
-          100% {
-            box-shadow: 0 0 0px rgba(215, 239, 188, 0);
-          }
-          50% {
-            box-shadow: 0 0 14px 4px rgba(215, 239, 188, 0.55);
-          }
+        /* The iPod gives a tiny speaker-thump on every beat (only in the menus, not during games) */
+        .beat-thump {
+          scale: calc(1 + var(--kick, 0) * 0.008);
         }
       `}</style>
     </main>
