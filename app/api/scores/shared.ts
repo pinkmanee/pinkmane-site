@@ -8,7 +8,14 @@ export const KEY = "pinkrun:scores";
 
 // Every game with its own Top 10.
 // rate/base: the biggest score that's believable for how long a run lasted
-export const GAMES: Record<string, { key: string; rate: number; base: number; max: number }> = {
+// timed = a Super Pinkmane level board: the score is LEVEL_TIME_BASE minus your time in milliseconds
+// (so faster = higher), and minMs is the fastest time that's physically possible for that level.
+export type GameCfg = { key: string; rate: number; base: number; max: number; timed?: { minMs: number } };
+export const LEVEL_TIME_BASE = 10000000;
+const LEVEL_COUNT = 30; // boards exist for super-l1 ... super-l30 (add more levels without touching this file)
+const LEVEL_MIN_MS: Record<number, number> = { 1: 25000 }; // anything else: 15 seconds
+
+export const GAMES: Record<string, GameCfg> = {
   pinkrun: { key: KEY, rate: 60, base: 100, max: 100000 },
   vortex: { key: "pinkvortex:scores", rate: 150, base: 1000, max: 1000000 },
   snake: { key: "pinksnake:scores", rate: 40, base: 200, max: 100000 },
@@ -18,6 +25,16 @@ export const GAMES: Record<string, { key: string; rate: number; base: number; ma
   maze: { key: "pinkmaze:scores", rate: 150, base: 5000, max: 1000000 },
   super: { key: "pinksuper:scores", rate: 60, base: 500, max: 1000000 },
 };
+
+for (let n = 1; n <= LEVEL_COUNT; n++) {
+  GAMES[`super-l${n}`] = {
+    key: `pinksuper:l${n}:times`,
+    rate: 0,
+    base: 0,
+    max: LEVEL_TIME_BASE,
+    timed: { minMs: LEVEL_MIN_MS[n] ?? 15000 },
+  };
+}
 
 export function gameConfig(game: unknown) {
   return typeof game === "string" && GAMES[game] ? GAMES[game] : GAMES.pinkrun;

@@ -25,7 +25,10 @@ type Mode =
   | "board"
   | "golden"
   | "choose"
-  | "paused";
+  | "paused"
+  | "home" // the pink start screen: PINK RUN INFINITE or PINK LEVELS
+  | "levelSelect" // the list of levels
+  | "levelDone"; // you hit the bong
 
 // One column of the level
 type Column = {
@@ -55,8 +58,9 @@ type Enemy = {
   phase: number;
   alive: boolean;
   squash: number;
+  shoot?: number; // IPOD USER drones: seconds until the next laser
 };
-type Leaf = { x: number; y: number; taken: boolean; small?: boolean }; // small = half size, used to spell words
+type Leaf = { x: number; y: number; taken: boolean; small?: boolean; coin?: boolean }; // small = half size (words), coin = gold coin
 type Heart = { x: number; y: number; taken: boolean };
 type PowerKind = "fire" | "ice" | "double";
 type PowerUp = { x: number; y: number; vx: number; vy: number; kind: PowerKind };
@@ -104,7 +108,7 @@ const ZONE_NAMES = [
   "PINK CLOUDS",
   "TWISTED TREES",
   "SMOKE OCEAN",
-  "GIVE A FUCK FIELD",
+  "GAF FIELD",
   "GODS PSP FIELD",
   "IPOD USER FIELD",
   "TRIPPY FIELD",
@@ -126,6 +130,14 @@ const FIELD_IMAGES = [
   "/backgrounds/field-coral.png",
 ];
 const Z_CLOUDS = 3;
+// The cover-art fields by name (each one has its own ground, blocks and lines to match its cover)
+const F_GAF = 6;
+const F_PSP = 7;
+const F_IPOD = 8;
+const F_TRIPPY = 9;
+const F_SPT = 10;
+const F_TOP = 11;
+const F_CORAL = 12;
 // Colours of each zone on the progress line at the bottom
 const ZONE_COLORS = [
   "#ff5fe0",
@@ -134,7 +146,7 @@ const ZONE_COLORS = [
   "#fbd3f3",
   "#b06ce0",
   "#c6b9d6",
-  "#d63cc8", // give a fuck field
+  "#d63cc8", // gaf field
   "#9b8bd6", // gods psp field
   "#5b6fd6", // ipod user field
   "#c68bff", // trippy field
@@ -220,6 +232,159 @@ const PTS_FLYER = 150;
 // Saved in the visitor's browser (name, device and owner code are shared with the other games)
 const BEST_KEY = "pinksuper-best";
 const SFX_KEY = "pinksuper-sfx";
+// ---------- Test shortcut (only on your own computer, never on the real site) ----------
+// Open  http://localhost:3000/?zone=coral  (or a zone number like ?zone=13) and every new game
+// starts right at the beginning of that zone. Test runs never go on the scoreboard.
+const TEST_ZONES: Record<string, number> = {
+  fields: 0, speaker: 1, rooftops: 2, clouds: 3, trees: 4, smoke: 5,
+  gaf: 6, psp: 7, ipod: 8, trippy: 9, spt: 10, top: 11, topshelf: 11, coral: 12,
+};
+function testStartZone() {
+  if (typeof window === "undefined") return -1;
+  const host = window.location.hostname;
+  if (host !== "localhost" && host !== "127.0.0.1") return -1;
+  const q = (new URLSearchParams(window.location.search).get("zone") || "").toLowerCase();
+  if (!q) return -1;
+  if (q in TEST_ZONES) return TEST_ZONES[q];
+  const n = Number(q);
+  return Number.isInteger(n) && n >= 1 && n <= ZONE_NAMES.length ? n - 1 : -1;
+}
+// =====================================================================================
+// PINK LEVELS
+// =====================================================================================
+// Each level is drawn as 10 rows of text, one character per tile (rows 0-9, top to bottom).
+//   #  ground (everything below it is solid)      =  brick (land on it from above)
+//   -  thin line (land on it from above)          ?  bonus block (bump it from below)
+//   L  weed leaf (points)   C  gold coin   H  heart
+//   w  walker               f  flyer
+//   S  sign: shows the next line from `signs` when you walk past it
+//   A  the boss arena starts here (exactly one screen wide, keep it flat)
+//   B  the bong: touch it to finish the level and stop the clock
+// Only one of = - ? per column. Edit the rows, keep them all the same length.
+const LEVEL_ZONE = 30; // the "weed fantasy" look
+type LevelDef = { name: string; map: string[]; signs: string[]; bossHp: number };
+const LEVELS: LevelDef[] = [
+  {
+    // Other name ideas: "BONG LVL 1", "THE FIRST HIT", "WEEDLAND", "GREEN DREAM", "HIGH GROUND"
+    name: "PINKMANE LIKES WEED",
+    bossHp: 10,
+    // Lore signs, in order. Change them to whatever you want people to learn about PINKMANE.
+    // Max ~40 characters per line; use \n to split a sign into two lines.
+    signs: [
+      "WELCOME TO WEEDLAND, PINKMANE'S HOME",
+      "PINKMANE: PRODUCER FROM SLOVAKIA",
+      "HE MAKES HIS OWN BEATS",
+      "HIS FAVOURITE ARTISTS:\nLIL PEEP, YUNG LEAN, GHOSTEMANE",
+      "FIND PINKMANE ON SOUNDCLOUD",
+      "THE EVIL LEAF GUARDS HIS BONG...",
+      "PINKMANE LIKES WEED. GO HIT THE BONG!",
+    ],
+    map: [
+      "......................................................................................................................................................................................................................",
+      "......................................................................................................................................................................................................................",
+      "......................................................................................................................................................................................................................",
+      ".......................................................................................H..............f...............................................................................................................",
+      "..........................C...........L..L..........f.................................---...................f....................C..........f...L..L.....................===..........................................",
+      ".........................===..........=?==.................L........C...........................==?=.....................LL....----.............====.................?.........?......................................",
+      "........LLL....LL...............................LLL......-----.....###..................................LLL.............----.............................LLL..................................LLL.....................",
+      "...S..........####....w...........S..........w..................#########...S...w...w...........................S...w.......###.........w.............S..........A........................S..........B................",
+      "##############################..##########################...#############################...###########################....###....###################################################################################",
+      "##############################..##########################...#############################...###########################....###....###################################################################################",
+    ],
+  },
+];
+// The level map: stops (one per level) joined by a winding path, like a Mario world map.
+// icon = the look of that stop. `path` = the corners walked on the way TO that stop from the one before.
+// A stop is locked until you beat the level before it. Stops without a level yet say COMING SOON.
+type MapIcon = "weed" | "speaker" | "roof" | "cloud" | "tree" | "ship" | "coral" | "bong";
+const MAP_NODES: { x: number; y: number; icon: MapIcon; path: [number, number][] }[] = [
+  { x: 28, y: 128, icon: "weed", path: [] },
+  { x: 84, y: 128, icon: "speaker", path: [] },
+  { x: 84, y: 80, icon: "roof", path: [] },
+  { x: 148, y: 80, icon: "cloud", path: [] },
+  { x: 148, y: 128, icon: "tree", path: [] },
+  { x: 212, y: 128, icon: "ship", path: [] },
+  { x: 212, y: 76, icon: "coral", path: [] },
+  { x: 296, y: 104, icon: "bong", path: [[296, 76]] }, // the last one: a big bong, BOSS FIGHT
+];
+const MAP_BADGE: Record<MapIcon, string> = {
+  weed: "#6fdc5a",
+  speaker: "#ff9a3c",
+  roof: "#8e3fb0",
+  cloud: "#fbd3f3",
+  tree: "#b06ce0",
+  ship: "#c6b9d6",
+  coral: "#3ec6c0",
+  bong: "#ff5fe0",
+};
+const MAP_WALK_SPEED = 95;
+const LEVEL_PROGRESS_KEY = "pinksuper-levels"; // { "1": best ms } for every level you finished
+const LEVEL_TIME_BASE = 10000000; // a level time is saved on the scoreboard as LEVEL_TIME_BASE - milliseconds
+const levelGameId = (n: number) => `super-l${n}`;
+const fmtTime = (ms: number) => {
+  const m = Math.floor(ms / 60000);
+  const sec = Math.floor((ms % 60000) / 1000);
+  const cs = Math.floor((ms % 1000) / 10);
+  return `${m}:${String(sec).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
+};
+// The evil weed leaf (Level 1 boss), drawn 2x bigger
+const EVIL_LEAF = [
+  ".........KK..........",
+  "........KGGK.........",
+  "..KK....KGGK....KK...",
+  ".KGGK...KGGK...KGGK..",
+  ".KGgGK..KGGK..KGgGK..",
+  "..KGgGK.KGgK.KGgGK...",
+  "K..KGgGKKGgKKGgGK..KK",
+  "KGK.KGgGKGgKGgGK.KGGK",
+  ".KGGKKGGGGGGGGGKKGgK.",
+  "..KGgGGGGGGGGGGGGgK..",
+  "...KKGRRGGGGGRRGKK...",
+  "....KGKRRGGGRRKGK....",
+  "....KGGGGGGGGGGGK....",
+  ".....KGKWKWKWKGK.....",
+  "......KGKKKKKGK......",
+  ".......KKGGGKK.......",
+  ".........KgK.........",
+  ".........KgK.........",
+  "..........K..........",
+];
+const EVIL_COLORS = { K: "#141e0f", G: "#46aa3c", g: "#1e6428", R: "#ff283c", W: "#ffffff" };
+const EL_W = 42;
+const EL_H = 38;
+// The bong at the end of every level, drawn 2x bigger
+const BONG = [
+  "...KKKK...",
+  "...KCcK...",
+  "...KCcK...",
+  "...KCcK...",
+  "...KCcK...",
+  "...KCcK...",
+  "...KCcK.KK",
+  "...KCcKKOK",
+  "..KCCcCKK.",
+  ".KCCBBcCK.",
+  "KCBBBBBBCK",
+  "KCBBWBBBCK",
+  "KCBBBBBBCK",
+  ".KCBBBBCK.",
+  "..KKKKKK..",
+];
+const BONG_COLORS = { K: "#111111", C: "#b8f0d8", c: "#e8fff4", B: "#58b8ff", W: "#ffffff", O: "#ff7a00" };
+const BONG_W = 20;
+const BONG_H = 30;
+// Weedland colours
+const WL_SKY_TOP = "#c8f5b0";
+const WL_SKY_BOTTOM = "#78cf6e";
+const WL_SOIL = "#2d4a22";
+const WL_GRASS = "#6fdc5a";
+
+const SFX_VOL_KEY = "pinksuper-sfx-volume"; // 0..1, set with the slider under the speaker icon
+// How much each cover background is washed out (brighter, less contrast) so the level is easy to see.
+// Index = field (GAF, PSP, IPOD, TRIPPY, SPT, TOP SHELF, CORAL). 0 = the cover as it is.
+const FIELD_WASH = [0.4, 0.38, 0.32, 0, 0.35, 0, 0];
+// Covers that gently wiggle like a heat haze / water (all of them; set one to false to keep it still)
+const FIELD_WIGGLE = [true, true, true, true, true, true, true];
 const NAME_KEY = "pinkrun-name";
 const DEVICE_KEY = "pinkrun-device";
 const OWNER_KEY = "pinkrun-owner";
@@ -233,9 +398,12 @@ const OUTFITS: { id: OutfitId; name: string; file: string; how: string }[] = [
   { id: "classic", name: "CLASSIC PINKMANE", file: "/game/pinkdude.png", how: "ALWAYS UNLOCKED" },
   { id: "og", name: "TRIPPY PINKMANE", file: "/game/pinkdude-pinkfit.png", how: "REACH SCORE 30000" },
   { id: "ghost", name: "GHOSTY PINKMANE", file: "/game/pinkdude-ghost.png", how: "BEAT A TROLL" },
-  { id: "icy", name: "ICY PINKMANE", file: "/game/pinkdude-icy.png", how: "500 LIFETIME GRAMS" },
+  { id: "icy", name: "ICY PINKMANE", file: "/game/pinkdude-icy.png", how: "BUY FOR 100 COINS" },
 ];
-const ICY_COST = 500;
+const ICY_COST = 100; // gold coins
+// Gold coins: some of the weed leaves in the level are gold coins instead (about 1 in 14).
+// Leaves are only for your score; coins are what you spend on outfits.
+const COIN_CHANCE = 0.07;
 const OG_SCORE_UNLOCK = 30000;
 const OUTFIT_FALLBACK: Record<OutfitId, string> = {
   classic: "#d63cc8",
@@ -243,7 +411,7 @@ const OUTFIT_FALLBACK: Record<OutfitId, string> = {
   ghost: "#bfe9d8",
   icy: "#8fd9ff",
 };
-const COINS_KEY = "pinksuper-coins"; // lifetime grams, never goes down
+const COINS_KEY = "pinksuper-goldcoins"; // gold coins you have (spent on outfits)
 const UNLOCKED_KEY = "pinksuper-outfits"; // JSON array of unlocked outfit ids
 const OUTFIT_KEY = "pinksuper-outfit"; // currently worn outfit id
 
@@ -264,12 +432,13 @@ const CLOUD = "#fdeefb";
 const CLOUD_SKY = "#f3d3ee";
 // A different accent tint for each Void room (index matches buildVoid's "which"), so the
 // rooms feel a bit less identical even though the wave pattern is the same
-const VOID_PALETTES: { bg: string; a: string; b: string }[] = [
-  { bg: "#160c1d", a: "#3a1a44", b: "#2a1234" }, // 0: the classic
-  { bg: "#0c1a1d", a: "#1a4044", b: "#123034" }, // 1: the stairs
-  { bg: "#1d0c16", a: "#441a34", b: "#341228" }, // 2: FOLLOW ME ON SOUNDCLOUD (one line)
-  { bg: "#141a0c", a: "#3a4418", b: "#2a3410" }, // 3: the zigzag
-  { bg: "#0c1420", a: "#1a2c48", b: "#122038" }, // 4: FOLLOW ME / ON SOUNDCLOUD (two lines)
+// SoundCloud Void colours: a random one every time you go in (never the same twice in a row)
+const VOID_PALETTES: { bg: string; a: string; b: string; ink: string }[] = [
+  { bg: "#c23d93", a: "#ff7fd0", b: "#e25cb4", ink: "#ffffff" }, // pink
+  { bg: "#1e0c2e", a: "#4a1f6a", b: "#33144d", ink: "#ffffff" }, // dark purple
+  { bg: "#0b2414", a: "#1f5a33", b: "#154226", ink: "#ffffff" }, // dark green
+  { bg: "#0b1433", a: "#1f3a7a", b: "#152a5c", ink: "#ffffff" }, // dark blue
+  { bg: "#e8c22a", a: "#fff07a", b: "#f5d84a", ink: "#111111" }, // yellow
 ];
 // Twisted Trees
 const TREE_SKY = "#c9a9e8";
@@ -452,6 +621,142 @@ function pad(n: number) {
   return String(Math.floor(n)).padStart(5, "0");
 }
 
+// ---------- Cover-field art (every piece has a dark outline so it shows up on any cover) ----------
+// GAF FIELD: weed nugs to jump on
+const NUG = [
+  "....KKKKKK......",
+  "..KKGgGGgGKK....",
+  ".KGgOGGWGGgGK...",
+  "KGGGGgGGOGGgGKK.",
+  "KgOGGWGgGGWGGgGK",
+  "KGGgGGGGOgGGOGGK",
+  ".KGWGgOGGGgGGWK.",
+  "..KKGGGgGWGGKK..",
+  "....KKKKKKKK....",
+];
+const NUG_COLORS = { K: "#111111", G: "#5cb84a", g: "#2e6e28", O: "#ff8c28", W: "#ebffeb" };
+// GODS PSP FIELD: little handheld consoles
+const HANDHELD = [
+  "KKKKKKKKKKKKKKKK",
+  "KLLLLLLLLLLLLLLK",
+  "KLdLKBBBBBBKLoLK",
+  "KdddKBSBBBBKLLoK",
+  "KLdLKBBBBBBKoLLK",
+  "KLLLLLLLLLLLLLLK",
+  ".KKKKKKKKKKKKKK.",
+];
+const HANDHELD_COLORS = { K: "#111111", L: "#3c3c48", d: "#c8c8d2", B: "#4aa3ff", S: "#dcf0ff", o: "#ff5fe0" };
+// IPOD USER FIELD: little music players at MAX volume
+// IPOD USER FIELD: little white music players with a pink song on the screen and a click wheel
+const PLAYER = [
+  ".KKKKKKKKKKKKKK.",
+  "KWWWWWWWWWWWWWWK",
+  "KWKKKKKKKKKKKKWK",
+  "KWKssssssssssKWK",
+  "KWKsPPPPPPPssKWK",
+  "KWKsbbbbbssssKWK",
+  "KWKssssssssssKWK",
+  "KWKKKKKKKKKKKKWK",
+  "KWWWWWggggWWWWWK",
+  "KWWWWggWWggWWWWK",
+  "KWWWgWWccWWgWWWK",
+  "KWWWgWWccWWgWWWK",
+  "KWWWWggWWggWWWWK",
+  "KWWWWWggggWWWWWK",
+  "KWWWWWWWWWWWWWWK",
+  ".KKKKKKKKKKKKKK.",
+];
+const PLAYER_COLORS = { K: "#111111", W: "#f7f7fb", g: "#b4b4c4", c: "#dcdce6", s: "#9fd4ff", P: "#ff5fc8", b: "#3c6ed2" };
+// SMALL PRETTY TITTIES FIELD: rainbows to jump on, devil bunnies to stomp, fairies flying over
+const RAINBOW = [
+  "....KKKKKKKK....",
+  "..KKRRRRRRRRKK..",
+  ".KRROOOOOOOORRK.",
+  "KROOYYYYYYYYOORK",
+  "KROYGGGGGGGGYORK",
+  "KROYGBBBBBBGYORK",
+  "KROYGBK..KBGYORK",
+  "KKKKKK....KKKKKK",
+];
+const RAINBOW_COLORS = { K: "#111111", R: "#eb323c", O: "#ff9628", Y: "#ffe13c", G: "#50c85a", B: "#468cff" };
+const RAINBOW_STRIPES = ["#eb323c", "#ff9628", "#ffe13c", "#50c85a", "#468cff", "#9646dc"];
+const BUNNY = [".W...W.", ".WR.RW.", ".WWWWW.", "WKWWWKW", "WWWPWWW", "WWKKKWW", ".WWWWW."];
+const BUNNY_COLORS = { K: "#111111", W: "#fff0f8", P: "#ff78c8", R: "#dc1e28" };
+const FAIRY = [
+  ["C..PPP..C", "CCPSSSPCC", "CCPKSKPCC", ".CPSSSPC.", "...VVV...", "..VVVVV..", "...S.S..."],
+  ["...PPP...", "..PSSSP..", ".CPKSKPC.", "CCPSSSPCC", "CC.VVV.CC", "C.VVVVV.C", "...S.S..."],
+];
+const FAIRY_COLORS = { C: "#c8f0ff", P: "#ff5fc8", S: "#ffd6b4", K: "#111111", V: "#9646dc" };
+// TOP SHELF FIELD: riveted metal plates
+const METAL = [
+  "KKKKKKKKKKKKKKKK",
+  "KHHHHHHHHHHHHHHK",
+  "KHrMMMMMMMMMMrHK",
+  "KMMMMMMMMMMMMMMK",
+  "KMMMMMMMMMMMMMMK",
+  "KMrMMMMMMMMMMrMK",
+  "KDDDDDDDDDDDDDDK",
+  "KKKKKKKKKKKKKKKK",
+];
+const METAL_COLORS = { K: "#111111", H: "#d7dce6", M: "#8c94a2", D: "#5a606e", r: "#3c3e46" };
+// TWISTED CORAL PEAKS: corals growing out of the sand (the seaweed has two frames so it sways)
+const CORALS = [
+  ["P..P..P", "P..P..P", ".P.P.P.", ".PPPPP.", "...P...", "...P...", "..DDD.."],
+  ["O.....O", "O..O..O", "O..O..O", "OO.O.OO", ".O.O.O.", ".OOOOO.", "..ddd.."],
+  [".V...V.", "V...V..", ".V...V.", "..V...V", ".V...V.", "V...V..", ".V...V."],
+  ["V...V..", ".V...V.", "..V...V", ".V...V.", "V...V..", ".V...V.", "..V...V"],
+];
+// coral rock blocks to jump on
+const REEF = [
+  ".KKKKKKKKKKKKKK.",
+  "KPPpPPPPpPPPpPPK",
+  "KPpPPoPPPPpPPoPK",
+  "KPPPPPPpPPPPPPPK",
+  "KpPPoPPPPPoPPpPK",
+  "KPPPPPpPPPPPPPPK",
+  ".KKKKKKKKKKKKKK.",
+];
+const REEF_COLORS = { K: "#111111", P: "#ff8a7a", p: "#d85a50", o: "#7a2a30" };
+const CORAL_COLORS = { P: "#ff6f91", D: "#b0305a", O: "#ff963c", d: "#aa501e", V: "#aa5aff" };
+// GAF FIELD monsters: dark bats flying, red walking bombs (the fuse sparks)
+const BAT = [
+  ["G.......G", "GG.K.K.GG", "GgGKKKGgG", ".GKRKRKG.", "...KKK...", ".........", "........."],
+  [".........", "...K.K...", "...KKK...", ".GKRKRKG.", "GgGKKKGgG", "GG.....GG", "G.......G"],
+];
+const BAT_COLORS = { G: "#2c2c34", g: "#5a5a68", K: "#0a0a0a", R: "#ff3040" };
+const BOMB = ["....S..", "...K...", "..RRR..", ".RWRRR.", "RRKRKRR", "RRRRRRR", ".RRRRR.", ".K...K."];
+const BOMB_COLORS = { S: "#ffc800", K: "#111111", R: "#e0283a", W: "#ffb0b8" };
+const BOMB_COLORS_2 = { S: "#ff5a00", K: "#111111", R: "#e0283a", W: "#ffb0b8" };
+// IPOD USER FIELD monsters: brown walkers with yellow horns, yellow drones that shoot red lasers
+const HORNED = ["Y.....Y", ".Y...Y.", ".BBBBB.", "BWWBWWB", "BWKBWKB", "BBBBBBB", "BdddddB", ".K...K."];
+const HORNED_COLORS = { Y: "#ffd23c", B: "#8a5a2b", d: "#5a3a1a", W: "#ffffff", K: "#111111" };
+const DRONE = [
+  ["KKK...KKK", "...K.K...", "..YYYYY..", ".YKRRRKY.", "YYYYYYYYY", ".y.K.K.y.", "...K.K..."],
+  [".K.....K.", "...K.K...", "..YYYYY..", ".YKRRRKY.", "YYYYYYYYY", ".y.K.K.y.", "...K.K..."],
+];
+const DRONE_COLORS = { K: "#111111", Y: "#ffd000", y: "#c89a00", R: "#ff2832" };
+const DRONE_COLORS_CHARGING = { K: "#111111", Y: "#ffd000", y: "#c89a00", R: "#ffffff" };
+const LASER_SPEED = 150;
+// GODS PSP FIELD monster colours (pink walkers, blue flyers)
+const PSP_WALKER_COLORS = { G: "#ff5fc8", K: "#5a0a46", W: "#ffffff" };
+const PSP_FLYER_COLORS = { G: "#6fc3ff", D: "#1e46b4", W: "#ffffff" };
+// TWISTED CORAL PEAKS monsters: spiky sea urchins walking, seahorses swimming
+const URCHIN = ["p.P.P.p", ".PPPPP.", "PPKPKPP", "pPPPPPp", "PRPKPRP", ".PPPPP.", "p.P.P.p"];
+const URCHIN_COLORS = { P: "#8c5ad2", p: "#502d8c", K: "#111111", R: "#ff96be" };
+const SEAHORSE = [
+  ["....BBF..", "KBBBKBFF.", "....BBBF.", "...BLBB..", "...BLLB..", "....BBB..", ".b..BB...", "..bbB...."],
+  ["....BBFF.", "KBBBKBF..", "....BBBFF", "...BLBB..", "...BLLB..", "....BBB..", ".b..BB...", "..bbB...."],
+];
+const SEAHORSE_COLORS = { B: "#5a8cff", b: "#2846aa", L: "#c8dcff", K: "#111111", F: "#ff8cc8" };
+// TRIPPY FIELD monsters: green bacteria walking, blue dragonflies flying
+const BACTERIA = ["G.GGG.G", ".GGGGG.", "GGWGWGG", "gGKGKGg", "GGRRRGG", ".gGGGg.", "g.g.g.g"];
+const BACTERIA_COLORS = { G: "#3cd23c", g: "#147846", W: "#e6f5ff", K: "#0a1446", R: "#dc2832" };
+const DRAGONFLY = [
+  ["..CC.CC..", ".CCC.CCC.", "..CCCCC..", "KBBBBBbbb", ".........", ".........", "........."],
+  [".........", ".........", "..CCCCC..", "KBBBBBbbb", ".CCC.CCC.", "..CC.CC..", "........."],
+];
+const DRAGONFLY_COLORS = { C: "#beebff", B: "#3c82ff", b: "#1e46b4", K: "#111111" };
+
 function drawPixels(
   ctx: CanvasRenderingContext2D,
   rows: string[],
@@ -537,6 +842,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const [showGolden, setShowGolden] = useState(false); // the golden leaf pause screen
   const [goldBefore, setGoldBefore] = useState(false); // found it in an earlier game already
   const sfxOnRef = useRef(true);
+  const sfxVolRef = useRef(1); // sound effects volume 0..1 (the slider under the speaker icon)
+  const sfxDragRef = useRef(false); // dragging the slider right now
   const heldRef = useRef({ left: false, right: false, up: false }); // up = jump held (for the jetpack)
   const touchRef = useRef(0); // -1 holding left side, 1 holding right side
   const touchUpRef = useRef(false); // holding the middle of the screen (jetpack on phones)
@@ -554,7 +861,23 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const savingRef = useRef(false);
 
   const state = useRef({
-    mode: "select" as Mode,
+    mode: "home" as Mode,
+    // Pink Levels
+    gameMode: "infinite" as "infinite" | "levels",
+    homeChoice: 0, // 0 = PINK RUN INFINITE, 1 = PINK LEVELS
+    levelMode: false, // playing a level right now
+    level: 1,
+    levelPick: 0, // which stop on the level map you're standing on
+    mapWalk: null as null | { pts: [number, number][]; d: number; to: number }, // walking between stops
+    levelTime: 0, // seconds on the clock
+    levelMs: 0, // your final time
+    levelBest: {} as Record<string, number>, // best time per level (ms), from this browser
+    newBest: false,
+    doneAt: 0,
+    bong: null as null | { x: number; y: number },
+    signs: [] as { x: number; text: string }[],
+    lboss: null as null | { x: number; y: number; vx: number; vy: number; hp: number; maxHp: number; hit: number; dive: number; diveTimer: number; dead: number; facing: number },
+    lbossState: "none" as "none" | "waiting" | "fight" | "done",
     outfit: "classic" as OutfitId,
     unlocked: ["classic"] as OutfitId[],
     coins: 0,
@@ -578,6 +901,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     powerups: [] as PowerUp[],
     fireballs: [] as Fireball[],
     particles: [] as Particle[],
+    testRun: false, // started with the ?zone= test shortcut
+    voidPal: 0, // colour of the current SoundCloud Void visit
+    bubbles: [] as { x: number; y: number; life: number; r: number; ph: number }[],
+    smoke: [] as { x: number; y: number; vx: number; vy: number; r: number; life: number }[], // bong smoke
+    lasers: [] as { x: number; y: number; vx: number; ty: number; life: number }[], // drone lasers (jump over them!) // breathing underwater (coral field)
+    bubbleTimer: 0,
     popups: [] as Popup[],
     power: "none" as "none" | "fire" | "ice",
     ammo: 0,
@@ -674,7 +1003,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   };
 
   const beep = (from: number, to: number, time: number, volume: number, type: OscillatorType = "square", delay = 0) => {
-    if (mutedRef.current || !sfxOnRef.current) return;
+    if (mutedRef.current || !sfxOnRef.current || sfxVolRef.current <= 0) return;
+    volume *= sfxVolRef.current;
     const ac = getAudio();
     if (!ac) return;
     const now = ac.currentTime + delay;
@@ -692,6 +1022,14 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   };
 
   const playJump = () => beep(260, 640, 0.12, 0.045, "square");
+  const playCoin = () => [988, 1319].forEach((f, i) => beep(f, f, 0.07, 0.05, "square", i * 0.06));
+  // Some leaves are gold coins (same spot = always the same answer). Never in the Void or in words.
+  const isCoin = (l: Leaf) =>
+    l.coin === true ||
+    (!l.small &&
+      !state.current.inBonus &&
+      !state.current.levelMode &&
+      hash(Math.floor(l.x) * 7 + Math.floor(l.y) * 13) < COIN_CHANCE);
   const playLeaf = () => {
     beep(988, 988, 0.05, 0.045);
     beep(1319, 1319, 0.1, 0.045, "square", 0.05);
@@ -754,10 +1092,22 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const playPipe = () => [520, 390, 260, 180].forEach((f, i) => beep(f, f * 0.9, 0.08, 0.05, "square", i * 0.08));
   const playDeath = () => {
     const sound = deathSoundRef.current;
-    if (sound && !mutedRef.current && sfxOnRef.current) {
+    if (sound && !mutedRef.current && sfxOnRef.current && sfxVolRef.current > 0) {
+      sound.volume = sfxVolRef.current;
       sound.currentTime = 0;
       sound.play().catch(() => {});
     }
+  };
+
+  // Sound effects volume (0..1). Moving the slider up from 0 also turns the sounds back on.
+  const setSfxVolume = (v: number) => {
+    const vol = Math.max(0, Math.min(1, Math.round(v * 20) / 20));
+    sfxVolRef.current = vol;
+    if (vol > 0 && !sfxOnRef.current) sfxOnRef.current = true;
+    try {
+      localStorage.setItem(SFX_VOL_KEY, String(vol));
+      localStorage.setItem(SFX_KEY, sfxOnRef.current ? "on" : "off");
+    } catch {}
   };
 
   const toggleSfx = () => {
@@ -769,12 +1119,17 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
   // ---------- Scoreboard ----------
 
-  const loadBoard = async () => {
+  const loadBoard = async (game = "super") => {
+    boardStatusRef.current = "loading";
     try {
-      const res = await fetch("/api/scores?game=super", { cache: "no-store" });
+      const res = await fetch(`/api/scores?game=${game}`, { cache: "no-store" });
       if (!res.ok) throw new Error();
       const data = await res.json();
-      boardRef.current = Array.isArray(data.scores) ? data.scores : [];
+      let scores: { name: string; score: number }[] = Array.isArray(data.scores) ? data.scores : [];
+      // A level board only holds times (LEVEL_TIME_BASE - ms). If the server hands back something else
+      // (an old server that doesn't know the level boards yet), ignore it instead of showing nonsense times.
+      if (game !== "super") scores = scores.filter((e) => e.score > LEVEL_TIME_BASE - 3600000 && e.score < LEVEL_TIME_BASE);
+      boardRef.current = scores;
       boardStatusRef.current = "ok";
     } catch {
       boardStatusRef.current = "offline";
@@ -782,6 +1137,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   };
 
   const qualifies = (score: number) => {
+    if (state.current.testRun) return false; // test runs (?zone=...) never go on the scoreboard
     if (boardStatusRef.current !== "ok" || score < 10) return false;
     const b = boardRef.current;
     return b.length < 10 || score > b[b.length - 1].score;
@@ -803,17 +1159,27 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          game: "super",
+          game: s.levelMode ? levelGameId(s.level) : "super",
           name: clean,
-          score: Math.floor(s.score),
-          runTime: s.runTime,
+          score: s.levelMode ? LEVEL_TIME_BASE - s.levelMs : Math.floor(s.score),
+          runTime: s.levelMode ? s.levelTime + 1 : s.runTime,
           device: getDeviceId(),
           ownerCode: getOwnerCode(),
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setMessage(String(data.error || "COULD NOT SAVE").toUpperCase());
+        // Explain what the scoreboard said, in plain words
+        const why: Record<string, string> = {
+          "name reserved": "PINKMANE IS RESERVED, PICK ANOTHER NAME",
+          "beat their score to take this name": "THAT NAME HAS A HIGHER SCORE - BEAT IT TO TAKE IT",
+          "slow down": "WAIT 10 SECONDS, THEN TRY AGAIN",
+          "pick another name": "PICK ANOTHER NAME",
+          "score not valid": "SCORE COULD NOT BE CHECKED",
+          offline: "SCOREBOARD IS OFFLINE",
+        };
+        const err = String(data.error || "");
+        setMessage(why[err] ?? (err || "COULD NOT SAVE").toUpperCase());
         return;
       }
       boardRef.current = Array.isArray(data.scores) ? data.scores : boardRef.current;
@@ -962,7 +1328,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   // Builds the level a bit ahead of the camera. Gets harder the farther you go.
   const generateUpTo = (col: number) => {
     const s = state.current;
-    if (s.inBonus) return;
+    if (s.inBonus || s.levelMode) return; // levels are hand-made, nothing random gets added
     while (s.cols.length <= col) {
       const i = s.cols.length;
       const zone = zoneOf(i);
@@ -1251,7 +1617,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (s.inBonus) return s.cols[col] || makeCol(0, VOID_ZONE);
     if (col < 0) return s.eggCols[-col - 1] || makeCol(0, 0); // secret area, then a wall
     generateUpTo(col + 2);
-    return s.cols[col];
+    return s.cols[col] || makeCol(0, LEVEL_ZONE); // past the end of a level: a wall
   };
 
   // Ground and bonus blocks are solid. Bricks and thin lines are "one-way": you land on them from above.
@@ -1320,6 +1686,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.powerups = [];
     s.fireballs = [];
     s.particles = [];
+    s.bubbles = [];
+    s.smoke = [];
+    s.lasers = [];
     s.popups = [];
     s.pipeZones = [];
     s.power = "none";
@@ -1369,6 +1738,33 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.lives = START_LIVES;
     s.invuln = 0;
     s.runTime = 0;
+    s.testRun = false;
+    s.levelMode = false;
+    s.levelTime = 0;
+    s.bong = null;
+    s.signs = [];
+    s.lboss = null;
+    s.lbossState = "none";
+
+    // Test shortcut: start right at the zone from the address bar (?zone=...), localhost only
+    const tz = testStartZone();
+    if (tz > 0) {
+      const col0 = tz * ZONE_LEN;
+      generateUpTo(col0 + 40);
+      let c = col0 + 1;
+      while (c < col0 + 30 && (colAt(c).ground < 0 || colAt(c).pipe)) c++;
+      s.x = c * T;
+      s.y = colAt(c).ground * T - SPRITE_H;
+      s.cam = s.x - 40;
+      s.farthest = s.x;
+      s.eggOpen = false;
+      s.zoneShown = tz;
+      s.zoneMarks = [{ score: 0, zone: tz % ZONE_NAMES.length }];
+      s.lives = MAX_LIVES;
+      s.testRun = true;
+      s.flash = 3;
+      s.flashText = `TEST: ${ZONE_NAMES[tz]}`;
+    }
   };
 
   const jump = () => {
@@ -1505,6 +1901,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
     if (which === 2 || which === 4) s.followShown = true;
     s.lastVoid = which;
+    // pick a colour for this visit
+    let pal = Math.floor(Math.random() * VOID_PALETTES.length);
+    if (pal === s.voidPal) pal = (pal + 1 + Math.floor(Math.random() * (VOID_PALETTES.length - 1))) % VOID_PALETTES.length;
+    s.voidPal = pal;
     const room = buildVoid(which);
     // where the golden leaf floats in each room (high up, you have to work for it)
     const goldSpot: Record<number, [number, number]> = { 0: [22, 2], 1: [21, 2], 3: [27, 2] };
@@ -1582,18 +1982,167 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const bossSpeed = () => 1 + BOSS_SPEED_STEP * state.current.bossCount;
 
   // Picked a spell: you get it with a couple more shots than he needs, and free double jumps
+  // ---------- Pink Levels ----------
+
+  // Builds a level from its text map and puts you at the start
+  const startLevel = (n: number) => {
+    const def = LEVELS[n - 1];
+    if (!def) return;
+    newGame();
+    const s = state.current;
+    s.levelMode = true;
+    s.level = n;
+    s.levelTime = 0;
+    s.eggCols = [];
+    s.eggOpen = false;
+    s.jetItem = null;
+    s.goldLeaf = null;
+    s.cols = [];
+    s.enemies = [];
+    s.leaves = [];
+    s.hearts = [];
+    s.signs = [];
+    s.bong = null;
+    s.lboss = null;
+    s.lbossState = "none";
+    s.zoneMarks = [{ score: 0, zone: 0 }];
+    s.zoneShown = 999; // no zone names in levels
+    const map = def.map;
+    const len = Math.max(...map.map((r) => r.length));
+    let sign = 0;
+    for (let c = 0; c < len; c++) {
+      let ground = -1;
+      for (let r = 0; r < map.length; r++) {
+        if (map[r][c] === "#") {
+          ground = r;
+          break;
+        }
+      }
+      const col = makeCol(ground, LEVEL_ZONE);
+      for (let r = 0; r < map.length; r++) {
+        const ch = map[r][c];
+        const x = c * T;
+        if (ch === "=") col.block = r;
+        else if (ch === "-") {
+          col.line = r;
+          col.lineTh = 3;
+        } else if (ch === "?") col.bonus = r;
+        else if (ch === "L") s.leaves.push({ x: x + 1, y: r * T + 1, taken: false });
+        else if (ch === "C") s.leaves.push({ x: x + 1, y: r * T + 1, taken: false, coin: true });
+        else if (ch === "H") s.hearts.push({ x: x + 1, y: r * T + 2, taken: false });
+        else if (ch === "w") addWalker(c, r + 1, 0);
+        else if (ch === "f") {
+          addFlyer(c, r + 3, 0);
+          s.enemies[s.enemies.length - 1].baseY = r * T;
+          s.enemies[s.enemies.length - 1].y = r * T;
+        } else if (ch === "S") s.signs.push({ x, text: def.signs[sign++] ?? "" });
+        else if (ch === "A") {
+          s.bossCol = c - 1;
+          s.lbossState = "waiting";
+        } else if (ch === "B") s.bong = { x: x - 2, y: (r + 1) * T - BONG_H };
+      }
+      s.cols.push(col);
+    }
+    s.x = 2 * T;
+    s.y = 8 * T - SPRITE_H;
+    s.cam = 0;
+    s.farthest = s.x;
+    s.mode = "ready";
+    loadBoard(levelGameId(n));
+  };
+
+  // Reads your best level times from this browser
+  const loadLevelProgress = () => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(LEVEL_PROGRESS_KEY) || "{}");
+      if (raw && typeof raw === "object") state.current.levelBest = raw;
+    } catch {}
+  };
+
+  // The camera reached the arena: lock the screen, bring in the evil leaf, pick a spell
+  const startLevelBoss = () => {
+    const s = state.current;
+    const def = LEVELS[s.level - 1];
+    s.lbossState = "fight";
+    s.bossState = "fight"; // shares the arena rules: locked screen, free double jumps, keep your spell
+    s.cam = s.bossCol * T;
+    s.bossRefill = 0;
+    for (const e of s.enemies) {
+      e.alive = false;
+      e.squash = 0;
+    }
+    const hp = def?.bossHp ?? 10;
+    s.lboss = { x: s.cam + W - 60, y: 30, vx: 0, vy: 0, hp, maxHp: hp, hit: 0, dive: 0, diveTimer: 2.5, dead: 0, facing: -1 };
+    heldRef.current = { left: false, right: false, up: false };
+    touchRef.current = 0;
+    s.vx = 0;
+    s.spellChoice = 0;
+    s.mode = "choose";
+  };
+
+  const hitLevelBoss = (ice: boolean) => {
+    const s = state.current;
+    const b = s.lboss;
+    if (!b || b.dead > 0) return;
+    const cx = b.x + EL_W / 2;
+    const cy = b.y + EL_H / 2;
+    b.hp -= 1; // every shot that touches it counts (ammo is tight)
+    b.hit = 0.35;
+    burst(cx, cy, 16, ice ? ICE : FIRE, 70);
+    s.shake = 0.1;
+    playStomp();
+    if (b.hp <= 0) {
+      b.dead = 1.6;
+      popup(cx, b.y - 6, "BYE EVIL LEAF!");
+      playTrollDeath();
+    } else {
+      popup(cx, b.y - 6, `${b.hp} LEFT`);
+    }
+  };
+
+  // You touched the bong: stop the clock, save your time
+  const finishLevel = () => {
+    const s = state.current;
+    s.levelMs = Math.round(s.levelTime * 1000);
+    const key = String(s.level);
+    const old = s.levelBest[key];
+    s.newBest = !old || s.levelMs < old;
+    if (s.newBest) {
+      s.levelBest = { ...s.levelBest, [key]: s.levelMs };
+      try {
+        localStorage.setItem(LEVEL_PROGRESS_KEY, JSON.stringify(s.levelBest));
+      } catch {}
+    }
+    s.mode = "levelDone";
+    s.doneAt = s.t;
+    s.vx = 0;
+    heldRef.current = { left: false, right: false, up: false };
+    const b = s.bong;
+    if (b) {
+      // a big cloud of smoke rising out of the bong
+      for (let i = 0; i < 26; i++) {
+        s.smoke.push({ x: b.x + BONG_W / 2 + rand(-4, 4), y: b.y + rand(-2, 6), vx: rand(-14, 14), vy: rand(-34, -14), r: rand(2, 4), life: rand(1.6, 3) });
+      }
+    }
+    playHeart();
+  };
+
   const pickSpell = (choice: number) => {
     const s = state.current;
-    if (s.mode !== "choose" || !s.boss) return;
+    if (s.mode !== "choose" || (!s.boss && !s.lboss)) return;
     const kind: PowerKind = choice === 1 ? "ice" : "fire";
     s.bossSpell = kind;
     s.power = kind;
-    s.ammo = s.boss.maxHp + BOSS_SPARE_SHOTS;
+    s.ammo = (s.boss ? s.boss.maxHp : s.lboss ? s.lboss.maxHp : 10) + BOSS_SPARE_SHOTS;
     s.fireTime = kind === "fire" ? 999 : 0; // no timer in a boss fight
     s.mode = "running";
     s.flash = 1.6;
     const bossLabel = s.boss?.kind === "giant" ? "GIANT" : "TROLL";
-    s.flashText = s.bossCount === 0 ? `FIGHT THE ${bossLabel}!` : `${bossLabel} #${s.bossCount + 1}!`;
+    s.flashText = s.lboss
+      ? "SHOOT THE EVIL LEAF!"
+      : s.bossCount === 0
+        ? `FIGHT THE ${bossLabel}!`
+        : `${bossLabel} #${s.bossCount + 1}!`;
     s.hinted = s.hinted.filter((h) => h !== "bossjump");
     showHint("bossjump", "FREE DOUBLE JUMPS HERE!");
     s.hintTime = 4;
@@ -1641,12 +2190,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     try {
       localStorage.setItem(COINS_KEY, String(s.coins));
     } catch {}
-    if (s.coins >= ICY_COST) unlockOutfit("icy");
   };
 
   const playTrollDeath = () => {
     try {
       const a = new Audio(TROLL_DEATH_SOUND);
+      a.volume = sfxVolRef.current;
       a.muted = mutedRef.current;
       const resume = () => window.dispatchEvent(new CustomEvent("pinkmane-music", { detail: "resume" }));
       a.addEventListener("ended", resume);
@@ -1718,8 +2267,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (s.lives <= 0) {
       s.mode = "dying";
       s.deadAt = s.t;
-      addCoins(Math.floor(s.score));
-      if (s.score > s.best) {
+      if (!s.levelMode && s.score > s.best) {
         s.best = Math.floor(s.score);
         try {
           localStorage.setItem(BEST_KEY, String(s.best));
@@ -1734,6 +2282,13 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
   const finishDeath = () => {
     const s = state.current;
+    if (s.levelMode) {
+      // no scoreboard for a lost level, just try again
+      s.mode = "levelSelect";
+      s.flash = 2;
+      s.flashText = "TRY AGAIN!";
+      return;
+    }
     if (qualifies(Math.floor(s.score))) {
       s.mode = "entry";
       setMessage("");
@@ -1748,14 +2303,54 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const press = () => {
     const s = state.current;
     getAudio(); // browsers only allow sound after a click, so wake it up here
+    if (s.mode === "home") {
+      // The pink start screen: pick INFINITE or LEVELS, then your outfit
+      s.gameMode = s.homeChoice === 1 ? "levels" : "infinite";
+      if (s.gameMode === "infinite") {
+        loadBoard("super");
+        newGame();
+      }
+      s.mode = "select";
+      return;
+    }
+    if (s.mode === "levelSelect") {
+      if (s.mapWalk) return;
+      if (LEVELS[s.levelPick]) startLevel(s.levelPick + 1);
+      else {
+        s.flash = 1.5;
+        s.flashText = "COMING SOON";
+      }
+      return;
+    }
+    if (s.mode === "levelDone") {
+      if (s.t - s.doneAt < 1) return;
+      if (qualifies(LEVEL_TIME_BASE - s.levelMs)) {
+        s.mode = "entry";
+        setMessage("");
+        setShowEntry(true);
+      } else {
+        s.mode = "board";
+        s.deadAt = s.t;
+      }
+      return;
+    }
     if (s.mode === "select") {
       const o = OUTFITS[s.selectIndex];
+      if (!s.unlocked.includes(o.id) && o.id === "icy" && s.coins >= ICY_COST) {
+        // buy it with gold coins
+        s.coins -= ICY_COST;
+        try {
+          localStorage.setItem(COINS_KEY, String(s.coins));
+        } catch {}
+        unlockOutfit(o.id);
+        playHeart();
+      }
       if (s.unlocked.includes(o.id)) {
         s.outfit = o.id;
         try {
           localStorage.setItem(OUTFIT_KEY, o.id);
         } catch {}
-        s.mode = "ready";
+        s.mode = s.gameMode === "levels" ? "levelSelect" : "ready";
       } else {
         s.flash = 1.2;
         s.flashText = `LOCKED \u2014 ${o.how}`;
@@ -1780,8 +2375,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     } else if (s.mode === "entry") {
       submitName();
     } else if (s.mode === "board" && s.t - s.deadAt > 0.6) {
-      newGame();
-      s.mode = "running";
+      if (s.levelMode) {
+        s.mode = "levelSelect"; // back to the list of levels
+      } else {
+        newGame();
+        s.mode = "running";
+      }
     }
   };
 
@@ -1817,10 +2416,17 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     e.squash = 0.35;
     s.killStreak += 1;
     s.killStreakTimer = KILL_STREAK_WINDOW;
-    const doubled = s.killStreak >= 2;
-    const finalPoints = doubled ? points * 2 : points;
+    // 2 = DOUBLE, 3 = TRIPLE, 4 = QUADRA, 5+ = PENTAKILL. Points get multiplied by the streak (max x5).
+    const streak = Math.min(s.killStreak, 5);
+    const finalPoints = points * streak;
+    const names = ["", "", "DOUBLE KILL!", "TRIPLE KILL!", "QUADRA KILL!", "PENTAKILL!"];
     s.bonus += finalPoints;
-    popup(e.x + 7, e.y - 4, doubled ? `+${finalPoints} DOUBLE KILL!` : `+${finalPoints}`);
+    popup(e.x + 7, e.y - 4, streak >= 2 ? `+${finalPoints} ${names[streak]}` : `+${finalPoints}`);
+    if (streak >= 3) {
+      s.flash = 1.3;
+      s.flashText = names[streak];
+      [880, 1175, 1568].slice(0, streak - 1).forEach((f, i) => beep(f, f, 0.08, 0.05, "square", i * 0.07));
+    }
     burst(e.x + 7, e.y + 7, 12, e.kind === "flyer" ? [LIGHT_GREEN, DARK_GREEN, "#ffffff"] : ["#8a8a8a", "#ffffff", INK], 60);
     playStomp();
   };
@@ -1838,6 +2444,40 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       p.life -= dt;
     }
     s.particles = s.particles.filter((p) => p.life > 0);
+    // bong smoke rises, spreads and fades
+    for (const m of s.smoke) {
+      m.x += m.vx * dt;
+      m.y += m.vy * dt;
+      m.vx *= 1 - dt * 0.8;
+      m.r += dt * 4;
+      m.life -= dt;
+    }
+    s.smoke = s.smoke.filter((m) => m.life > 0);
+    if (s.mode === "levelSelect") updateMap(dt);
+
+    // TWISTED CORAL PEAKS: bubbles come out of your mouth like you're breathing underwater
+    if (s.mode === "running" && !s.inBonus && colAt(Math.floor((s.x + SPRITE_W / 2) / T)).zone === F_CORAL) {
+      s.bubbleTimer -= dt;
+      if (s.bubbleTimer <= 0) {
+        s.bubbleTimer = rand(0.5, 1.1);
+        const count = 1 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < count; i++) {
+          s.bubbles.push({
+            x: s.x + (s.facing > 0 ? SPRITE_W - 3 : 3) + rand(-1, 1),
+            y: s.y + 15 - i * 4,
+            life: rand(1.2, 2),
+            r: i === 0 ? 2 : 1 + Math.round(Math.random()),
+            ph: Math.random() * 6,
+          });
+        }
+      }
+    }
+    for (const b of s.bubbles) {
+      b.y -= 20 * dt;
+      b.x += Math.sin(s.t * 4 + b.ph) * 8 * dt;
+      b.life -= dt;
+    }
+    s.bubbles = s.bubbles.filter((b) => b.life > 0);
     for (const p of s.popups) {
       p.y -= 18 * dt;
       p.life -= dt;
@@ -1873,6 +2513,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           s.boss.x = s.cam + W - 50; // the troll backs off so you get a fair restart
           s.boss.vx = 0;
         }
+        if (s.lboss) {
+          s.lboss.x = s.cam + W - 60;
+          s.lboss.y = 30;
+          s.lboss.dive = 0;
+        }
         s.invuln = 1.5;
         s.mode = "running";
       }
@@ -1891,6 +2536,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (s.mode !== "running") return;
 
     s.runTime += dt;
+    if (s.levelMode) s.levelTime += dt;
     if (!s.unlocked.includes("og") && s.score >= OG_SCORE_UNLOCK) unlockOutfit("og");
     if (s.invuln > 0) s.invuln -= dt;
 
@@ -2028,6 +2674,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       s.cam = Math.max(s.cam, s.x - 90);
       generateUpTo(Math.floor((s.cam + W) / T) + 4);
       if (s.bossState === "placed" && s.cam >= s.bossCol * T) startBoss();
+      if (s.levelMode) {
+        s.cam = Math.min(s.cam, s.cols.length * T - W);
+        if (s.x + HB_X + HB_W > s.cols.length * T) s.x = s.cols.length * T - HB_X - HB_W;
+        if (s.lbossState === "waiting" && s.cam >= s.bossCol * T) startLevelBoss();
+      }
     }
 
     // Vertical camera: when a jump or a jetpack flight takes you higher than the screen
@@ -2094,7 +2745,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
 
     // Zone name when you enter a new zone
-    if (!s.inBonus) {
+    if (!s.inBonus && !s.levelMode) {
       const zoneIndex = Math.floor(Math.floor(s.x / T) / ZONE_LEN);
       if (zoneIndex > s.zoneShown) {
         s.zoneShown = zoneIndex;
@@ -2225,8 +2876,28 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           hitBoss(f.ice);
         }
       }
+      const lb = s.lboss;
+      if (f.life > 0 && lb && lb.dead <= 0) {
+        if (f.x + 4 > lb.x + 6 && f.x < lb.x + EL_W - 6 && f.y + 4 > lb.y + 4 && f.y < lb.y + EL_H - 4) {
+          f.life = 0;
+          hitLevelBoss(f.ice);
+        }
+      }
     }
     s.fireballs = s.fireballs.filter((f) => f.life > 0);
+
+    // Drone lasers: swoop down to waist height, then fly straight. Touching one hurts.
+    for (const l of s.lasers) {
+      l.x += l.vx * dt;
+      l.y += (l.ty - l.y) * Math.min(1, dt * 8);
+      l.life -= dt;
+      if (l.life > 0 && s.invuln <= 0 && hx() + HB_W > l.x && hx() < l.x + 12 && hy() + HB_H > l.y && hy() < l.y + 3) {
+        l.life = 0;
+        hurt();
+        return;
+      }
+    }
+    s.lasers = s.lasers.filter((l) => l.life > 0 && l.x > s.cam - 40 && l.x < s.cam + W + 40);
 
     // Monsters
     for (const e of s.enemies) {
@@ -2238,7 +2909,26 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         if (e.x < s.cam - 60) e.alive = false;
         continue;
       }
-      if (e.kind === "flyer") {
+      if (e.kind === "flyer" && colAt(Math.floor((e.x + 9) / T)).zone === F_IPOD && !s.inBonus) {
+        // IPOD USER drone: hovers above head height, drifts, and every few seconds fires a red laser
+        // that swoops down to your waist and races along: jump over it
+        e.phase += dt * 3;
+        e.x += e.vx * 0.6 * dt;
+        const g = colAt(Math.floor((e.x + 9) / T)).ground;
+        const floor = (g >= 0 ? g : 8) * T;
+        e.y += (floor - 58 + Math.sin(e.phase) * 3 - e.y) * Math.min(1, dt * 3);
+        if (e.shoot === undefined) e.shoot = rand(1, 2.2);
+        const dxp = s.x + SPRITE_W / 2 - (e.x + 9);
+        if (Math.abs(dxp) < 230 && e.x > s.cam && e.x < s.cam + W - 10) {
+          e.shoot -= dt;
+          if (e.shoot <= 0) {
+            e.shoot = rand(2.2, 3.4);
+            const dir = dxp < 0 ? -1 : 1;
+            s.lasers.push({ x: e.x + 4, y: e.y + 12, vx: dir * LASER_SPEED, ty: s.y + SPRITE_H - 16, life: 3 });
+            beep(1400, 500, 0.12, 0.035, "sawtooth");
+          }
+        }
+      } else if (e.kind === "flyer") {
         // Green flyer: floats left in a wave
         e.phase += dt * 2.6;
         e.x += e.vx * dt;
@@ -2276,6 +2966,90 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
     }
     s.enemies = s.enemies.filter((e) => e.alive || e.squash > 0);
+
+    // The evil weed leaf: floats around, follows you, and every few seconds dives at you
+    const lb = s.lboss;
+    if (s.levelMode && lb) {
+      if (lb.dead > 0) {
+        lb.dead -= dt;
+        lb.y += 40 * dt;
+        if (Math.random() < 0.6) burst(lb.x + rand(4, EL_W - 4), lb.y + rand(4, EL_H), 2, [LIGHT_GREEN, GREEN, "#ffffff"], 40);
+        if (lb.dead <= 0) {
+          s.lboss = null;
+          s.lbossState = "done";
+          s.bossState = "none";
+          s.flash = 2.5;
+          s.flashText = "EVIL LEAF DOWN! GO HIT THE BONG";
+          if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
+          s.ammo = Math.min(s.ammo, 5);
+        }
+      } else {
+        if (lb.hit > 0) lb.hit -= dt;
+        const pc = s.x + HB_X + HB_W / 2;
+        const bc = lb.x + EL_W / 2;
+        lb.facing = pc < bc ? -1 : 1;
+        const floorY = 8 * T - EL_H;
+        if (lb.dive > 0) {
+          lb.dive -= dt;
+          lb.vy = Math.min(lb.vy + 520 * dt, 260);
+          lb.y += lb.vy * dt;
+          lb.x += lb.vx * dt;
+          if (lb.y >= floorY) {
+            lb.y = floorY;
+            lb.dive = 0;
+            s.shake = 0.1;
+          }
+        } else {
+          const hoverY = 46 + Math.sin(s.t * 2) * 10;
+          lb.y += (hoverY - lb.y) * Math.min(1, dt * 1.6);
+          lb.vx += (lb.facing * 50 - lb.vx) * Math.min(1, dt * 2);
+          lb.x += lb.vx * dt;
+          lb.diveTimer -= dt;
+          if (lb.diveTimer <= 0 && Math.abs(pc - bc) < 100) {
+            lb.dive = 1.4;
+            lb.vy = 40;
+            lb.vx = lb.facing * 60;
+            lb.diveTimer = rand(2.4, 3.6);
+            playBump();
+          }
+        }
+        lb.x = Math.max(s.cam, Math.min(s.cam + W - EL_W, lb.x));
+        // touching it hurts; landing on top just bounces you off
+        const bx1 = lb.x + 6;
+        const by1 = lb.y + 4;
+        if (hx() + HB_W > bx1 && hx() < bx1 + EL_W - 12 && hy() + HB_H > by1 && hy() < by1 + EL_H - 8) {
+          if (s.vy > 0 && hy() + HB_H - by1 < 12) {
+            s.vy = STOMP_BOUNCE;
+            popup(lb.x + EL_W / 2, lb.y - 6, "NOPE!");
+            playBump();
+          } else if (s.invuln <= 0) {
+            hurt();
+            return;
+          }
+        }
+      }
+      // the arena's bonus blocks refill every few seconds
+      s.bossRefill += dt;
+      if (s.bossRefill > 10) {
+        s.bossRefill = 0;
+        for (let k = 0; k < 22; k++) {
+          const c = colAt(s.bossCol + k);
+          if (c.bonus >= 0 && c.used) {
+            c.used = false;
+            c.bump = 0.15;
+          }
+        }
+      }
+    }
+
+    // The bong: touch it to finish the level
+    const bg = s.bong;
+    if (s.levelMode && bg && s.lbossState !== "fight") {
+      if (hx() + HB_W > bg.x + 2 && hx() < bg.x + BONG_W - 2 && hy() + HB_H > bg.y + 4 && hy() < bg.y + BONG_H) {
+        finishLevel();
+        return;
+      }
+    }
 
     // The troll (or, every other fight, the bigger giant): walks at you, sometimes jumps at
     // you. Shots hurt him; the giant additionally needs a finishing stomp once he's down.
@@ -2388,12 +3162,19 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
     }
 
-    // Weed leaves: points
+    // Weed leaves: points. Gold coins: money for outfits.
     for (const l of s.leaves) {
       if (l.taken) continue;
       const size = l.small ? 8 : 14;
       if (hx() + HB_W > l.x && hx() < l.x + size && hy() + HB_H > l.y && hy() < l.y + size) {
         l.taken = true;
+        if (isCoin(l)) {
+          addCoins(1);
+          popup(l.x + 7, l.y - 4, "+1 COIN");
+          burst(l.x + 7, l.y + 7, 10, ["#ffd700", "#fff3a0", "#b8860b"], 50);
+          playCoin();
+          continue;
+        }
         s.bonus += PTS_LEAF;
         burst(l.x + 7, l.y + 7, 8, [GREEN, DARK_GREEN, "#ffffff"], 45);
         playLeaf();
@@ -2441,6 +3222,30 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
   };
 
+  // The sound effects slider: a thin bar going down from the speaker icon (top = loud, bottom = quiet)
+  const SFX_SLIDER = { x: 9, top: 18, bottom: 58 };
+  const drawSfxSlider = (ctx: CanvasRenderingContext2D, color: string) => {
+    const { x, top, bottom } = SFX_SLIDER;
+    const vol = sfxOnRef.current ? sfxVolRef.current : 0;
+    const knobY = Math.round(bottom - vol * (bottom - top));
+    ctx.globalAlpha = sfxDragRef.current ? 1 : 0.75;
+    ctx.fillStyle = INK;
+    ctx.fillRect(x - 1, top - 1, 5, bottom - top + 2);
+    ctx.fillStyle = "#6e6478";
+    ctx.fillRect(x, top, 3, bottom - top);
+    ctx.fillStyle = PINK;
+    ctx.fillRect(x, knobY, 3, bottom - knobY);
+    // knob
+    ctx.fillStyle = INK;
+    ctx.fillRect(x - 3, knobY - 2, 9, 5);
+    ctx.fillStyle = color === INK ? "#ffffff" : color;
+    ctx.fillRect(x - 2, knobY - 1, 7, 3);
+    ctx.globalAlpha = 1;
+  };
+  // Is this canvas point on the slider? (a bit wider than it looks, easier to grab)
+  const onSfxSlider = (cx: number, cy: number) => cx < 22 && cy >= SFX_SLIDER.top - 5 && cy <= SFX_SLIDER.bottom + 5;
+  const sfxFromY = (cy: number) => setSfxVolume((SFX_SLIDER.bottom - cy) / (SFX_SLIDER.bottom - SFX_SLIDER.top));
+
   const textBox = (ctx: CanvasRenderingContext2D, text: string, y: number) => {
     const w = ctx.measureText(text).width + 8;
     ctx.fillStyle = SCREEN;
@@ -2460,30 +3265,65 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     ctx.textAlign = "center";
 
     if (status !== "ok") {
-      ctx.fillText("GAME OVER", W / 2, 40);
-      ctx.fillText(`YOU SMOKED ${Math.floor(s.score)} GRAMS`, W / 2, 58);
+      ctx.fillText(s.levelMode ? `LVL ${s.level} DONE!` : "GAME OVER", W / 2, 40);
+      ctx.fillText(s.levelMode ? `YOUR TIME ${fmtTime(s.levelMs)}` : `YOU SMOKED ${Math.floor(s.score)} GRAMS`, W / 2, 58);
       ctx.fillText(status === "loading" ? "LOADING SCORES..." : "SCOREBOARD OFFLINE", W / 2, 80);
     } else {
-      ctx.fillText("TOP 10", W / 2, 8);
+      ctx.fillText(s.levelMode ? `LVL ${s.level} BEST TIMES` : "TOP 10", W / 2, 8);
       const b = boardRef.current;
       if (b.length === 0) ctx.fillText("NO SCORES YET", W / 2, 60);
+      const MEDALS = ["#ffd700", "#c8ccd6", "#cd7f32"]; // gold, silver, bronze
       b.slice(0, 10).forEach((e, i) => {
         const y = 22 + i * 11;
-        if (e.name === myNameRef.current) {
-          ctx.fillStyle = PINK;
+        // every row wiggles a little, like an old screen
+        const wob = Math.round(Math.sin(s.t * 2.2 + i * 0.8) * 1.5);
+        ctx.save();
+        ctx.translate(wob, 0);
+        if (i < 3) {
+          ctx.fillStyle = MEDALS[i];
           ctx.fillRect(24, y - 2, W - 48, 11);
+          // a shine sweeping across the gold one
+          if (i === 0) {
+            const sx = 24 + ((s.t * 90) % (W + 40)) - 20;
+            ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+            ctx.fillRect(Math.round(sx), y - 2, 6, 11);
+            ctx.fillRect(Math.round(sx) + 8, y - 2, 2, 11);
+          }
+        }
+        if (e.name === myNameRef.current) {
+          // your own row: pink frame
+          ctx.fillStyle = PINK;
+          ctx.fillRect(22, y - 3, W - 44, 1);
+          ctx.fillRect(22, y + 9, W - 44, 1);
+          ctx.fillRect(22, y - 3, 1, 13);
+          ctx.fillRect(W - 23, y - 3, 1, 13);
         }
         ctx.fillStyle = INK;
         ctx.textAlign = "left";
         ctx.fillText(`${String(i + 1).padStart(2, " ")} ${e.name}`, 28, y);
         ctx.textAlign = "right";
-        ctx.fillText(pad(e.score), W - 28, y);
+        ctx.fillText(s.levelMode ? fmtTime(LEVEL_TIME_BASE - e.score) : pad(e.score), W - 28, y);
+        ctx.restore();
       });
       ctx.textAlign = "center";
-      ctx.fillText(`YOU SMOKED ${Math.floor(s.score)} GRAMS`, W / 2, 134);
+      ctx.fillText(s.levelMode ? `YOUR TIME ${fmtTime(s.levelMs)}` : `YOU SMOKED ${Math.floor(s.score)} GRAMS`, W / 2, 134);
     }
 
-    if (Math.floor(s.t * 2) % 2 === 0) ctx.fillText("OK TO PLAY AGAIN", W / 2, 148);
+    if (Math.floor(s.t * 2) % 2 === 0) ctx.fillText(s.levelMode ? "OK TO GO ON" : "OK TO PLAY AGAIN", W / 2, 148);
+
+    // Old screen effect: scanlines, a slow rolling bright band, a little flicker, dark corners
+    ctx.fillStyle = "rgba(0, 0, 0, 0.1)";
+    for (let y = 0; y < H; y += 2) ctx.fillRect(0, y, W, 1);
+    const band = (s.t * 30) % (H + 30) - 30;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.07)";
+    ctx.fillRect(0, Math.round(band), W, 14);
+    ctx.fillStyle = `rgba(0, 0, 0, ${0.03 + Math.abs(Math.sin(s.t * 13)) * 0.03})`;
+    ctx.fillRect(0, 0, W, H);
+    const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, W * 0.62);
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(1, "rgba(0,0,0,0.35)");
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
   };
 
   // One twisted tree, drawn as outlines. Its branches sway a little in the wind.
@@ -2548,13 +3388,83 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   };
 
   // Background for each zone (moves slower than the level, so it feels far away)
+  // A big weed leaf (7 fingers), used for the Weedland background
+  const drawBigLeaf = (ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, angle: number, color: string) => {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.fillStyle = color;
+    const fingers: [number, number][] = [[-1.35, 0.45], [-0.9, 0.7], [-0.45, 0.9], [0, 1], [0.45, 0.9], [0.9, 0.7], [1.35, 0.45]];
+    for (const [a, l] of fingers) {
+      const len = l * size;
+      ctx.save();
+      ctx.rotate(a);
+      ctx.beginPath();
+      ctx.ellipse(0, -len / 2, size * 0.09, len / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.fillRect(-1, 0, 2, size * 0.45);
+    ctx.restore();
+  };
+
+  // WEEDLAND (Level 1): a green fantasy sky with giant swaying leaves and glowing spores
+  const drawWeedland = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    const cam = s.cam;
+    const g = ctx.createLinearGradient(0, -200, 0, H);
+    g.addColorStop(0, WL_SKY_TOP);
+    g.addColorStop(1, WL_SKY_BOTTOM);
+    ctx.fillStyle = g;
+    ctx.fillRect(-4, -1200, W + 8, H + 1400);
+    // soft sun
+    ctx.fillStyle = "rgba(255, 250, 190, 0.8)";
+    ctx.beginPath();
+    ctx.arc(W - 50, 26, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255, 250, 190, 0.3)";
+    ctx.beginPath();
+    ctx.arc(W - 50, 26, 22, 0, Math.PI * 2);
+    ctx.fill();
+    // far hills
+    ctx.fillStyle = "#5fb85a";
+    for (let x = -4; x < W + 4; x += 4) {
+      const hgt = 26 + Math.sin((x + cam * 0.1) * 0.02) * 10 + Math.sin((x + cam * 0.1) * 0.05) * 5;
+      ctx.fillRect(x, H - 44 - hgt, 4, hgt + 60);
+    }
+    // giant leaves swaying (far = pale, near = darker)
+    for (const [par, gap, size, color] of [
+      [0.2, 90, 34, "rgba(80, 170, 70, 0.45)"],
+      [0.4, 130, 48, "rgba(40, 130, 50, 0.55)"],
+    ] as [number, number, number, string][]) {
+      const base = Math.floor((cam * par) / gap);
+      for (let i = -1; i < W / gap + 2; i++) {
+        const idx = base + i;
+        const x = idx * gap - cam * par + hash(idx + 17) * 30;
+        const sway = Math.sin(s.t * 0.9 + idx) * 0.12;
+        drawBigLeaf(ctx, x, H - 40 - hash(idx + 3) * 20, size, sway, color);
+      }
+    }
+    // glowing spores floating up
+    for (let k = 0; k < 22; k++) {
+      const x = ((((hash(k) * 600 - cam * 0.5 + Math.sin(s.t + k) * 6) % (W + 20)) + W + 20) % (W + 20)) - 10;
+      const y = H - ((s.t * (8 + hash(k + 5) * 10) + hash(k + 9) * H) % (H + 20));
+      ctx.fillStyle = k % 3 === 0 ? "#fff7a8" : "#eaffc0";
+      ctx.fillRect(Math.round(x), Math.round(y), 2, 2);
+    }
+  };
+
   const drawBackground = (ctx: CanvasRenderingContext2D, zone: number) => {
     const s = state.current;
     const cam = s.cam;
+    if (zone === LEVEL_ZONE) {
+      drawWeedland(ctx);
+      return;
+    }
 
     if (zone === VOID_ZONE) {
       // SoundCloud Void: dark room with a moving sound wave, tinted a bit differently per room
-      const pal = VOID_PALETTES[((s.lastVoid % VOID_PALETTES.length) + VOID_PALETTES.length) % VOID_PALETTES.length] || VOID_PALETTES[0];
+      const pal = VOID_PALETTES[s.voidPal] || VOID_PALETTES[0];
       ctx.fillStyle = pal.bg;
       // Extended upward so it still fully covers the screen when the vertical camera scrolls up
       ctx.fillRect(-4, -1200, W + 8, H + 1400);
@@ -2576,9 +3486,41 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         // Stack extra copies directly above the visible one, so jumping high (which
         // scrolls the screen up) reveals more of the same cover instead of a plain gap.
         const COPIES_ABOVE = 6;
+        const wiggle = FIELD_WIGGLE[zone - FIELD_ZONE_START];
         for (let i = -COPIES_ABOVE; i <= 0; i++) {
-          ctx.drawImage(img, 0, i * H, W, H);
+          const top = i * H;
+          if (top > s.camY + H || top + H < s.camY) continue; // not on screen
+          if (!wiggle) {
+            ctx.drawImage(img, 0, top, W, H);
+            continue;
+          }
+          // Wiggle: draw the cover in thin strips, each one nudged sideways by a slow wave
+          const STRIP = 4;
+          const sh = img.naturalHeight / (H / STRIP);
+          for (let y = 0; y < H; y += STRIP) {
+            const off = Math.sin(s.t * 1.6 + (top + y) * 0.07) * 3;
+            ctx.drawImage(img, 0, (y / STRIP) * sh, img.naturalWidth, sh, -4 + off, top + y, W + 8, STRIP + 1);
+          }
         }
+      }
+      if (zone - FIELD_ZONE_START === F_CORAL - FIELD_ZONE_START) {
+        // Underwater: darker blue water on top of the cover, with light rippling through
+        ctx.fillStyle = "rgba(8, 40, 90, 0.38)";
+        ctx.fillRect(-4, -1200, W + 8, H + 1400);
+        ctx.fillStyle = "rgba(170, 225, 255, 0.22)";
+        for (let band = 0; band < 5; band++) {
+          const by = 14 + band * 30;
+          for (let x = 0; x < W; x += 2) {
+            const y = by + Math.sin(s.t * 1.4 + x * 0.05 + band) * 4 + Math.sin(s.t * 0.7 + x * 0.013) * 3;
+            ctx.fillRect(x, Math.round(y), 2, 1);
+          }
+        }
+      }
+      // Wash out the darker covers a bit so the level on top of them is easy to see
+      const wash = FIELD_WASH[zone - FIELD_ZONE_START] ?? 0;
+      if (wash > 0) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${wash})`;
+        ctx.fillRect(-4, -1200, W + 8, H + 1400);
       }
       return;
     }
@@ -2842,6 +3784,23 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
       return;
     }
+    if (c.zone === LEVEL_ZONE) {
+      // rich soil with grass on top and little tufts
+      ctx.fillStyle = WL_SOIL;
+      ctx.fillRect(x, gy, T, H - gy);
+      ctx.fillStyle = "#1e3417";
+      ctx.fillRect(x + ((col * 7) % 12) + 2, gy + 9, 2, 2);
+      ctx.fillRect(x + ((col * 5) % 10) + 3, gy + 19, 2, 2);
+      ctx.fillStyle = WL_GRASS;
+      ctx.fillRect(x, gy, T, 3);
+      ctx.fillStyle = "#a6f07e";
+      ctx.fillRect(x + ((col * 3) % 12) + 1, gy - 2, 1, 2);
+      ctx.fillRect(x + ((col * 7) % 12) + 3, gy - 1, 1, 1);
+      ctx.fillStyle = "#3f8a34";
+      ctx.fillRect(x, gy + 3, T, 1);
+      return;
+    }
+    if (drawFieldGround(ctx, c, col, x, gy)) return;
     ctx.fillStyle = INK;
     ctx.fillRect(x, gy, T, H - gy);
     ctx.fillStyle = PINK;
@@ -2851,7 +3810,144 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     void s;
   };
 
+  // A spinning gear (TOP SHELF FIELD, under the ground)
+  const drawGear = (ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, angle: number) => {
+    ctx.fillStyle = "#5a606e";
+    for (let k = 0; k < 8; k++) {
+      const a = angle + (k * Math.PI) / 4;
+      ctx.fillRect(Math.round(cx + Math.cos(a) * (r + 1) - 1.5), Math.round(cy + Math.sin(a) * (r + 1) - 1.5), 3, 3);
+    }
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#8c94a2";
+    ctx.beginPath();
+    ctx.arc(cx, cy, r - 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#2a2d34";
+    ctx.fillRect(Math.round(cx) - 1, Math.round(cy) - 1, 3, 3);
+    // a spoke so you can see it turning
+    ctx.fillRect(Math.round(cx + Math.cos(angle) * (r - 3)) - 1, Math.round(cy + Math.sin(angle) * (r - 3)) - 1, 2, 2);
+  };
+
+  // Ground for the cover-art fields. Returns false for fields that keep the plain look.
+  const drawFieldGround = (ctx: CanvasRenderingContext2D, c: Column, col: number, x: number, gy: number) => {
+    const s = state.current;
+    const depth = H - gy;
+    if (c.zone === F_GAF) {
+      // dark soil with a row of little nugs on top
+      ctx.fillStyle = INK;
+      ctx.fillRect(x, gy, T, depth);
+      ctx.fillStyle = "#2e6e28";
+      ctx.fillRect(x, gy, T, 3);
+      ctx.fillStyle = "#5cb84a";
+      ctx.fillRect(x + 1, gy - 1, 5, 3);
+      ctx.fillRect(x + 9, gy - 1, 6, 3);
+      ctx.fillStyle = "#ff8c28";
+      ctx.fillRect(x + 3, gy, 1, 1);
+      ctx.fillRect(x + 12, gy, 1, 1);
+      ctx.fillStyle = "#2e6e28";
+      ctx.fillRect(x + ((col * 7) % 11) + 2, gy + 9, 3, 3);
+      ctx.fillStyle = "#5cb84a";
+      ctx.fillRect(x + ((col * 7) % 11) + 3, gy + 9, 1, 1);
+      return true;
+    }
+    if (c.zone === F_PSP) {
+      // black plastic with d-pads and buttons
+      ctx.fillStyle = INK;
+      ctx.fillRect(x, gy, T, depth);
+      ctx.fillStyle = "#4aa3ff";
+      ctx.fillRect(x, gy, T, 2);
+      ctx.fillStyle = "#3c3c48";
+      if (col % 2 === 0) {
+        ctx.fillRect(x + 4, gy + 8, 7, 3);
+        ctx.fillRect(x + 6, gy + 6, 3, 7);
+      } else {
+        ctx.fillStyle = "#ff5fe0";
+        ctx.fillRect(x + 4, gy + 7, 2, 2);
+        ctx.fillStyle = "#4aa3ff";
+        ctx.fillRect(x + 8, gy + 10, 2, 2);
+      }
+      return true;
+    }
+    if (c.zone === F_IPOD) {
+      // polished silver, like the back of an old iPod, with a shine sliding across
+      ctx.fillStyle = "#c9ced8";
+      ctx.fillRect(x, gy, T, depth);
+      ctx.fillStyle = "#e9ecf2";
+      ctx.fillRect(x, gy + 4, T, 3);
+      ctx.fillStyle = "#a9afbb";
+      ctx.fillRect(x, gy + 12, T, 2);
+      ctx.fillRect(x, gy + 20, T, 1);
+      ctx.fillStyle = INK;
+      ctx.fillRect(x, gy, T, 1);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x, gy + 1, T, 2);
+      // moving diagonal shine
+      const shine = (((col * T - s.t * 40) % 96) + 96) % 96;
+      if (shine < T) {
+        ctx.fillStyle = "rgba(255,255,255,0.7)";
+        for (let k = 0; k < 10; k++) ctx.fillRect(x + ((shine + k) % T), gy + 3 + k, 2, 1);
+      }
+      return true;
+    }
+    if (c.zone === F_SPT) {
+      // a rainbow floor
+      ctx.fillStyle = INK;
+      ctx.fillRect(x, gy, T, depth);
+      RAINBOW_STRIPES.forEach((color, i) => {
+        ctx.fillStyle = color;
+        ctx.fillRect(x, gy + i, T, 1);
+      });
+      ctx.fillStyle = "#ff78c8";
+      ctx.fillRect(x + ((col * 7) % 12) + 2, gy + 11, 2, 2);
+      return true;
+    }
+    if (c.zone === F_TOP) {
+      // riveted steel with gears turning underneath
+      ctx.fillStyle = "#3a3e48";
+      ctx.fillRect(x, gy, T, depth);
+      ctx.fillStyle = INK;
+      ctx.fillRect(x, gy, T, 1);
+      ctx.fillStyle = "#d7dce6";
+      ctx.fillRect(x, gy + 1, T, 2);
+      ctx.fillStyle = "#8c94a2";
+      ctx.fillRect(x, gy + 3, T, 2);
+      ctx.fillStyle = INK;
+      ctx.fillRect(x + 2, gy + 2, 1, 1);
+      ctx.fillRect(x + 13, gy + 2, 1, 1);
+      if (depth > 22) drawGear(ctx, x + 8, gy + 15, 5, s.t * 2.2 * (col % 2 === 0 ? 1 : -1) + (col % 2) * 0.4);
+      return true;
+    }
+    if (c.zone === F_CORAL) {
+      // sand, with corals growing out of it here and there
+      ctx.fillStyle = "#e8cf8f";
+      ctx.fillRect(x, gy, T, depth);
+      ctx.fillStyle = "#5a3c1e";
+      ctx.fillRect(x, gy, T, 1);
+      ctx.fillStyle = "#f7e6b8";
+      ctx.fillRect(x, gy + 1, T, 1);
+      ctx.fillStyle = "#c2a060";
+      ctx.fillRect(x + ((col * 7) % 12) + 2, gy + 6, 1, 1);
+      ctx.fillRect(x + ((col * 5) % 10) + 4, gy + 12, 1, 1);
+      const pick = hash(col * 3 + 11);
+      if (pick < 0.45 && !c.pipe) {
+        const which = pick < 0.15 ? 0 : pick < 0.3 ? 1 : 2 + (Math.floor(s.t * 2 + col) % 2);
+        drawPixels(ctx, CORALS[which], x + 1 + Math.floor(hash(col) * 2), gy - 14, CORAL_COLORS, 2);
+      }
+      return true;
+    }
+    return false;
+  };
+
   const drawBrick = (ctx: CanvasRenderingContext2D, x: number, by: number, zone: number) => {
+    // Cover-art fields: each has its own thing to jump on
+    if (zone === F_GAF || zone === LEVEL_ZONE) return drawPixels(ctx, NUG, x, by, NUG_COLORS);
+    if (zone === F_PSP) return drawPixels(ctx, HANDHELD, x, by + 1, HANDHELD_COLORS);
+    if (zone === F_IPOD) return drawPixels(ctx, PLAYER, x, by, PLAYER_COLORS);
+    if (zone === F_SPT) return drawPixels(ctx, RAINBOW, x, by, RAINBOW_COLORS);
+    if (zone === F_TOP) return drawPixels(ctx, METAL, x, by, METAL_COLORS);
+    if (zone === F_CORAL) return drawPixels(ctx, REEF, x, by, REEF_COLORS);
     if (zone === Z_TREES) {
       // a crooked branch
       ctx.fillStyle = INK;
@@ -2917,10 +4013,359 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
   };
 
+  // The pink start screen: two big blocks
+  const drawHome = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    ctx.fillStyle = "#e05fc8";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#d24fba";
+    for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
+    ctx.font = `8px ${fontFamily}`;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "center";
+    ctx.fillStyle = INK;
+    ctx.fillText("SUPER PINKMANE", W / 2 + 1, 7);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText("SUPER PINKMANE", W / 2, 6);
+    const blocks = [
+      { title: ["PINK RUN", "INFINITE"], text: ["SURVIVE THE", "LONGEST, COLLECT", "THE HIGHEST", "SCORE!"], foot: `HI ${pad(s.best)}` },
+      {
+        title: ["PINK", "LEVELS"],
+        text: ["BEAT THE LEVELS,", "HIT THE BONG,", "SET THE", "FASTEST TIME!"],
+        foot: `${Object.keys(s.levelBest).length}/${LEVELS.length} DONE`,
+      },
+    ];
+    blocks.forEach((b, i) => {
+      const bx = i === 0 ? 8 : W / 2 + 4;
+      const bw = W / 2 - 12;
+      const by = 20;
+      const bh = 124;
+      const picked = s.homeChoice === i;
+      const on = Math.floor(s.t * 3) % 2 === 0;
+      ctx.fillStyle = INK;
+      ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+      ctx.fillStyle = picked ? (on ? "#ffffff" : "#ffd6f4") : "#8a1f86";
+      ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
+      ctx.fillStyle = picked ? "#ff8ae0" : "#b43aa4";
+      ctx.fillRect(bx + 1, by + 1, bw - 2, bh - 2);
+      ctx.fillStyle = INK;
+      b.title.forEach((t, k) => ctx.fillText(t, bx + bw / 2, by + 8 + k * 11));
+      ctx.fillStyle = picked ? INK : "#f8d8f0";
+      b.text.forEach((t, k) => ctx.fillText(t, bx + bw / 2, by + 36 + k * 10));
+      // a little picture: you running / the bong
+      if (i === 0) {
+        const sprite = spritesRef.current[s.outfit];
+        if (sprite && sprite.complete && sprite.naturalWidth > 0) {
+          ctx.drawImage(sprite, (Math.floor(s.t * 6) % 2) * SPRITE_W, 0, SPRITE_W, SPRITE_H, bx + bw / 2 - 12, by + 78, SPRITE_W, SPRITE_H);
+        }
+      } else {
+        drawPixels(ctx, BONG, bx + bw / 2 - 10, by + 80, BONG_COLORS, 2);
+      }
+      ctx.fillStyle = INK;
+      ctx.fillText(b.foot, bx + bw / 2, by + bh - 11);
+    });
+    if (Math.floor(s.t * 2) % 2 === 0) {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText("< > TO PICK, OK TO GO", W / 2, H - 12);
+    }
+  };
+
+  // ---------- The level map ----------
+  const mapUnlocked = (i: number) => i === 0 || !!state.current.levelBest[String(i)];
+
+  // The points walked from stop `from` to the next/previous stop `to`
+  const mapPath = (from: number, to: number): [number, number][] => {
+    const A = MAP_NODES[from];
+    const B = MAP_NODES[to];
+    if (to === from + 1) return [[A.x, A.y], ...B.path, [B.x, B.y]];
+    return [[A.x, A.y], ...[...A.path].reverse(), [B.x, B.y]];
+  };
+
+  // Arrow keys / WASD on the map: walk along the path that leaves your stop in that direction
+  const mapMove = (dx: number, dy: number) => {
+    const s = state.current;
+    if (s.mapWalk) return;
+    const here = s.levelPick;
+    for (const to of [here + 1, here - 1]) {
+      if (to < 0 || to >= MAP_NODES.length) continue;
+      const pts = mapPath(here, to);
+      const [x0, y0] = pts[0];
+      const [x1, y1] = pts[1];
+      const sx = Math.sign(x1 - x0);
+      const sy = Math.sign(y1 - y0);
+      if ((dx !== 0 && sx === dx) || (dy !== 0 && sy === dy)) {
+        if (!mapUnlocked(to)) {
+          s.flash = 1.5;
+          s.flashText = `LOCKED - BEAT LVL ${to} FIRST`;
+          beep(200, 140, 0.12, 0.05, "square");
+          return;
+        }
+        s.mapWalk = { pts, d: 0, to };
+        return;
+      }
+    }
+  };
+
+  const updateMap = (dt: number) => {
+    const s = state.current;
+    const w = s.mapWalk;
+    if (!w) return;
+    w.d += MAP_WALK_SPEED * dt;
+    let total = 0;
+    for (let i = 1; i < w.pts.length; i++) total += Math.hypot(w.pts[i][0] - w.pts[i - 1][0], w.pts[i][1] - w.pts[i - 1][1]);
+    if (w.d >= total) {
+      s.levelPick = w.to;
+      s.mapWalk = null;
+      beep(660, 880, 0.06, 0.04, "square");
+    }
+  };
+
+  // Where you are on the map right now (walking or standing), and which way you face
+  const mapPos = (): { x: number; y: number; face: number; moving: boolean } => {
+    const s = state.current;
+    const w = s.mapWalk;
+    if (!w) {
+      const n = MAP_NODES[s.levelPick];
+      return { x: n.x, y: n.y, face: 1, moving: false };
+    }
+    let d = w.d;
+    for (let i = 1; i < w.pts.length; i++) {
+      const [x0, y0] = w.pts[i - 1];
+      const [x1, y1] = w.pts[i];
+      const len = Math.hypot(x1 - x0, y1 - y0);
+      if (d <= len || i === w.pts.length - 1) {
+        const k = len > 0 ? Math.min(1, d / len) : 1;
+        return { x: x0 + (x1 - x0) * k, y: y0 + (y1 - y0) * k, face: x1 < x0 ? -1 : 1, moving: true };
+      }
+      d -= len;
+    }
+    const n = MAP_NODES[w.to];
+    return { x: n.x, y: n.y, face: 1, moving: true };
+  };
+
+  const drawMapIcon = (ctx: CanvasRenderingContext2D, icon: MapIcon, x: number, y: number) => {
+    const s = state.current;
+    ctx.fillStyle = INK;
+    if (icon === "weed") drawPixels(ctx, LEAF, x - 7, y - 7, { G: GREEN, D: DARK_GREEN }, 2);
+    else if (icon === "speaker") {
+      ctx.fillRect(x - 6, y - 7, 12, 14);
+      ctx.fillStyle = "#777";
+      ctx.beginPath();
+      ctx.arc(x, y - 3, 2, 0, Math.PI * 2);
+      ctx.arc(x, y + 3, 3, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (icon === "roof") {
+      ctx.beginPath();
+      ctx.moveTo(x - 8, y);
+      ctx.lineTo(x, y - 8);
+      ctx.lineTo(x + 8, y);
+      ctx.fill();
+      ctx.fillStyle = "#5a2a6a";
+      ctx.fillRect(x - 6, y, 12, 7);
+      ctx.fillStyle = "#ffd23c";
+      ctx.fillRect(x - 3, y + 2, 2, 2);
+      ctx.fillRect(x + 2, y + 2, 2, 2);
+    } else if (icon === "cloud") {
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(x - 4, y + 1, 4, 0, Math.PI * 2);
+      ctx.arc(x + 1, y - 2, 5, 0, Math.PI * 2);
+      ctx.arc(x + 5, y + 2, 3, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (icon === "tree") {
+      ctx.strokeStyle = "#3a1f5a";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, y + 7);
+      ctx.lineTo(x, y - 1);
+      ctx.lineTo(x - 5, y - 6);
+      ctx.moveTo(x, y - 1);
+      ctx.lineTo(x + 4, y - 7);
+      ctx.moveTo(x, y + 2);
+      ctx.lineTo(x + 5, y - 1);
+      ctx.stroke();
+    } else if (icon === "ship") {
+      ctx.fillStyle = "#7a4a3a";
+      ctx.fillRect(x - 7, y + 1, 14, 4);
+      ctx.fillStyle = INK;
+      ctx.fillRect(x, y - 7, 1, 8);
+      ctx.fillStyle = "#8f8499";
+      ctx.fillRect(x + 1, y - 6, 5, 4);
+      ctx.fillStyle = "#f5f0e6";
+      ctx.fillRect(x - 5, y - 2, 3, 3);
+    } else if (icon === "coral") drawPixels(ctx, CORALS[0], x - 7, y - 7, CORAL_COLORS, 2);
+    else if (icon === "bong") {
+      drawPixels(ctx, BONG, x - 10, y - 20, BONG_COLORS, 2);
+      void s;
+    }
+  };
+
+  // The level map screen
+  const drawLevelSelect = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    // grassy map
+    ctx.fillStyle = "#7cc86a";
+    ctx.fillRect(0, 0, W, H);
+    for (let k = 0; k < 40; k++) {
+      ctx.fillStyle = k % 2 ? "#6cb85c" : "#8cd87a";
+      ctx.fillRect(Math.round(hash(k) * W), Math.round(hash(k + 50) * H), 6 + Math.round(hash(k + 9) * 10), 3);
+    }
+    for (let k = 0; k < 9; k++) {
+      const lx = Math.round(hash(k + 200) * (W - 20));
+      const ly = 36 + Math.round(hash(k + 300) * (H - 60));
+      drawPixels(ctx, LEAF, lx, ly + Math.round(Math.sin(s.t * 2 + k)), { G: "#4e9e44", D: "#3a7a32" }, 1);
+    }
+    // the path
+    for (let i = 1; i < MAP_NODES.length; i++) {
+      const pts = mapPath(i - 1, i);
+      const open = mapUnlocked(i);
+      for (let j = 1; j < pts.length; j++) {
+        const [x0, y0] = pts[j - 1];
+        const [x1, y1] = pts[j];
+        const len = Math.hypot(x1 - x0, y1 - y0);
+        for (let d = 0; d <= len; d += 6) {
+          const px = Math.round(x0 + ((x1 - x0) * d) / len);
+          const py = Math.round(y0 + ((y1 - y0) * d) / len);
+          ctx.fillStyle = INK;
+          ctx.fillRect(px - 2, py - 2, 5, 5);
+          ctx.fillStyle = open ? "#f2dea0" : "#9aa08a";
+          ctx.fillRect(px - 1, py - 1, 3, 3);
+        }
+      }
+    }
+    // the stops
+    MAP_NODES.forEach((n, i) => {
+      const open = mapUnlocked(i);
+      const done = !!s.levelBest[String(i + 1)];
+      const big = n.icon === "bong";
+      const r = big ? 14 : 11;
+      ctx.fillStyle = INK;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r + 1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = open ? MAP_BADGE[n.icon] : "#8a8a8a";
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      if (open) drawMapIcon(ctx, n.icon, n.x, n.y + (big ? 8 : 0));
+      else {
+        // padlock
+        ctx.fillStyle = INK;
+        ctx.fillRect(n.x - 4, n.y - 1, 9, 7);
+        ctx.fillRect(n.x - 3, n.y - 5, 1, 4);
+        ctx.fillRect(n.x + 3, n.y - 5, 1, 4);
+        ctx.fillRect(n.x - 3, n.y - 6, 7, 1);
+        ctx.fillStyle = "#ffd23c";
+        ctx.fillRect(n.x, n.y + 1, 1, 2);
+      }
+      if (done) {
+        // gold star: beaten
+        ctx.fillStyle = INK;
+        ctx.fillRect(n.x + r - 5, n.y - r - 1, 7, 7);
+        ctx.fillStyle = "#ffd700";
+        ctx.fillRect(n.x + r - 4, n.y - r, 5, 5);
+      }
+      if (big) {
+        ctx.font = `8px ${fontFamily}`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillStyle = INK;
+        ctx.fillText("BOSS FIGHT", n.x - 12, n.y + r + 4);
+        ctx.fillStyle = "#ff2832";
+        ctx.fillText("BOSS FIGHT", n.x - 13, n.y + r + 3);
+      }
+    });
+    // you
+    const me = mapPos();
+    const sprite = spritesRef.current[s.outfit];
+    const frame = me.moving ? Math.floor(s.t * 8) % 2 : 0;
+    const px = Math.round(me.x - SPRITE_W / 2);
+    const py = Math.round(me.y - 8 - SPRITE_H + (me.moving ? 0 : Math.sin(s.t * 3)));
+    if (sprite && sprite.complete && sprite.naturalWidth > 0) {
+      ctx.save();
+      if (me.face < 0) {
+        ctx.translate(px + SPRITE_W, py);
+        ctx.scale(-1, 1);
+        ctx.drawImage(sprite, frame * SPRITE_W, 0, SPRITE_W, SPRITE_H, 0, 0, SPRITE_W, SPRITE_H);
+      } else {
+        ctx.drawImage(sprite, frame * SPRITE_W, 0, SPRITE_W, SPRITE_H, px, py, SPRITE_W, SPRITE_H);
+      }
+      ctx.restore();
+    } else {
+      ctx.fillStyle = PINK;
+      ctx.fillRect(px + HB_X, py + HB_Y, HB_W, HB_H);
+    }
+    // info about the stop you're on
+    ctx.font = `8px ${fontFamily}`;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "center";
+    if (!s.mapWalk) {
+      const i = s.levelPick;
+      const lv = LEVELS[i];
+      const last = i === MAP_NODES.length - 1;
+      textBox(ctx, lv ? `LVL ${i + 1}: ${lv.name}` : last ? `LVL ${i + 1}: THE FINAL BOSS` : `LVL ${i + 1}`, 6);
+      const best = s.levelBest[String(i + 1)];
+      textBox(ctx, lv ? (best ? `BEST ${fmtTime(best)}  -  OK TO PLAY` : "OK TO PLAY") : "COMING SOON", 18);
+    }
+    if (s.flash > 0) textBox(ctx, s.flashText, 34);
+    if (Math.floor(s.t * 2) % 2 === 0) {
+      ctx.fillStyle = INK;
+      ctx.fillText("ARROWS / WASD TO WALK, ESC BACK", W / 2 + 1, H - 9);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText("ARROWS / WASD TO WALK, ESC BACK", W / 2, H - 10);
+    }
+  };
+
+  // You hit the bong
+  const drawLevelDone = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    const since = s.t - s.doneAt;
+    if (since < 0.6) return; // let the smoke show first
+    ctx.fillStyle = "rgba(22, 60, 20, 0.75)";
+    ctx.fillRect(0, 0, W, H);
+    textBox(ctx, `LVL ${s.level} DONE!`, 20);
+    textBox(ctx, LEVELS[s.level - 1]?.name ?? "", 34);
+    textBox(ctx, `TIME ${fmtTime(s.levelMs)}`, 56);
+    const best = s.levelBest[String(s.level)];
+    if (s.newBest) {
+      if (Math.floor(s.t * 4) % 2 === 0) textBox(ctx, "NEW BEST TIME!", 70);
+    } else if (best) {
+      textBox(ctx, `YOUR BEST ${fmtTime(best)}`, 70);
+    }
+    textBox(ctx, "PINKMANE HIT THE BONG", 92);
+    if (since > 1 && Math.floor(s.t * 2) % 2 === 0) textBox(ctx, "OK TO GO ON", 120);
+  };
+
   // Thin line at the bottom: the zones you ran through (solid), the zones coming up (faded),
   // you (pink marker) and the next troll (green face at the end)
   const drawProgress = (ctx: CanvasRenderingContext2D) => {
     const s = state.current;
+    if (s.levelMode) {
+      const end = s.bong ? s.bong.x : s.cols.length * T;
+      const x0 = 10;
+      const x1 = W - 20;
+      const y = H - 4;
+      const part = Math.max(0, Math.min(1, s.farthest / end));
+      ctx.fillStyle = INK;
+      ctx.fillRect(x0 - 1, y - 1, x1 - x0 + 2, 4);
+      ctx.fillStyle = "#4a3d55";
+      ctx.fillRect(x0, y, x1 - x0, 2);
+      ctx.fillStyle = WL_GRASS;
+      ctx.fillRect(x0, y, Math.round((x1 - x0) * part), 2);
+      // the boss arena
+      const ax = x0 + Math.round((x1 - x0) * Math.min(1, (s.bossCol * T) / end));
+      ctx.fillStyle = "#ff283c";
+      ctx.fillRect(ax, y - 2, 2, 6);
+      // you
+      const me = x0 + Math.round((x1 - x0) * part);
+      ctx.fillStyle = INK;
+      ctx.fillRect(me - 2, y - 5, 5, 4);
+      ctx.fillStyle = PINK;
+      ctx.fillRect(me - 1, y - 4, 3, 2);
+      // the bong at the end
+      drawPixels(ctx, BONG, x1 + 4, y - 11, BONG_COLORS, 1);
+      return;
+    }
     const lo = s.bossCount * BOSS_EVERY;
     const hi = lo + BOSS_EVERY;
     const x0 = 10;
@@ -2990,8 +4435,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     ctx.fillStyle = "#ffffff";
     ctx.fillText("PICK YOUR SPELL", W / 2, 14);
     ctx.fillStyle = "#ffc800";
-    const shots = b ? b.maxHp + BOSS_SPARE_SHOTS : 0;
-    ctx.fillText(`${shots} SHOTS, HE TAKES ${b ? b.maxHp : 0}`, W / 2, 26);
+    const need = b ? b.maxHp : s.lboss ? s.lboss.maxHp : 0;
+    const shots = need + BOSS_SPARE_SHOTS;
+    ctx.fillText(`${shots} SHOTS, IT TAKES ${need}`, W / 2, 26);
     for (let i = 0; i < 2; i++) {
       const bx = i === 0 ? W / 2 - 78 : W / 2 + 14;
       const by = 42;
@@ -3054,6 +4500,14 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       drawBoard(ctx);
       return;
     }
+    if (s.mode === "home") {
+      drawHome(ctx);
+      return;
+    }
+    if (s.mode === "levelSelect") {
+      drawLevelSelect(ctx);
+      return;
+    }
 
     const cam = Math.round(s.cam);
     const viewZone = s.inBonus ? VOID_ZONE : colAt(Math.floor((cam + W / 2) / T)).zone;
@@ -3084,8 +4538,33 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         const blinking = c.crumble > 0 && Math.floor(s.t * (c.crumble < 1 ? 16 : 8)) % 2 === 0;
         ctx.fillStyle = INK;
         ctx.fillRect(x, ly, T, c.lineTh + 1);
-        ctx.fillStyle = blinking ? "#ffffff" : c.zone === VOID_ZONE ? LIGHT_GREEN : c.fragile > 0 ? "#ff5fe0" : PINK;
+        const fieldLine: Record<number, string> = {
+          [F_GAF]: "#5cb84a",
+          [F_PSP]: "#4aa3ff",
+          [F_IPOD]: "#f5f5fa",
+          [F_TOP]: "#c9ced8",
+          [F_CORAL]: "#ff6f91",
+          [LEVEL_ZONE]: "#4caa3c",
+        };
+        ctx.fillStyle = blinking
+          ? "#ffffff"
+          : c.zone === VOID_ZONE
+            ? LIGHT_GREEN
+            : c.fragile > 0
+              ? "#ff5fe0"
+              : fieldLine[c.zone] ?? PINK;
         ctx.fillRect(x, ly, T, c.lineTh);
+        if (c.zone === F_SPT && !blinking) {
+          // rainbow lines
+          for (let i = 0; i < c.lineTh; i++) {
+            ctx.fillStyle = RAINBOW_STRIPES[i % RAINBOW_STRIPES.length];
+            ctx.fillRect(x, ly + i, T, 1);
+          }
+        }
+        if (c.zone === F_TOP && !blinking) {
+          ctx.fillStyle = INK;
+          ctx.fillRect(x + 7, ly + Math.floor(c.lineTh / 2), 1, 1);
+        }
         // vanishing lines get little dashes so you can spot them
         if (c.fragile > 0 && !blinking) {
           ctx.fillStyle = INK;
@@ -3115,12 +4594,59 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
     // Leaves and hearts
     for (const l of s.leaves) {
+      if (isCoin(l)) {
+        // spinning gold coin
+        const spin = Math.abs(Math.cos(s.t * 4 + l.x));
+        const cw = Math.max(2, Math.round(12 * spin));
+        const cx = Math.round(l.x - cam + 7 - cw / 2);
+        const cy = l.y + 1 + Math.round(Math.sin(s.t * 4 + l.x) * 2);
+        ctx.fillStyle = "#6b4a00";
+        ctx.fillRect(cx - 1, cy, cw + 2, 12);
+        ctx.fillRect(cx, cy - 1, cw, 14);
+        ctx.fillStyle = "#ffd700";
+        ctx.fillRect(cx, cy, cw, 12);
+        ctx.fillStyle = "#b8860b";
+        if (cw > 5) ctx.fillRect(cx + Math.floor(cw / 2) - 1, cy + 3, 2, 6);
+        ctx.fillStyle = "#fff3a0";
+        if (cw > 3) ctx.fillRect(cx + 1, cy + 1, 2, 3);
+        continue;
+      }
       if (l.small) {
         drawPixels(ctx, LEAF, l.x - cam, l.y + Math.round(Math.sin(s.t * 4 + l.x * 0.05)), { G: LIGHT_GREEN, D: GREEN }, 1);
       } else {
         drawPixels(ctx, LEAF, l.x - cam, l.y + Math.round(Math.sin(s.t * 4 + l.x) * 2), { G: GREEN, D: DARK_GREEN }, 2);
       }
     }
+    // Level signs (lore) and the bong at the end
+    if (s.levelMode) {
+      for (const sg of s.signs) {
+        const sx = Math.round(sg.x - cam);
+        if (sx < -20 || sx > W + 20) continue;
+        const gy = colAt(Math.floor(sg.x / T)).ground * T;
+        ctx.fillStyle = "#5a3a1e";
+        ctx.fillRect(sx + 7, gy - 14, 2, 14);
+        ctx.fillStyle = INK;
+        ctx.fillRect(sx, gy - 22, 16, 10);
+        ctx.fillStyle = "#c8945a";
+        ctx.fillRect(sx + 1, gy - 21, 14, 8);
+        ctx.fillStyle = "#5a3a1e";
+        ctx.fillRect(sx + 3, gy - 19, 10, 1);
+        ctx.fillRect(sx + 3, gy - 16, 7, 1);
+      }
+      if (s.bong) {
+        const bx = Math.round(s.bong.x - cam);
+        drawPixels(ctx, BONG, bx, s.bong.y, BONG_COLORS, 2);
+        // a little smoke curling out of the top while it waits for you
+        if (s.mode !== "levelDone") {
+          ctx.fillStyle = "rgba(255,255,255,0.7)";
+          for (let k = 0; k < 3; k++) {
+            const t = (s.t * 0.8 + k / 3) % 1;
+            ctx.fillRect(Math.round(bx + 9 + Math.sin(s.t * 3 + k * 2) * 3), Math.round(s.bong.y - 2 - t * 20), 2, 2);
+          }
+        }
+      }
+    }
+
     // The secret jetpack, floating on its shelf
     if (s.jetItem) {
       const ji = s.jetItem;
@@ -3219,17 +4745,108 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     // Monsters (squashed flat when beaten)
     for (const e of s.enemies) {
       const x = e.x - cam;
+      const ez = colAt(Math.floor(e.x / T)).zone;
+      if (ez === F_IPOD) {
+        if (e.kind === "flyer") {
+          if (e.alive) {
+            const frame = Math.abs(Math.floor(s.t * 16) % 2) || 0;
+            const charging = e.shoot !== undefined && e.shoot < 0.4 && Math.floor(s.t * 16) % 2 === 0;
+            drawPixels(ctx, DRONE[frame], x, e.y, charging ? DRONE_COLORS_CHARGING : DRONE_COLORS, 2);
+          } else {
+            ctx.fillStyle = "#ffd000";
+            ctx.fillRect(x + 2, e.y + 10, 14, 3);
+          }
+        } else if (e.alive) {
+          const bob = Math.floor(s.t * 6 + e.x) % 2;
+          drawPixels(ctx, HORNED, x, e.y - 2 - bob, HORNED_COLORS, 2);
+        } else {
+          ctx.fillStyle = "#8a5a2b";
+          ctx.fillRect(x, e.y + 10, 14, 4);
+        }
+        continue;
+      }
+      if (ez === F_GAF) {
+        if (e.kind === "flyer") {
+          if (e.alive) {
+            const frame = Math.abs(Math.floor(s.t * 10 + e.phase) % 2) || 0;
+            drawPixels(ctx, BAT[frame], x, e.y, BAT_COLORS, 2);
+          } else {
+            ctx.fillStyle = "#2c2c34";
+            ctx.fillRect(x + 2, e.y + 10, 14, 3);
+          }
+        } else if (e.alive) {
+          const bob = Math.floor(s.t * 6 + e.x) % 2;
+          drawPixels(ctx, BOMB, x, e.y - 2 - bob, Math.floor(s.t * 12) % 2 ? BOMB_COLORS : BOMB_COLORS_2, 2);
+        } else {
+          // squashed bomb goes poof
+          ctx.fillStyle = "#e0283a";
+          ctx.fillRect(x, e.y + 10, 14, 4);
+        }
+        continue;
+      }
+      if (ez === F_CORAL || ez === F_TRIPPY) {
+        const coral = ez === F_CORAL;
+        if (e.kind === "flyer") {
+          if (e.alive) {
+            const frame = Math.floor(s.t * 8 + e.phase) % 2;
+            if (coral) {
+              // seahorses face the way they swim
+              const rows = e.vx > 0 ? SEAHORSE[frame].map((r) => r.split("").reverse().join("")) : SEAHORSE[frame];
+              drawPixels(ctx, rows, x, e.y - 2, SEAHORSE_COLORS, 2);
+            } else {
+              const rows = e.vx > 0 ? DRAGONFLY[frame].map((r) => r.split("").reverse().join("")) : DRAGONFLY[frame];
+              drawPixels(ctx, rows, x, e.y, DRAGONFLY_COLORS, 2);
+            }
+          } else {
+            ctx.fillStyle = coral ? "#5a8cff" : "#3c82ff";
+            ctx.fillRect(x + 2, e.y + 10, 14, 3);
+          }
+        } else if (e.alive) {
+          const bob = Math.floor(s.t * 6 + e.x) % 2;
+          drawPixels(ctx, coral ? URCHIN : BACTERIA, x, e.y - bob, coral ? URCHIN_COLORS : BACTERIA_COLORS, 2);
+        } else {
+          ctx.fillStyle = coral ? "#8c5ad2" : "#3cd23c";
+          ctx.fillRect(x, e.y + 10, 14, 4);
+        }
+        continue;
+      }
+      if (ez === F_SPT) {
+        // SMALL PRETTY TITTIES FIELD: fairies shitting rainbows, and devil bunnies
+        if (e.kind === "flyer") {
+          if (e.alive) {
+            const frame = Math.floor(s.t * 8 + e.phase) % 2;
+            // rainbow trail out of her behind, on the side she's flying away from
+            const back = e.vx > 0 ? -1 : 1;
+            for (let i = 0; i < 6; i++) {
+              ctx.fillStyle = RAINBOW_STRIPES[i];
+              const wave = Math.round(Math.sin(s.t * 6 + i * 0.3) * 1);
+              ctx.fillRect(back > 0 ? x + 12 : x - 14, e.y + 8 + i + wave, 20, 1);
+            }
+            drawPixels(ctx, FAIRY[frame], x, e.y, FAIRY_COLORS, 2);
+          } else {
+            ctx.fillStyle = "#9646dc";
+            ctx.fillRect(x + 2, e.y + 10, 14, 3);
+          }
+        } else if (e.alive) {
+          const bob = Math.floor(s.t * 6 + e.x) % 2;
+          drawPixels(ctx, BUNNY, x, e.y - bob, BUNNY_COLORS, 2);
+        } else {
+          ctx.fillStyle = "#fff0f8";
+          ctx.fillRect(x, e.y + 10, 14, 4);
+        }
+        continue;
+      }
       if (e.kind === "flyer") {
         if (e.alive) {
-          const frame = Math.floor(s.t * 8 + e.phase) % 2;
-          drawPixels(ctx, FLYER[frame], x, e.y, { G: LIGHT_GREEN, D: DARK_GREEN, W: "#ffffff" }, 2);
+          const frame = Math.abs(Math.floor(s.t * 8 + e.phase) % 2) || 0;
+          drawPixels(ctx, FLYER[frame], x, e.y, ez === F_PSP ? PSP_FLYER_COLORS : { G: LIGHT_GREEN, D: DARK_GREEN, W: "#ffffff" }, 2);
         } else {
           ctx.fillStyle = LIGHT_GREEN;
           ctx.fillRect(x + 2, e.y + 10, 14, 3);
         }
       } else if (e.alive) {
         const bob = Math.floor(s.t * 6 + e.x) % 2;
-        drawPixels(ctx, HATER, x, e.y - bob, { G: "#8a8a8a", K: INK, W: "#ffffff" }, 2);
+        drawPixels(ctx, HATER, x, e.y - bob, ez === F_PSP ? PSP_WALKER_COLORS : { G: "#8a8a8a", K: INK, W: "#ffffff" }, 2);
       } else {
         ctx.fillStyle = "#8a8a8a";
         ctx.fillRect(x, e.y + 10, 14, 4);
@@ -3284,13 +4901,75 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       ctx.fillRect(-4, -4, W + 8, H + 8);
     }
 
+    // Bubbles (coral field)
+    for (const b of s.bubbles) {
+      const bx = Math.round(b.x - cam);
+      const by = Math.round(b.y);
+      ctx.strokeStyle = "#e8fbff";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(bx + 0.5, by + 0.5, b.r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(bx - 1, by - 1, 1, 1);
+    }
+
+    // Drone lasers (red, like the ice shot)
+    for (const l of s.lasers) {
+      const lx = Math.round(l.x - cam);
+      const ly = Math.round(l.y);
+      ctx.fillStyle = "#96001e";
+      ctx.fillRect(lx - 1, ly - 1, 14, 5);
+      ctx.fillStyle = "#ff2a3a";
+      ctx.fillRect(lx, ly, 12, 3);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(l.vx > 0 ? lx + 9 : lx + 1, ly + 1, 2, 1);
+      ctx.fillStyle = "rgba(255, 60, 80, 0.5)";
+      ctx.fillRect(l.vx > 0 ? lx - 8 : lx + 13, ly + 1, 7, 1);
+    }
+
+    // Bong smoke
+    for (const m of s.smoke) {
+      ctx.fillStyle = `rgba(245, 245, 250, ${Math.min(0.85, m.life / 2)})`;
+      ctx.beginPath();
+      ctx.arc(Math.round(m.x - cam), Math.round(m.y), m.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // The evil weed leaf (Level 1 boss), with a little health bar over it
+    if (s.lboss) {
+      const lb = s.lboss;
+      const lx = Math.round(lb.x - cam);
+      const ly = Math.round(lb.y + (lb.dive > 0 ? 0 : Math.sin(s.t * 6) * 1));
+      const flash = (lb.hit > 0 && Math.floor(s.t * 20) % 2 === 0) || (lb.dead > 0 && Math.floor(s.t * 14) % 2 === 0);
+      const colors = flash ? { K: "#ffffff", G: "#ffffff", g: "#ffffff", R: "#ffffff", W: "#ffffff" } : EVIL_COLORS;
+      // dark aura
+      ctx.fillStyle = "rgba(60, 0, 80, 0.25)";
+      ctx.beginPath();
+      ctx.arc(lx + EL_W / 2, ly + EL_H / 2, EL_W / 2 + 4 + Math.sin(s.t * 4) * 2, 0, Math.PI * 2);
+      ctx.fill();
+      drawPixels(ctx, EVIL_LEAF, lx, ly, colors, 2);
+      if (lb.dead <= 0) {
+        ctx.fillStyle = INK;
+        ctx.fillRect(lx + 5, ly - 7, 32, 4);
+        ctx.fillStyle = "#9b8fa6";
+        ctx.fillRect(lx + 6, ly - 6, 30, 2);
+        ctx.fillStyle = "#ff283c";
+        ctx.fillRect(lx + 6, ly - 6, Math.round((30 * Math.max(0, lb.hp)) / lb.maxHp), 2);
+      }
+    }
+
     // You
     const blinking = s.invuln > 0 && Math.floor(s.t * 12) % 2 === 0;
     const showYou = ["select", "ready", "running", "pipe", "golden", "choose", "paused"].includes(s.mode);
     if (showYou && !blinking) {
       const previewOutfit = s.mode === "select" ? OUTFITS[s.selectIndex].id : s.outfit;
       const sprite = spritesRef.current[previewOutfit];
-      const frame = s.onGround && Math.abs(s.vx) > 5 ? Math.floor(s.runAnim * 10) % 2 : 0;
+      // Frames: 0 and 1 = walking. Sheets with a 3rd frame (72px wide) use it for standing still
+      // (classic + trippy: he raises the joint to his mouth and smoke curls up).
+      const hasIdle = !!sprite && sprite.naturalWidth >= SPRITE_W * 3;
+      const walking = s.onGround && Math.abs(s.vx) > 5;
+      const frame = walking ? Math.floor(s.runAnim * 10) % 2 : hasIdle && (s.onGround || s.mode === "select") ? 2 : 0;
 
       if (s.mode === "select") {
         // Big centered portrait, so it's obviously the whole point of this screen
@@ -3338,6 +5017,25 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           ctx.fillRect(x + HB_X, y + HB_Y, HB_W, HB_H);
         }
         ctx.restore();
+        // IPOD USER FIELD: white earbuds, the wire running down into a little player in his pocket
+        if (!s.inBonus && colAt(Math.floor((s.x + SPRITE_W / 2) / T)).zone === F_IPOD) {
+          const px = (n: number) => (s.facing > 0 ? x + n : x + SPRITE_W - 1 - n);
+          const sway = Math.round(Math.sin(s.t * 5) * 0.6);
+          ctx.fillStyle = INK;
+          ctx.fillRect(Math.min(px(7), px(9)), y + 11, 3, 3);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(Math.min(px(8), px(9)), y + 12, 2, 2);
+          // the wire
+          const wire: [number, number][] = [[9, 14], [9, 15], [10, 16], [10, 17], [10 + sway, 18], [10 + sway, 19], [9, 20], [9, 21]];
+          for (const [wx, wy] of wire) ctx.fillRect(px(wx), y + wy, 1, 1);
+          // the little player in his pocket
+          ctx.fillStyle = INK;
+          ctx.fillRect(Math.min(px(8), px(10)), y + 22, 3, 4);
+          ctx.fillStyle = "#f7f7fb";
+          ctx.fillRect(Math.min(px(8), px(10)), y + 22, 3, 3);
+          ctx.fillStyle = "#9fd4ff";
+          ctx.fillRect(Math.min(px(8), px(10)) + 1, y + 22, 1, 1);
+        }
       }
     }
 
@@ -3361,14 +5059,29 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
     // HUD (score, lives, powers) — none of it means anything yet on the outfit-select
     // screen, so it stays hidden there and the screen is just the character picker
-    const hudInk = viewZone === VOID_ZONE ? "#ffffff" : INK;
+    const hudInk = viewZone === VOID_ZONE ? (VOID_PALETTES[s.voidPal] || VOID_PALETTES[0]).ink : INK;
     if (s.mode !== "select") {
     drawSfxIcon(ctx, hudInk);
+    drawSfxSlider(ctx, hudInk);
     ctx.fillStyle = hudInk;
     ctx.textAlign = "left";
-    ctx.fillText(pad(s.score), 22, 6);
+    ctx.fillText(s.levelMode ? fmtTime(s.levelTime * 1000) : pad(s.score), 22, 6);
     ctx.textAlign = "right";
-    ctx.fillText(`HI ${pad(s.best)}`, W - 6, 6);
+    if (s.levelMode) {
+      const best = s.levelBest[String(s.level)];
+      ctx.fillText(best ? `BEST ${fmtTime(best)}` : `LVL ${s.level}`, W - 6, 6);
+    } else {
+      ctx.fillText(`HI ${pad(s.best)}`, W - 6, 6);
+    }
+    // gold coins you have
+    ctx.fillStyle = "#6b4a00";
+    ctx.fillRect(W - 45, 16, 8, 8);
+    ctx.fillStyle = "#ffd700";
+    ctx.fillRect(W - 44, 17, 6, 6);
+    ctx.fillStyle = "#fff3a0";
+    ctx.fillRect(W - 43, 18, 2, 2);
+    ctx.fillStyle = hudInk;
+    ctx.fillText(`${s.coins}`, W - 6, 16);
 
     // Hearts = lives (max 4)
     for (let i = 0; i < MAX_LIVES; i++) {
@@ -3470,10 +5183,16 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       textBox(ctx, "CHOOSE YOUR PINKMANE", 8);
       textBox(ctx, o.name, 20);
       // The big portrait itself is drawn further down, right in the middle of the screen
-      textBox(ctx, owned ? "PRESS OK TO WEAR IT" : `LOCKED \u2014 ${o.how}`, 118);
-      textBox(ctx, `GRAMS SAVED UP: ${s.coins}`, 130);
+      const canBuy = !owned && o.id === "icy" && s.coins >= ICY_COST;
+      textBox(ctx, owned ? "PRESS OK TO WEAR IT" : canBuy ? `PRESS OK TO BUY (${ICY_COST} COINS)` : `LOCKED \u2014 ${o.how}`, 118);
+      textBox(ctx, `GOLD COINS: ${s.coins}`, 130);
       if (!s.storageOk) textBox(ctx, "BROWSER STORAGE BLOCKED \u2014 WON'T SAVE", 141);
       if (blink) textBox(ctx, "\u2190 \u2192 BROWSE OUTFITS", 152);
+    } else if (s.mode === "ready" && s.levelMode) {
+      textBox(ctx, `LVL ${s.level}: ${LEVELS[s.level - 1]?.name ?? ""}`, 36);
+      if (blink) textBox(ctx, "PRESS OK TO START", 54);
+      const best = s.levelBest[String(s.level)];
+      textBox(ctx, best ? `YOUR BEST: ${fmtTime(best)}` : "REACH THE BONG AS FAST AS YOU CAN", 70);
     } else if (s.mode === "ready") {
       textBox(ctx, "SUPER PINKMANE", 36);
       if (blink) textBox(ctx, "PRESS OK TO START", 54);
@@ -3499,6 +5218,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
 
     if (s.mode === "choose") drawSpellPick(ctx);
+    // Lore sign you're standing next to
+    if (s.levelMode && s.mode === "running" && s.flash <= 0) {
+      const near = s.signs.find((sg) => Math.abs(sg.x + 8 - (s.x + SPRITE_W / 2)) < 36);
+      if (near && near.text) near.text.split("\n").forEach((line, i) => textBox(ctx, line, 30 + i * 12));
+    }
+    if (s.mode === "levelDone") drawLevelDone(ctx);
     if (s.mode === "paused") {
       ctx.fillStyle = "rgba(22, 12, 29, 0.7)";
       ctx.fillRect(0, 0, W, H);
@@ -3557,6 +5282,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
     try {
       sfxOnRef.current = localStorage.getItem(SFX_KEY) !== "off";
+      const savedVol = localStorage.getItem(SFX_VOL_KEY);
+      if (savedVol !== null && !Number.isNaN(Number(savedVol))) sfxVolRef.current = Math.max(0, Math.min(1, Number(savedVol)));
       const saved = Number(localStorage.getItem(BEST_KEY));
       if (saved > 0) state.current.best = saved;
       const savedName = localStorage.getItem(NAME_KEY);
@@ -3578,6 +5305,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     } catch {}
 
     loadBoard();
+    loadLevelProgress();
     newGame();
 
     // Keyboard: ← → / A D walk, ↑ / W jump (Space and Enter jump through the iPod),
@@ -3591,6 +5319,21 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (k === "Escape" || k === "p" || k === "P") {
         if (mode === "running") pauseGame();
         else if (mode === "paused") resumeGame();
+        else if (k === "Escape" && (mode === "select" || mode === "levelSelect")) state.current.mode = "home";
+        return;
+      }
+      // The pink start screen
+      if (mode === "home") {
+        if (k === "ArrowLeft" || k === "a" || k === "A") state.current.homeChoice = 0;
+        if (k === "ArrowRight" || k === "d" || k === "D") state.current.homeChoice = 1;
+        return;
+      }
+      // The level map: walk with arrows / WASD
+      if (mode === "levelSelect") {
+        if (k === "ArrowLeft" || k === "a" || k === "A") mapMove(-1, 0);
+        if (k === "ArrowRight" || k === "d" || k === "D") mapMove(1, 0);
+        if (k === "ArrowUp" || k === "w" || k === "W") mapMove(0, -1);
+        if (k === "ArrowDown" || k === "s" || k === "S") mapMove(0, 1);
         return;
       }
       // Browsing outfits before the game starts
@@ -3619,6 +5362,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (k === "ArrowDown" || k === "s" || k === "S") down();
       if (k === "f" || k === "F" || k === "x" || k === "X") shoot();
       if (k === "m" || k === "M") toggleSfx();
+      if (k === "-" || k === "_") setSfxVolume((sfxOnRef.current ? sfxVolRef.current : 0) - 0.1);
+      if (k === "=" || k === "+") setSfxVolume((sfxOnRef.current ? sfxVolRef.current : 0) + 0.1);
     };
     const keyUp = (e: KeyboardEvent) => {
       const k = e.key;
@@ -3685,12 +5430,34 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           const scale = Math.min(rect.width / W, rect.height / H);
           const cx = (e.clientX - rect.left - (rect.width - W * scale) / 2) / scale;
           const cy = (e.clientY - rect.top - (rect.height - H * scale) / 2) / scale;
-          if (cx < 20 && cy < 18) {
+          if (cx < 20 && cy < 14) {
             toggleSfx();
+            return;
+          }
+          if (onSfxSlider(cx, cy)) {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            sfxDragRef.current = true;
+            sfxFromY(cy);
             return;
           }
           const mode = state.current.mode;
           if (mode === "entry") return;
+          if (mode === "home") {
+            state.current.homeChoice = cx < W / 2 ? 0 : 1;
+            press();
+            return;
+          }
+          if (mode === "levelSelect") {
+            const here = state.current.levelPick;
+            const near = (i: number) => i >= 0 && i < MAP_NODES.length && Math.hypot(MAP_NODES[i].x - cx, MAP_NODES[i].y - cy) < 22;
+            if (near(here)) press();
+            else if (near(here + 1) || near(here - 1)) {
+              const to = near(here + 1) ? here + 1 : here - 1;
+              const pts = mapPath(here, to);
+              mapMove(Math.sign(pts[1][0] - pts[0][0]), Math.sign(pts[1][1] - pts[0][1]));
+            }
+            return;
+          }
           if (mode === "choose") {
             state.current.spellChoice = cx < W / 2 ? 0 : 1;
             pickSpell(state.current.spellChoice);
@@ -3715,11 +5482,23 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
             jump();
           }
         }}
+        onPointerMove={(e) => {
+          if (!sfxDragRef.current) return;
+          const rect = e.currentTarget.getBoundingClientRect();
+          const scale = Math.min(rect.width / W, rect.height / H);
+          const cy = (e.clientY - rect.top - (rect.height - H * scale) / 2) / scale;
+          sfxFromY(cy);
+        }}
         onPointerUp={() => {
+          if (sfxDragRef.current) {
+            sfxDragRef.current = false;
+            beep(520, 780, 0.08, 0.05, "square"); // a little test sound at the new volume
+          }
           touchRef.current = 0;
           touchUpRef.current = false;
         }}
         onPointerCancel={() => {
+          sfxDragRef.current = false;
           touchRef.current = 0;
           touchUpRef.current = false;
         }}

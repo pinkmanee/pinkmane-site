@@ -1803,9 +1803,9 @@ activeGame === "maze" ? (
           <div className={`hh-keys ${pixelFont.className}`}>
             {(activeGame === "super"
               ? [
-                  [["←", "→"], "walk"],
-                  [["SPACE", "↑"], "jump"],
-                  [["S"], "shoot / pipe"],
+                  [["A", "D", "←", "→"], "walk"],
+                  [["W", "↑", "SPACE"], "jump"],
+                  [["S", "↓"], "shoot / pipe"],
                   [["M"], "sounds"],
                   [["ESC"], "pause"],
                   [["BACKSPACE"], "menu"],

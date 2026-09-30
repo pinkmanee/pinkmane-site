@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   BANNED_KEY,
   BLOCKED,
+  LEVEL_TIME_BASE,
   MAX_ENTRIES,
   OWNER_PREFIX,
   cleanName,
@@ -71,7 +72,13 @@ export async function POST(req: Request) {
   // Simple cheat check: the score has to be possible for how long the run lasted
   const s = Math.floor(score);
   if (!Number.isFinite(s) || s < 1 || s > game.max) return fail("score not valid");
-  if (!(runTime > 0) || runTime > 7200 || s > runTime * game.rate + game.base) return fail("score not valid");
+  if (game.timed) {
+    // Level time: must be possible for this level, and can't be shorter than the run itself
+    const ms = LEVEL_TIME_BASE - s;
+    if (ms < game.timed.minMs || ms > 3600000 || !(runTime > 0) || ms > runTime * 1000 + 5000) return fail("score not valid");
+  } else if (!(runTime > 0) || runTime > 7200 || s > runTime * game.rate + game.base) {
+    return fail("score not valid");
+  }
 
   try {
     if (await redis.sismember(BANNED_KEY, clean)) return fail("pick another name");
