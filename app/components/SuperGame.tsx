@@ -262,7 +262,10 @@ function testStartZone() {
 //   B  the bong: touch it to finish the level and stop the clock
 // Only one of = - ? per column. Edit the rows, keep them all the same length.
 const LEVEL_ZONE = 30; // the "weed fantasy" look
-type LevelDef = { name: string; map: string[]; signs: string[]; bossHp: number };
+// zone = the look (LEVEL_ZONE = Weedland, LEVEL_SNOW = snowy mountains), boss = which boss waits in the arena,
+// outfit = a picture PINKMANE wears only in this level (leave it out to wear your own outfit)
+type LevelDef = { name: string; map: string[]; signs: string[]; bossHp: number; zone?: number; boss?: "leaf" | "snowman"; outfit?: string };
+const LEVEL_SNOW = 31; // the snowy mountain valley look
 const LEVELS: LevelDef[] = [
   {
     // Other name ideas: "BONG LVL 1", "THE FIRST HIT", "WEEDLAND", "GREEN DREAM", "HIGH GROUND"
@@ -292,14 +295,42 @@ const LEVELS: LevelDef[] = [
       "##############################..##########################...#############################...###########################....###....###################################################################################",
     ],
   },
+  {
+    // Other name ideas: "SNOWY MOUNTAINS", "COLD HANDS", "FROZEN HIGH", "BRRR"
+    name: "SNOWY MOUNTAINS",
+    bossHp: 10,
+    zone: LEVEL_SNOW,
+    boss: "snowman",
+    outfit: "/game/pinkdude-winter.png", // pink parka + beanie, only in this level
+    signs: [
+      "WELCOME TO THE SNOWY MOUNTAINS",
+      "PINKMANE'S FAVOURITE SHOW: SOUTH PARK",
+      "FAVOURITE CHARACTERS:\nKENNY, CARTMAN, BUTTERS, TWEEK",
+      "IT'S COLD UP HERE. KEEP YOUR JOINT LIT",
+      "THE EVIL SNOWMAN WANTS YOUR WEED...",
+      "WARM UP: GO HIT THE BONG!",
+    ],
+    map: [
+      "........................................................................................................................................................................................................................",
+      "........................................................................................................................................................................................................................",
+      "........................................................................................................................................................................................................................",
+      "........................................................................H...f.................................f.........................................................................................................",
+      "....................C.........................f........................---..........................L.....................LL............f........C...........................===........................................",
+      "...................===...............L......=?==....LL.............................................==?=..................----...................===......................?.........?....................................",
+      ".......LLL..........................###...........------......................LLL..........C........................---......---..........................LLL.....................................LLL...................",
+      "...S...........w.............S...######...w.................S...w...w.....................###...S.........w............##...........w.......w.........S..............A........................S.........B...............",
+      "########################...#######################......############################...#############################...##.......########################################################################################",
+      "########################...#######################......############################...#############################...##.......########################################################################################",
+    ],
+  },
 ];
 // The level map: stops (one per level) joined by a winding path, like a Mario world map.
 // icon = the look of that stop. `path` = the corners walked on the way TO that stop from the one before.
 // A stop is locked until you beat the level before it. Stops without a level yet say COMING SOON.
-type MapIcon = "weed" | "speaker" | "roof" | "cloud" | "tree" | "ship" | "coral" | "bong";
+type MapIcon = "weed" | "snow" | "speaker" | "roof" | "cloud" | "tree" | "ship" | "coral" | "bong";
 const MAP_NODES: { x: number; y: number; icon: MapIcon; path: [number, number][] }[] = [
   { x: 28, y: 128, icon: "weed", path: [] },
-  { x: 84, y: 128, icon: "speaker", path: [] },
+  { x: 84, y: 128, icon: "snow", path: [] },
   { x: 84, y: 80, icon: "roof", path: [] },
   { x: 148, y: 80, icon: "cloud", path: [] },
   { x: 148, y: 128, icon: "tree", path: [] },
@@ -309,6 +340,7 @@ const MAP_NODES: { x: number; y: number; icon: MapIcon; path: [number, number][]
 ];
 const MAP_BADGE: Record<MapIcon, string> = {
   weed: "#6fdc5a",
+  snow: "#bfe8ff",
   speaker: "#ff9a3c",
   roof: "#8e3fb0",
   cloud: "#fbd3f3",
@@ -352,6 +384,44 @@ const EVIL_LEAF = [
 const EVIL_COLORS = { K: "#141e0f", G: "#46aa3c", g: "#1e6428", R: "#ff283c", W: "#ffffff" };
 const EL_W = 42;
 const EL_H = 38;
+// LEVEL 2 (snowy mountains): snowman walkers, crows, and the evil horned snowman boss
+const SNOWMAN = ["..WWW..", ".WKWKW.", "..WOW..", "B.WWW.B", ".BWKWB.", "WWWKWWW", ".WWWWW."];
+const SNOWMAN_COLORS = { W: "#fafcff", K: "#14141e", O: "#ff8c1e", B: "#6e4628" };
+const CROW = [
+  ["K.......K", "KK.....KK", ".KKK.KKK.", "..KKKKKOO", "..KRKKK..", "...KKK...", "........."],
+  [".........", ".........", "..KKKKKOO", "..KRKKK..", ".KKK.KKK.", "KK.....KK", "K.......K"],
+];
+const CROW_COLORS = { K: "#1e1e28", O: "#ffaa28", R: "#ff323c" };
+const EVIL_SNOWMAN = [
+  "......R........R......",
+  ".....RR........RR.....",
+  ".....R..KKKKKK..R.....",
+  ".....RKKKKKKKKKKR.....",
+  "......KKKKKKKKKK......",
+  ".....KKKKKKKKKKKK.....",
+  "....KKKKKKKKKKKKKK....",
+  ".....WWWWWWWWWWWW.....",
+  "....WWRRWWWWWWRRWW....",
+  "....WWWRRWWWWRRWWW....",
+  "....WWWWWWOOWWWWWW....",
+  "....WWWWWWOOOOWWWW....",
+  "....WWKWKWKWKWKWWW....",
+  ".....WWWWWWWWWWWW.....",
+  "..B...WWWWWWWWWW...B..",
+  "...B.WWWWWKWWWWWW.B...",
+  "....BWWWWWWWWWWWWB....",
+  "....WWWWWWKWWWWWWW....",
+  "...WWWWWWWWWWWWWWWW...",
+  "...WWWWWWWWKWWWWWWW...",
+  "...WWWWWWWWWWWWWWWW...",
+  "...WWWWWWWWKWWWWWWW...",
+  "....WWWWWWWWWWWWWW....",
+  ".....SSSSSSSSSSSS.....",
+];
+const EVIL_SNOWMAN_COLORS = { W: "#f5f8ff", K: "#14141e", R: "#dc1e28", O: "#ff8c1e", B: "#6e4628", S: "#aac3e1" };
+const SN_W = 44;
+const SN_H = 48;
+const SNOWMAN_DAZE = 4; // seconds you get to jump on his head once he's out of hits
 // The bong at the end of every level, drawn 2x bigger
 const BONG = [
   "...KKKK...",
@@ -830,6 +900,7 @@ function getOwnerCode() {
 export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const spritesRef = useRef<Partial<Record<OutfitId, HTMLImageElement>>>({});
+  const levelSpritesRef = useRef<Record<string, HTMLImageElement>>({}); // outfits worn only in one level
   const shipRef = useRef<HTMLImageElement | null>(null); // your ghost ship drawing: /public/game/ghostship.png
   const fieldImagesRef = useRef<HTMLImageElement[]>([]); // the 7 cover-art field backgrounds
   const firstSignal = useRef(actionSignal);
@@ -876,7 +947,22 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     doneAt: 0,
     bong: null as null | { x: number; y: number },
     signs: [] as { x: number; text: string }[],
-    lboss: null as null | { x: number; y: number; vx: number; vy: number; hp: number; maxHp: number; hit: number; dive: number; diveTimer: number; dead: number; facing: number },
+    lboss: null as null | {
+      kind: "leaf" | "snowman";
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      hp: number;
+      maxHp: number;
+      hit: number;
+      dive: number;
+      diveTimer: number;
+      dead: number;
+      facing: number;
+      dazed: number; // snowman: out of hits, jump on his head!
+      speech: number; // seconds the speech bubble stays up
+    },
     lbossState: "none" as "none" | "waiting" | "fight" | "done",
     outfit: "classic" as OutfitId,
     unlocked: ["classic"] as OutfitId[],
@@ -2018,7 +2104,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           break;
         }
       }
-      const col = makeCol(ground, LEVEL_ZONE);
+      const col = makeCol(ground, def.zone ?? LEVEL_ZONE);
       for (let r = 0; r < map.length; r++) {
         const ch = map[r][c];
         const x = c * T;
@@ -2072,7 +2158,23 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       e.squash = 0;
     }
     const hp = def?.bossHp ?? 10;
-    s.lboss = { x: s.cam + W - 60, y: 30, vx: 0, vy: 0, hp, maxHp: hp, hit: 0, dive: 0, diveTimer: 2.5, dead: 0, facing: -1 };
+    const kind = def?.boss ?? "leaf";
+    s.lboss = {
+      kind,
+      x: s.cam + W - 60,
+      y: kind === "snowman" ? 8 * T - SN_H : 30,
+      vx: 0,
+      vy: 0,
+      hp,
+      maxHp: hp,
+      hit: 0,
+      dive: 0,
+      diveTimer: 2.5,
+      dead: 0,
+      facing: -1,
+      dazed: 0,
+      speech: kind === "snowman" ? 3.5 : 0,
+    };
     heldRef.current = { left: false, right: false, up: false };
     touchRef.current = 0;
     s.vx = 0;
@@ -2084,14 +2186,21 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const s = state.current;
     const b = s.lboss;
     if (!b || b.dead > 0) return;
-    const cx = b.x + EL_W / 2;
-    const cy = b.y + EL_H / 2;
+    const cx = b.x + (b.kind === "snowman" ? SN_W : EL_W) / 2;
+    const cy = b.y + (b.kind === "snowman" ? SN_H : EL_H) / 2;
     b.hp -= 1; // every shot that touches it counts (ammo is tight)
     b.hit = 0.35;
     burst(cx, cy, 16, ice ? ICE : FIRE, 70);
     s.shake = 0.1;
     playStomp();
-    if (b.hp <= 0) {
+    if (b.hp <= 0 && b.kind === "snowman") {
+      // out of hits: he's dizzy, finish him by jumping on his head
+      b.hp = 0;
+      b.dazed = SNOWMAN_DAZE;
+      b.vx = 0;
+      s.flash = 2;
+      s.flashText = "NOW JUMP ON HIS HEAD!";
+    } else if (b.hp <= 0) {
       b.dead = 1.6;
       popup(cx, b.y - 6, "BYE EVIL LEAF!");
       playTrollDeath();
@@ -2139,7 +2248,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.flash = 1.6;
     const bossLabel = s.boss?.kind === "giant" ? "GIANT" : "TROLL";
     s.flashText = s.lboss
-      ? "SHOOT THE EVIL LEAF!"
+      ? s.lboss.kind === "snowman"
+        ? "SHOOT THE EVIL SNOWMAN!"
+        : "SHOOT THE EVIL LEAF!"
       : s.bossCount === 0
         ? `FIGHT THE ${bossLabel}!`
         : `${bossLabel} #${s.bossCount + 1}!`;
@@ -2515,7 +2626,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         }
         if (s.lboss) {
           s.lboss.x = s.cam + W - 60;
-          s.lboss.y = 30;
+          s.lboss.y = s.lboss.kind === "snowman" ? 8 * T - SN_H : 30;
           s.lboss.dive = 0;
         }
         s.invuln = 1.5;
@@ -2878,7 +2989,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
       const lb = s.lboss;
       if (f.life > 0 && lb && lb.dead <= 0) {
-        if (f.x + 4 > lb.x + 6 && f.x < lb.x + EL_W - 6 && f.y + 4 > lb.y + 4 && f.y < lb.y + EL_H - 4) {
+        const bw = lb.kind === "snowman" ? SN_W : EL_W;
+        const bh = lb.kind === "snowman" ? SN_H : EL_H;
+        if (lb.dazed <= 0 && f.x + 4 > lb.x + 6 && f.x < lb.x + bw - 6 && f.y + 4 > lb.y + 4 && f.y < lb.y + bh - 4) {
           f.life = 0;
           hitLevelBoss(f.ice);
         }
@@ -2973,15 +3086,74 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (lb.dead > 0) {
         lb.dead -= dt;
         lb.y += 40 * dt;
-        if (Math.random() < 0.6) burst(lb.x + rand(4, EL_W - 4), lb.y + rand(4, EL_H), 2, [LIGHT_GREEN, GREEN, "#ffffff"], 40);
+        if (Math.random() < 0.6) {
+          const snow = lb.kind === "snowman";
+          burst(lb.x + rand(4, (snow ? SN_W : EL_W) - 4), lb.y + rand(4, snow ? SN_H : EL_H), 2, snow ? ["#ffffff", "#dff3fb", "#aac3e1"] : [LIGHT_GREEN, GREEN, "#ffffff"], 40);
+        }
         if (lb.dead <= 0) {
           s.lboss = null;
           s.lbossState = "done";
           s.bossState = "none";
           s.flash = 2.5;
-          s.flashText = "EVIL LEAF DOWN! GO HIT THE BONG";
+          s.flashText = lb.kind === "snowman" ? "THE EVIL SNOWMAN MELTED! GO HIT THE BONG" : "EVIL LEAF DOWN! GO HIT THE BONG";
           if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
           s.ammo = Math.min(s.ammo, 5);
+        }
+      } else if (lb.kind === "snowman") {
+        // THE EVIL SNOWMAN: stomps after you and hops. Shots only; once he's out of hits he gets
+        // dizzy for a few seconds and you finish him by jumping on his head.
+        if (lb.hit > 0) lb.hit -= dt;
+        if (lb.speech > 0) lb.speech -= dt;
+        const floorY = 8 * T - SN_H;
+        const pc = s.x + HB_X + HB_W / 2;
+        const bc = lb.x + SN_W / 2;
+        const onFloor = lb.y >= floorY - 0.5;
+        if (lb.dazed > 0) {
+          lb.dazed -= dt;
+          lb.vx = 0;
+          if (lb.dazed <= 0) {
+            lb.hp = 3; // took too long: he shakes it off
+            popup(bc, lb.y - 8, "HE'S BACK UP!");
+          }
+        } else if (onFloor) {
+          lb.facing = pc < bc ? -1 : 1;
+          lb.vx = lb.facing * 40;
+          lb.diveTimer -= dt;
+          if (lb.diveTimer <= 0 && Math.abs(pc - bc) < 130) {
+            lb.vy = -300;
+            lb.vx = lb.facing * 70;
+            lb.diveTimer = rand(2, 3.2);
+            playBump();
+          }
+        }
+        lb.vy = Math.min(420, lb.vy + GRAVITY * dt);
+        lb.x += lb.vx * dt;
+        lb.y += lb.vy * dt;
+        if (lb.y > floorY) {
+          if (lb.vy > 200) s.shake = 0.12;
+          lb.y = floorY;
+          lb.vy = 0;
+        }
+        lb.x = Math.max(s.cam, Math.min(s.cam + W - SN_W, lb.x));
+        const bx1 = lb.x + 8;
+        const by1 = lb.y + 6;
+        if (hx() + HB_W > bx1 && hx() < bx1 + SN_W - 16 && hy() + HB_H > by1 && hy() < lb.y + SN_H) {
+          const onTop = s.vy > 0 && hy() + HB_H - by1 < 14;
+          if (onTop && lb.dazed > 0) {
+            // the finishing stomp!
+            s.vy = STOMP_BOUNCE;
+            lb.dazed = 0;
+            lb.dead = 1.6;
+            popup(bc, lb.y - 8, "MELTED!");
+            playTrollDeath();
+          } else if (onTop) {
+            s.vy = STOMP_BOUNCE;
+            popup(bc, lb.y - 8, "NOPE!");
+            playBump();
+          } else if (lb.dazed <= 0 && s.invuln <= 0) {
+            hurt();
+            return;
+          }
         }
       } else {
         if (lb.hit > 0) lb.hit -= dt;
@@ -3454,11 +3626,115 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
   };
 
+  // A pixel pine tree with snow on its branches
+  const drawPine = (ctx: CanvasRenderingContext2D, x: number, baseY: number, h: number, dark: string) => {
+    ctx.fillStyle = "#4a3222";
+    ctx.fillRect(Math.round(x) - 1, baseY - 4, 3, 4);
+    for (let k = 0; k < 3; k++) {
+      const w = h * (0.55 - k * 0.13);
+      const top = baseY - 4 - h * (0.35 + k * 0.28);
+      const bot = baseY - 4 - h * (k * 0.22);
+      ctx.fillStyle = dark;
+      ctx.beginPath();
+      ctx.moveTo(x, top);
+      ctx.lineTo(x - w / 2, bot);
+      ctx.lineTo(x + w / 2, bot);
+      ctx.fill();
+      ctx.fillStyle = "#f4f9fc";
+      ctx.fillRect(Math.round(x - w / 2), Math.round(bot) - 2, Math.round(w), 2);
+    }
+    ctx.fillStyle = "#f4f9fc";
+    ctx.fillRect(Math.round(x) - 1, Math.round(baseY - 4 - h * 0.91), 3, 2);
+  };
+
+  // SNOWY MOUNTAINS (Level 2): blue sky, snowy peaks, pine forest, a little town, snow falling
+  const drawSnowland = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    const cam = s.cam;
+    const g = ctx.createLinearGradient(0, -200, 0, H);
+    g.addColorStop(0, "#5fb4d6");
+    g.addColorStop(1, "#cfeaf5");
+    ctx.fillStyle = g;
+    ctx.fillRect(-4, -1200, W + 8, H + 1400);
+    // clouds
+    ctx.fillStyle = "#eef6fa";
+    for (let k = 0; k < 5; k++) {
+      const cx = ((((hash(k) * 500 - cam * 0.05 - s.t * 3) % (W + 80)) + W + 80) % (W + 80)) - 40;
+      const cy = 14 + hash(k + 7) * 30;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+      ctx.arc(cx + 10, cy - 4, 10, 0, Math.PI * 2);
+      ctx.arc(cx + 22, cy, 7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // far mountains with snow caps
+    const base = Math.floor((cam * 0.1) / 90);
+    for (let i = -1; i < W / 90 + 2; i++) {
+      const idx = base + i;
+      const mx = idx * 90 - cam * 0.1 + hash(idx) * 30;
+      const mh = 50 + hash(idx + 4) * 30;
+      const my = 112;
+      ctx.fillStyle = idx % 2 ? "#2f5d4a" : "#3a6b56";
+      ctx.beginPath();
+      ctx.moveTo(mx - 60, my);
+      ctx.lineTo(mx, my - mh);
+      ctx.lineTo(mx + 60, my);
+      ctx.fill();
+      ctx.fillStyle = "#f4f9fc";
+      ctx.beginPath();
+      ctx.moveTo(mx - 16, my - mh + 16);
+      ctx.lineTo(mx, my - mh);
+      ctx.lineTo(mx + 16, my - mh + 16);
+      ctx.lineTo(mx + 6, my - mh + 12);
+      ctx.lineTo(mx, my - mh + 17);
+      ctx.lineTo(mx - 7, my - mh + 12);
+      ctx.fill();
+    }
+    // a little town far away, with lit windows
+    const tb = Math.floor((cam * 0.2) / 160);
+    for (let i = -1; i < W / 160 + 2; i++) {
+      const idx = tb + i;
+      const tx = idx * 160 - cam * 0.2 + 40;
+      for (let h = 0; h < 4; h++) {
+        const hx2 = Math.round(tx + h * 13);
+        const hy2 = 104 - (h % 2) * 3;
+        ctx.fillStyle = ["#b0584a", "#6d8ab0", "#c9a14a", "#7c5aa0"][(idx + h) & 3];
+        ctx.fillRect(hx2, hy2, 10, 8);
+        ctx.fillStyle = "#f4f9fc";
+        ctx.beginPath();
+        ctx.moveTo(hx2 - 1, hy2);
+        ctx.lineTo(hx2 + 5, hy2 - 5);
+        ctx.lineTo(hx2 + 11, hy2);
+        ctx.fill();
+        ctx.fillStyle = "#ffe27a";
+        ctx.fillRect(hx2 + 3, hy2 + 3, 2, 2);
+      }
+    }
+    // pine forest
+    const pb = Math.floor((cam * 0.35) / 34);
+    for (let i = -1; i < W / 34 + 2; i++) {
+      const idx = pb + i;
+      const px = idx * 34 - cam * 0.35 + hash(idx + 11) * 14;
+      drawPine(ctx, px, 128, 30 + hash(idx + 2) * 18, idx % 3 ? "#1f6b3a" : "#175a30");
+    }
+    // snow falling
+    ctx.fillStyle = "#ffffff";
+    for (let k = 0; k < 40; k++) {
+      const fx = ((((hash(k) * 700 - cam * 0.6 + Math.sin(s.t + k) * 8) % (W + 10)) + W + 10) % (W + 10)) - 5;
+      const fy = ((s.t * (14 + hash(k + 3) * 16) + hash(k + 8) * (H + 10)) % (H + 10)) - 5;
+      ctx.fillRect(Math.round(fx), Math.round(fy), k % 4 ? 1 : 2, k % 4 ? 1 : 2);
+    }
+  };
+
   const drawBackground = (ctx: CanvasRenderingContext2D, zone: number) => {
     const s = state.current;
     const cam = s.cam;
     if (zone === LEVEL_ZONE) {
       drawWeedland(ctx);
+      return;
+    }
+    if (zone === LEVEL_SNOW) {
+      drawSnowland(ctx);
       return;
     }
 
@@ -3784,6 +4060,22 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
       return;
     }
+    if (c.zone === LEVEL_SNOW) {
+      // a thick layer of snow on dark earth
+      ctx.fillStyle = "#5a4636";
+      ctx.fillRect(x, gy, T, H - gy);
+      ctx.fillStyle = "#453427";
+      ctx.fillRect(x + ((col * 7) % 12) + 2, gy + 14, 3, 2);
+      ctx.fillStyle = "#dfeef6";
+      ctx.fillRect(x, gy, T, 7);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x, gy, T, 3);
+      ctx.fillStyle = "#b8d2e2";
+      ctx.fillRect(x + ((col * 5) % 10) + 2, gy + 5, 4, 1);
+      ctx.fillStyle = "#dfeef6";
+      ctx.fillRect(x + ((col * 3) % 12), gy + 7, 3, 2); // drips of snow
+      return;
+    }
     if (c.zone === LEVEL_ZONE) {
       // rich soil with grass on top and little tufts
       ctx.fillStyle = WL_SOIL;
@@ -3943,6 +4235,20 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const drawBrick = (ctx: CanvasRenderingContext2D, x: number, by: number, zone: number) => {
     // Cover-art fields: each has its own thing to jump on
     if (zone === F_GAF || zone === LEVEL_ZONE) return drawPixels(ctx, NUG, x, by, NUG_COLORS);
+    if (zone === LEVEL_SNOW) {
+      // an ice block
+      ctx.fillStyle = "#3a7fa8";
+      ctx.fillRect(x, by, T, T - 3);
+      ctx.fillStyle = "#bfe8ff";
+      ctx.fillRect(x + 1, by + 1, T - 2, T - 5);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x + 1, by + 1, T - 2, 2);
+      ctx.fillRect(x + 3, by + 5, 1, 4);
+      ctx.fillRect(x + 4, by + 4, 1, 1);
+      ctx.fillStyle = "#8fd0f0";
+      ctx.fillRect(x + 9, by + 7, 4, 1);
+      return;
+    }
     if (zone === F_PSP) return drawPixels(ctx, HANDHELD, x, by + 1, HANDHELD_COLORS);
     if (zone === F_IPOD) return drawPixels(ctx, PLAYER, x, by, PLAYER_COLORS);
     if (zone === F_SPT) return drawPixels(ctx, RAINBOW, x, by, RAINBOW_COLORS);
@@ -4147,7 +4453,20 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const s = state.current;
     ctx.fillStyle = INK;
     if (icon === "weed") drawPixels(ctx, LEAF, x - 7, y - 7, { G: GREEN, D: DARK_GREEN }, 2);
-    else if (icon === "speaker") {
+    else if (icon === "snow") {
+      ctx.fillStyle = "#2f5d4a";
+      ctx.beginPath();
+      ctx.moveTo(x - 8, y + 6);
+      ctx.lineTo(x, y - 7);
+      ctx.lineTo(x + 8, y + 6);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.moveTo(x - 3, y - 2);
+      ctx.lineTo(x, y - 7);
+      ctx.lineTo(x + 3, y - 2);
+      ctx.fill();
+    } else if (icon === "speaker") {
       ctx.fillRect(x - 6, y - 7, 12, 14);
       ctx.fillStyle = "#777";
       ctx.beginPath();
@@ -4545,6 +4864,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           [F_TOP]: "#c9ced8",
           [F_CORAL]: "#ff6f91",
           [LEVEL_ZONE]: "#4caa3c",
+          [LEVEL_SNOW]: "#9fdcff",
         };
         ctx.fillStyle = blinking
           ? "#ffffff"
@@ -4746,6 +5066,25 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     for (const e of s.enemies) {
       const x = e.x - cam;
       const ez = colAt(Math.floor(e.x / T)).zone;
+      if (ez === LEVEL_SNOW) {
+        if (e.kind === "flyer") {
+          if (e.alive) {
+            const frame = Math.abs(Math.floor(s.t * 8 + e.phase) % 2) || 0;
+            const rows = e.vx > 0 ? CROW[frame].map((r) => r.split("").reverse().join("")) : CROW[frame].map((r) => r);
+            drawPixels(ctx, e.vx > 0 ? rows : rows.map((r) => r.split("").reverse().join("")), x, e.y, CROW_COLORS, 2);
+          } else {
+            ctx.fillStyle = "#1e1e28";
+            ctx.fillRect(x + 2, e.y + 10, 14, 3);
+          }
+        } else if (e.alive) {
+          const bob = Math.floor(s.t * 6 + e.x) % 2;
+          drawPixels(ctx, SNOWMAN, x, e.y - bob, SNOWMAN_COLORS, 2);
+        } else {
+          ctx.fillStyle = "#fafcff";
+          ctx.fillRect(x, e.y + 10, 14, 4);
+        }
+        continue;
+      }
       if (ez === F_IPOD) {
         if (e.kind === "flyer") {
           if (e.alive) {
@@ -4937,7 +5276,49 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
 
     // The evil weed leaf (Level 1 boss), with a little health bar over it
-    if (s.lboss) {
+    if (s.lboss && s.lboss.kind === "snowman") {
+      const lb = s.lboss;
+      const lx = Math.round(lb.x - cam);
+      const walking = Math.abs(lb.vx) > 5 && lb.vy === 0;
+      const ly = Math.round(lb.y) - (walking && Math.floor(s.t * 6) % 2 === 0 ? 1 : 0) + (lb.dazed > 0 ? 2 : 0);
+      const flash = (lb.hit > 0 && Math.floor(s.t * 20) % 2 === 0) || (lb.dead > 0 && Math.floor(s.t * 14) % 2 === 0);
+      const colors = flash ? { W: "#ffffff", K: "#ffffff", R: "#ffffff", O: "#ffffff", B: "#ffffff", S: "#ffffff" } : EVIL_SNOWMAN_COLORS;
+      const rows = lb.facing > 0 ? EVIL_SNOWMAN.map((r) => r.split("").reverse().join("")) : EVIL_SNOWMAN;
+      drawPixels(ctx, rows, lx, ly, colors, 2);
+      if (lb.dazed > 0) {
+        // dizzy stars circling his hat
+        for (let k = 0; k < 3; k++) {
+          const a = s.t * 5 + (k * Math.PI * 2) / 3;
+          ctx.fillStyle = k % 2 ? "#ffe27a" : "#ffffff";
+          ctx.fillRect(Math.round(lx + SN_W / 2 + Math.cos(a) * 14), Math.round(ly + 2 + Math.sin(a) * 4), 3, 3);
+        }
+      } else if (lb.dead <= 0) {
+        ctx.fillStyle = INK;
+        ctx.fillRect(lx + 6, ly - 7, 32, 4);
+        ctx.fillStyle = "#9b8fa6";
+        ctx.fillRect(lx + 7, ly - 6, 30, 2);
+        ctx.fillStyle = "#ff283c";
+        ctx.fillRect(lx + 7, ly - 6, Math.round((30 * Math.max(0, lb.hp)) / lb.maxHp), 2);
+      }
+      // speech bubble when the fight starts
+      if (lb.speech > 0 && s.mode === "running") {
+        const text = "GIVE ME ALL YOUR WEED!";
+        ctx.font = `8px ${fontFamily}`;
+        ctx.textBaseline = "top";
+        ctx.textAlign = "center";
+        const tw = ctx.measureText(text).width + 8;
+        const bx = Math.max(4, Math.min(W - tw - 4, lx + SN_W / 2 - tw / 2));
+        const by = Math.max(24, ly - 26);
+        ctx.fillStyle = INK;
+        ctx.fillRect(bx - 1, by - 1, tw + 2, 14);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(bx, by, tw, 12);
+        ctx.fillStyle = INK;
+        ctx.fillRect(Math.round(lx + SN_W / 2) - 2, by + 13, 4, 2);
+        ctx.fillRect(Math.round(lx + SN_W / 2) - 1, by + 15, 2, 2);
+        ctx.fillText(text, bx + tw / 2, by + 2);
+      }
+    } else if (s.lboss) {
       const lb = s.lboss;
       const lx = Math.round(lb.x - cam);
       const ly = Math.round(lb.y + (lb.dive > 0 ? 0 : Math.sin(s.t * 6) * 1));
@@ -4964,7 +5345,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const showYou = ["select", "ready", "running", "pipe", "golden", "choose", "paused"].includes(s.mode);
     if (showYou && !blinking) {
       const previewOutfit = s.mode === "select" ? OUTFITS[s.selectIndex].id : s.outfit;
-      const sprite = spritesRef.current[previewOutfit];
+      const levelOutfit = s.levelMode ? LEVELS[s.level - 1]?.outfit : undefined;
+      const levelSprite = levelOutfit ? levelSpritesRef.current[levelOutfit] : undefined;
+      const sprite =
+        s.mode !== "select" && levelSprite && levelSprite.complete && levelSprite.naturalWidth > 0
+          ? levelSprite
+          : spritesRef.current[previewOutfit];
       // Frames: 0 and 1 = walking. Sheets with a 3rd frame (72px wide) use it for standing still
       // (classic + trippy: he raises the joint to his mouth and smoke curls up).
       const hasIdle = !!sprite && sprite.naturalWidth >= SPRITE_W * 3;
@@ -5255,6 +5641,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       const img = new Image();
       img.src = o.file;
       spritesRef.current[o.id] = img;
+    });
+    LEVELS.forEach((lv) => {
+      if (!lv.outfit || levelSpritesRef.current[lv.outfit]) return;
+      const img = new Image();
+      img.src = lv.outfit;
+      levelSpritesRef.current[lv.outfit] = img;
     });
     const ship = new Image();
     ship.src = "/game/ghostship.png";
