@@ -2153,6 +2153,7 @@ activeGame === "maze" ? (
           </div>
         </div>
 
+        {/* Grey hint text on the iPod: only on phones/tablets now (computers get the white key legend instead) */}
         <div className={`${pixelFont.className} controls-hint`}>
           <span className="hint-touch">
             {playing
@@ -2170,23 +2171,6 @@ activeGame === "maze" ? (
                 ? "turn wheel or drag screen · OK launch · ◀▶ songs"
                 : "tap screen or OK to jump · ◀▶ songs"
               : "swipe wheel to scroll · ◀▶ songs"}
-          </span>
-          <span className="hint-keys">
-            {playing
-              ? activeGame === "maze"
-                ? "arrows / WASD steer · space start · M mute · backspace exit"
-                : activeGame === "super"
-                ? "← → walk · space / ↑ jump · M mute · backspace exit"
-                : activeGame === "hex"
-                ? "← → / A D move · space start · M mute · backspace exit"
-                : activeGame === "bird"
-                ? "space / ↑ flap · M mute · backspace exit"
-                : activeGame === "snake"
-                ? "arrows / WASD steer · space start · backspace exit"
-                : activeGame === "vortex"
-                ? "scroll / ↑↓ spin · space launch · backspace exit"
-                : "space jump · ◀▶ songs · backspace exit"
-              : "scroll or drag wheel · enter select · ◀▶ songs · backspace back"}
           </span>
         </div>
       </div>
@@ -2665,16 +2649,10 @@ activeGame === "maze" ? (
           display: inline;
         }
 
-        .hint-keys {
-          display: none;
-        }
-
+        /* Computers: the white key legend under the iPod explains the controls, so hide the grey text */
         @media (hover: hover) and (pointer: fine) {
-          .hint-touch {
+          .controls-hint {
             display: none;
-          }
-          .hint-keys {
-            display: inline;
           }
         }
 
