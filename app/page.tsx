@@ -148,25 +148,36 @@ const DEFAULT_BPM = 140;
 // If everything feels a tiny bit early or late on your speakers, change this (in seconds).
 // Bigger number = the visuals hit later. Try steps of 0.02. Bluetooth headphones often need about 0.15.
 const SYNC_NUDGE = 0;
-// BASS QUAKE slider: 0 = off, 10 = max. Visitors can change it; this is where it starts.
-const QUAKE_DEFAULT = 5;
+// BASS QUAKE slider: 0 = off, 10 = max. Visitors can change it, but it always starts here
+// every time the website is opened.
+const QUAKE_DEFAULT = 3;
 // The shaking border around the screen: how thick it is (in screen pixels, ~57 = about 1.5 cm)
 const EDGE_BAND_PX = 57;
 // How far the border shakes on an 808 at level 10 (in screen pixels)
 const EDGE_MAX_SHAKE_PX = 10;
 
 // Your songs. Files go in public/music/ named 01.mp3, 02.mp3 ...
-const TRACKS: { title: string; file: string; bpm?: number; offset?: number }[] = [
-  { title: "pinkmane's random ass beat", file: "/sounds/song.mp3", bpm: 140, offset: 0 },
-  { title: "wet socks (w/ o1m4de)", file: "/music/06.mp3", bpm: 82, offset: 0 },
-  { title: "hurricane of blades", file: "/music/07.mp3", bpm: 77, offset: 0 },
-  { title: "cat piss kenny", file: "/music/10.mp3", bpm: 142, offset: 0 },
-  { title: "gaf (ft. TOMBFELL)", file: "/music/05.mp3", bpm: 138, offset: 0 },
-  { title: "snehulienka", file: "/music/03.mp3", bpm: 140, offset: 0 },
-  { title: "small pretty titties", file: "/music/01.mp3", bpm: 140, offset: 0 },
-  { title: "vomit trap", file: "/music/08.mp3", bpm: 140, offset: 0 },
-  { title: "gods psp (ft. TOMBFELL)", file: "/music/09.mp3", bpm: 140, offset: 0 },
+// link: the SoundCloud page of that song. Clicking the "NOW PLAYING" text on the iPod opens it.
+//   Paste each song's link between the quotes, e.g. link: "https://soundcloud.com/pinkmanee/wet-socks"
+//   If a link is left empty (""), clicking searches SoundCloud for that song instead.
+const TRACKS: { title: string; file: string; bpm?: number; offset?: number; link?: string }[] = [
+  { title: "pinkmane's random ass beat", file: "/sounds/song.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
+  { title: "wet socks (w/ o1m4de)", file: "/music/06.mp3", bpm: 82, offset: 0, link: "https://soundcloud.com/pinkmanee/wet-socks" },
+  { title: "hurricane of blades", file: "/music/07.mp3", bpm: 77, offset: 0, link: "https://soundcloud.com/pinkmanee/hurricane-of-blades" },
+  { title: "cat piss kenny", file: "/music/10.mp3", bpm: 142, offset: 0, link: "https://soundcloud.com/pinkmanee/cat-piss-kenny" },
+  { title: "gaf (ft. TOMBFELL)", file: "/music/05.mp3", bpm: 138, offset: 0, link: "https://soundcloud.com/pinkmanee/gaf" },
+  { title: "snehulienka", file: "/music/03.mp3", bpm: 140, offset: 0, link: "" },
+  { title: "small pretty titties", file: "/music/01.mp3", bpm: 140, offset: 0, link: "" },
+  { title: "vomit trap", file: "/music/08.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee/vomit-trap" },
+  { title: "gods psp (ft. TOMBFELL)", file: "/music/09.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee/gods-psp" },
 ];
+
+// Where clicking the now-playing text goes: the song's own link, or a SoundCloud search for it
+function trackLink(track: { title: string; link?: string }) {
+  if (track.link) return track.link;
+  const name = track.title.replace(/\(.*?\)/g, "").trim(); // drop "(ft. ...)" bits for a cleaner search
+  return `https://soundcloud.com/search/sounds?q=${encodeURIComponent(`pinkmane ${name}`)}`;
+}
 
 // How many menu rows fit on the screen at once
 const VISIBLE_ROWS = 5;
@@ -372,9 +383,28 @@ const DpadArrow = ({ dir }: { dir: "up" | "down" | "left" | "right" }) => {
 // If a browser can't do it, the normal still picture just shows instead.
 // WIGGLE_PX: how far the wiggle moves the picture sideways (0 = no wiggle)
 const WIGGLE_PX = 5;
-const MAIN_BG_SOURCES = ["/topshelf.png"];
-// Handheld: your handheld-bg.png, or .jpg, or the normal one, whichever exists first
-const HH_BG_SOURCES = ["/handheld-bg.png", "/handheld-bg.jpg", "/topshelf.png"];
+// BACKGROUND MODES: the 3 pixel buttons above the iPod swap the page background.
+// Put your pictures in /public/bg/ named mode1.png, mode2.png, mode3.png.
+// If one is missing, the normal topshelf.png shows instead.
+// focus: which part of the picture stays on screen when it doesn't fit
+//   0 = keep the top, 0.5 = keep the middle, 1 = keep the bottom
+// screen: the iPod screen colour that goes with that background
+//   (mode 1 light pink, mode 2 light green, mode 3 light red)
+const BG_MODES = [
+  { label: "MODE 1", sources: ["/bg/mode1.png", "/topshelf.png"], focus: 0.15, screen: "#f6d3ee", screenRgb: "246, 211, 238" },
+  { label: "MODE 2", sources: ["/bg/mode2.png", "/topshelf.png"], focus: 0.15, screen: "#d7efbc", screenRgb: "215, 239, 188" },
+  { label: "MODE 3", sources: ["/bg/mode3.png", "/topshelf.png"], focus: 0.15, screen: "#f8d0ca", screenRgb: "248, 208, 202" },
+];
+// HANDHELD (PSP) BACKGROUND MODES: 4 pixel buttons above the handheld.
+// MODE 1 is the one you had before (handheld-bg.png, or .jpg, or the normal one, whichever exists first).
+// MODE 2-4 are the same 3 pictures as the iPod modes (/public/bg/mode1.png, mode2.png, mode3.png).
+// focus works the same as the iPod ones: 0 = keep the top, 0.5 = keep the middle.
+const HH_BG_MODES = [
+  { label: "MODE 1", sources: ["/handheld-bg.png", "/handheld-bg.jpg", "/topshelf.png"], focus: 0.5 },
+  { label: "MODE 2", sources: ["/bg/mode1.png", "/topshelf.png"], focus: 0.15 },
+  { label: "MODE 3", sources: ["/bg/mode2.png", "/topshelf.png"], focus: 0.15 },
+  { label: "MODE 4", sources: ["/bg/mode3.png", "/topshelf.png"], focus: 0.15 },
+];
 
 type BeatState = { kick: number; sway: number; bass: number; quake: number };
 
@@ -398,6 +428,7 @@ uniform float pxScale;
 uniform float wiggle;
 uniform float band;
 uniform vec2 shake;
+uniform float focusY;
 void main() {
   // work in screen pixels
   vec2 px = uv * res / pxScale;
@@ -420,10 +451,23 @@ void main() {
   float rs = res.x / res.y;
   float ri = imgSize.x / imgSize.y;
   vec2 sc = rs > ri ? vec2(1.0, ri / rs) : vec2(rs / ri, 1.0);
-  gl_FragColor = vec4(texture2D(img, (p - 0.5) * sc + 0.5).rgb, 1.0);
+  vec2 tc = (p - 0.5) * sc + 0.5;
+  // when the top/bottom gets cut off, slide towards the part we want to keep (focusY: 0 = top)
+  tc.y += (focusY - 0.5) * (1.0 - sc.y);
+  gl_FragColor = vec4(texture2D(img, tc).rgb, 1.0);
 }`;
 
-function LiquidBg({ sources, beat, active }: { sources: string[]; beat: { current: BeatState }; active: boolean }) {
+function LiquidBg({
+  sources,
+  beat,
+  active,
+  focus = 0.5,
+}: {
+  sources: string[];
+  beat: { current: BeatState };
+  active: boolean;
+  focus?: number;
+}) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef(active);
   const [ready, setReady] = useState(false);
@@ -478,6 +522,7 @@ function LiquidBg({ sources, beat, active }: { sources: string[]; beat: { curren
     const uWiggle = u("wiggle");
     const uBand = u("band");
     const uShake = u("shake");
+    gl.uniform1f(u("focusY"), focus);
 
     let cancelled = false;
     let frame = 0;
@@ -551,7 +596,7 @@ function LiquidBg({ sources, beat, active }: { sources: string[]; beat: { curren
       canvas.remove();
       setReady(false);
     };
-  }, [sources, beat]);
+  }, [sources, beat, focus]);
 
   return <div ref={wrapRef} className={`liquid-bg ${ready ? "liquid-on" : ""}`} aria-hidden="true" />;
 }
@@ -644,6 +689,12 @@ export default function Home() {
   // Pink Maze and Super Pinkmane play on a wide handheld instead of the iPod
   const handheld = playing && (activeGame === "maze" || activeGame === "super");
   const [handheldBoot, setHandheldBoot] = useState(false);
+  // "CONTROL W THESE!" arrows pointing at the key legend, for 5 seconds after Super Pinkmane starts
+  const [keyTip, setKeyTip] = useState(false);
+  // Which background mode is picked (0, 1 or 2), remembered for next visit
+  const [bgMode, setBgMode] = useState(0);
+  // Same thing for the handheld (PSP) view (0-3), remembered separately
+  const [hhBgMode, setHhBgMode] = useState(0);
 
   // Glitch flicker on menu change
   const [glitch, setGlitch] = useState(false);
@@ -990,6 +1041,9 @@ export default function Home() {
       }
       if (e.key === "ArrowUp") goUp();
       if (e.key === "ArrowDown") goDown();
+      // W / S move up and down in the menus too (in the games they do their own thing)
+      if (!playing && (e.key === "w" || e.key === "W")) goUp();
+      if (!playing && (e.key === "s" || e.key === "S")) goDown();
       if (e.key === "Enter") selectItem();
       if (e.key === "Backspace") goBack();
     };
@@ -1046,17 +1100,7 @@ export default function Home() {
   //   bass    jumps up when the bass actually hits in the song (the browser listens to the low end),
   //           which makes the border around the screen shake
   // When the music is paused or muted, things breathe slowly instead.
-  // Remember the visitor's BASS QUAKE level
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("pinkmane-quake");
-      if (saved !== null && !Number.isNaN(Number(saved))) {
-        const v = Math.max(0, Math.min(10, Math.round(Number(saved))));
-        setQuake(v);
-        quakeRef.current = v;
-      }
-    } catch {}
-  }, []);
+  // BASS QUAKE always starts at QUAKE_DEFAULT (3) when the website opens, so nothing is loaded here
 
   useEffect(() => {
     const el = mainRef.current;
@@ -1384,7 +1428,7 @@ export default function Home() {
     quakeRef.current = v;
     quakeTestRef.current = performance.now(); // shake once so you can feel the new level
     try {
-      localStorage.setItem("pinkmane-quake", String(v));
+      localStorage.removeItem("pinkmane-quake"); // old saved level from before, not used any more
     } catch {}
   };
 
@@ -1456,6 +1500,43 @@ activeGame === "maze" ? (
     const t = setTimeout(() => setHandheldBoot(false), 1700);
     return () => clearTimeout(t);
   }, [handheld]);
+
+  // Super Pinkmane: once the boot screen is gone, point at the keys for 5 seconds
+  useEffect(() => {
+    if (!handheld || activeGame !== "super" || handheldBoot) {
+      setKeyTip(false);
+      return;
+    }
+    setKeyTip(true);
+    const t = setTimeout(() => setKeyTip(false), 5000);
+    return () => clearTimeout(t);
+  }, [handheld, activeGame, handheldBoot]);
+
+  // Load the background mode picked last time
+  useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem("pinkmane-bgmode"));
+      if (saved >= 0 && saved < BG_MODES.length) setBgMode(saved);
+      const savedHh = Number(localStorage.getItem("pinkmane-hh-bgmode"));
+      if (savedHh >= 0 && savedHh < HH_BG_MODES.length) setHhBgMode(savedHh);
+    } catch {}
+  }, []);
+
+  const pickBgMode = (i: number) => {
+    playSelectSound();
+    setBgMode(i);
+    try {
+      localStorage.setItem("pinkmane-bgmode", String(i));
+    } catch {}
+  };
+
+  const pickHhBgMode = (i: number) => {
+    playSelectSound();
+    setHhBgMode(i);
+    try {
+      localStorage.setItem("pinkmane-hh-bgmode", String(i));
+    } catch {}
+  };
 
   // HOME on the handheld: leave the game and go all the way back to the main menu
   const goHome = () => {
@@ -1555,11 +1636,21 @@ activeGame === "maze" ? (
         padding: "20px",
         boxSizing: "border-box",
         isolation: "isolate",
+        // iPod screen colour for the picked background mode (used by the screen, loading bar and lights)
+        "--screen": BG_MODES[bgMode].screen,
+        "--screen-rgb": BG_MODES[bgMode].screenRgb,
       } as React.CSSProperties}
     >
       {/* The background picture, on its own layer so it can wiggle and shake */}
-      <div className="bg-shake" aria-hidden="true" style={{ backgroundImage: "url('/topshelf.png')" }}>
-        <LiquidBg sources={MAIN_BG_SOURCES} beat={beatRef} active={!handheld} />
+      <div
+        className="bg-shake"
+        aria-hidden="true"
+        style={{
+          backgroundImage: BG_MODES[bgMode].sources.map((src) => `url('${src}')`).join(", "),
+          backgroundPosition: `center ${BG_MODES[bgMode].focus * 100}%`,
+        }}
+      >
+        <LiquidBg sources={BG_MODES[bgMode].sources} beat={beatRef} active={!handheld} focus={BG_MODES[bgMode].focus} />
       </div>
 
       {/* BASS QUAKE slider on the iPod view too (bottom left) */}
@@ -1654,6 +1745,22 @@ activeGame === "maze" ? (
         ))}
       </div>
 
+      {/* iPod column: background mode buttons on top, the iPod, then the keys you can use */}
+      <div className="ipod-col">
+      <div className={`bg-modes ${pixelFont.className}`} role="group" aria-label="Background mode">
+        {BG_MODES.map((m, i) => (
+          <button
+            key={m.label}
+            className={`bg-mode-btn ${bgMode === i ? "bg-mode-on" : ""}`}
+            onClick={() => pickBgMode(i)}
+            onMouseDown={noFocus}
+            aria-pressed={bgMode === i}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+
       <div
         className={`ipod-shell ${!playing && !isPaused && !isMuted ? "beat-thump" : ""}`}
         style={{
@@ -1694,7 +1801,8 @@ activeGame === "maze" ? (
         <div
           className={pixelFont.className}
           style={{
-            background: "#d7efbc",
+            background: "var(--screen, #d7efbc)",
+            transition: "background 0.4s ease",
             aspectRatio: "540 / 420",
             borderRadius: "8px",
             overflow: "hidden",
@@ -1895,8 +2003,17 @@ activeGame === "maze" ? (
             </div>
           )}
 
-          {/* Now-playing ticker */}
-          <div className="ticker-wrap">
+          {/* Now-playing ticker: click it to open that song on SoundCloud */}
+          <a
+            className="ticker-wrap"
+            href={trackLink(TRACKS[trackIndex])}
+            target="_blank"
+            rel="noopener noreferrer"
+            onMouseDown={noFocus}
+            onClick={(e) => e.currentTarget.blur()}
+            aria-label={`Listen to ${TRACKS[trackIndex].title} on SoundCloud`}
+            title="Listen on SoundCloud"
+          >
             <div
               className="ticker-track"
               style={{ animationDuration: `${Math.max(8, tickerText.length * 0.28)}s` }}
@@ -1904,7 +2021,7 @@ activeGame === "maze" ? (
               <span>{tickerText}</span>
               <span>{tickerText}</span>
             </div>
-          </div>
+          </a>
         </div>
 
         <div
@@ -2074,12 +2191,72 @@ activeGame === "maze" ? (
         </div>
       </div>
 
+      {/* Keys you can use, drawn as white key outlines like under the handheld (only on computers) */}
+      <div className={`hh-keys ipod-keys ${pixelFont.className}`}>
+        {(!playing
+          ? [
+              [["↑", "↓", "W", "S"], "move"],
+              [["ENTER"], "ok"],
+              [["MOUSE WHEEL"], "scroll"],
+              [["BACKSPACE"], "back"],
+              [["←", "→"], "songs"],
+            ]
+          : activeGame === "hex"
+          ? [
+              [["←", "→", "A", "D"], "move"],
+              [["SPACE"], "start"],
+              [["M"], "mute"],
+              [["BACKSPACE"], "exit"],
+            ]
+          : activeGame === "bird"
+          ? [
+              [["SPACE", "↑"], "flap"],
+              [["M"], "mute"],
+              [["BACKSPACE"], "exit"],
+            ]
+          : activeGame === "snake"
+          ? [
+              [["↑", "↓", "←", "→"], "steer"],
+              [["SPACE"], "start"],
+              [["BACKSPACE"], "exit"],
+            ]
+          : activeGame === "vortex"
+          ? [
+              [["MOUSE WHEEL", "↑", "↓"], "spin"],
+              [["SPACE"], "launch"],
+              [["BACKSPACE"], "exit"],
+            ]
+          : [
+              [["SPACE"], "jump"],
+              [["←", "→"], "songs"],
+              [["BACKSPACE"], "exit"],
+            ]
+        ).map(([keys, label]) => (
+          <span className="hh-keygroup" key={label as string}>
+            {(keys as string[]).map((k) => (
+              <span className="hh-key" key={k}>
+                {k}
+              </span>
+            ))}
+            <span className="hh-keylabel">{label as string}</span>
+          </span>
+        ))}
+      </div>
+      </div>
+
       {/* The PINKMANE handheld: a wide screen for Pink Maze and Super Pinkmane */}
       {handheld && (
         <div className="hh-overlay">
           {/* Background picture: wiggles, and its border shakes on the 808s */}
-          <div className="hh-bg" aria-hidden="true">
-            <LiquidBg sources={HH_BG_SOURCES} beat={beatRef} active />
+          <div
+            className="hh-bg"
+            aria-hidden="true"
+            style={{
+              backgroundImage: HH_BG_MODES[hhBgMode].sources.map((src) => `url('${src}')`).join(", "),
+              backgroundPosition: `center ${HH_BG_MODES[hhBgMode].focus * 100}%`,
+            }}
+          >
+            <LiquidBg sources={HH_BG_MODES[hhBgMode].sources} beat={beatRef} active focus={HH_BG_MODES[hhBgMode].focus} />
           </div>
 
           {/* Flying PINKMANEs with jetpacks in the background, some going right, some going left */}
@@ -2102,6 +2279,21 @@ activeGame === "maze" ? (
                   style={{ width: `${Math.round(g.size * 1.4)}px`, animationDuration: `${1.4 + (g.wobble % 10) / 10}s` }}
                 />
               </div>
+            ))}
+          </div>
+
+          {/* Background mode buttons for the handheld view */}
+          <div className={`bg-modes hh-bg-modes ${pixelFont.className}`} role="group" aria-label="Background mode">
+            {HH_BG_MODES.map((m, i) => (
+              <button
+                key={m.label}
+                className={`bg-mode-btn ${hhBgMode === i ? "bg-mode-on" : ""}`}
+                onClick={() => pickHhBgMode(i)}
+                onMouseDown={noFocus}
+                aria-pressed={hhBgMode === i}
+              >
+                {m.label}
+              </button>
             ))}
           </div>
 
@@ -2288,6 +2480,17 @@ activeGame === "maze" ? (
           </div>
 
           {/* Keys you use, drawn as white key outlines (only on computers) */}
+          <div className="hh-keys-wrap">
+          {keyTip && (
+            <div className={`key-tip ${pixelFont.className}`} aria-hidden="true">
+              <span className="key-tip-text">CONTROL W THESE!</span>
+              <span className="key-tip-arrows">
+                <span>▼</span>
+                <span>▼</span>
+                <span>▼</span>
+              </span>
+            </div>
+          )}
           <div className={`hh-keys ${pixelFont.className}`}>
             {(activeGame === "super"
               ? [
@@ -2314,6 +2517,7 @@ activeGame === "maze" ? (
                 <span className="hh-keylabel">{label as string}</span>
               </span>
             ))}
+          </div>
           </div>
 
           <div className={`hh-hint ${pixelFont.className}`}>
@@ -2416,7 +2620,7 @@ activeGame === "maze" ? (
         }
 
         .screen-overlay-loading {
-          color: #d7efbc;
+          color: var(--screen, #d7efbc);
           font-size: clamp(8px, 2.6vw, 12px);
           letter-spacing: 1px;
         }
@@ -2446,7 +2650,7 @@ activeGame === "maze" ? (
         }
 
         .segment-filled {
-          background: #d7efbc;
+          background: var(--screen, #d7efbc);
         }
 
         .controls-hint {
@@ -2663,6 +2867,129 @@ activeGame === "maze" ? (
             width: min(58vw, 240px);
           }
           .quake-page {
+            display: none;
+          }
+        }
+
+        /* iPod column: mode buttons, iPod, key legend stacked */
+        .ipod-col {
+          position: relative;
+          z-index: 1;
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 14px;
+        }
+        /* The 3 pixel BACKGROUND MODE buttons above the iPod */
+        .bg-modes {
+          display: flex;
+          gap: 10px;
+          justify-content: center;
+          flex-wrap: wrap;
+        }
+        .bg-mode-btn {
+          font-family: inherit;
+          font-size: 9px;
+          padding: 7px 10px;
+          color: #fff;
+          background: rgba(0, 0, 0, 0.45);
+          border: 2px solid #fff;
+          border-radius: 0;
+          box-shadow: 0 3px 0 #fff;
+          text-shadow: 1px 1px 0 #000;
+          cursor: pointer;
+          image-rendering: pixelated;
+        }
+        .bg-mode-btn:hover {
+          background: rgba(214, 60, 200, 0.5);
+        }
+        .bg-mode-btn:active {
+          transform: translateY(2px);
+          box-shadow: 0 1px 0 #fff;
+        }
+        .bg-mode-on {
+          background: #d63cc8;
+          border-color: #fff;
+        }
+        .bg-mode-btn:focus-visible {
+          outline: 2px solid #ff8ff0;
+          outline-offset: 3px;
+        }
+        /* Mode buttons on the handheld view sit above everything else in the overlay */
+        .hh-bg-modes {
+          position: relative;
+          z-index: 1;
+        }
+        /* The key legend under the iPod */
+        .ipod-keys {
+          max-width: min(560px, 96vw);
+        }
+
+        /* CONTROL W THESE! arrows pointing at the keys (Super Pinkmane, first 5 seconds) */
+        .hh-keys-wrap {
+          position: relative;
+          z-index: 2;
+          display: flex;
+          justify-content: center;
+        }
+        .key-tip {
+          position: absolute;
+          bottom: 100%;
+          left: 50%;
+          transform: translateX(-50%);
+          margin-bottom: 4px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 2px;
+          pointer-events: none;
+          white-space: nowrap;
+          animation: keyTipIn 0.3s ease-out;
+        }
+        .key-tip-text {
+          font-size: 11px;
+          padding: 4px 8px;
+          border: 2px solid #000;
+          animation: keyTipBlink 0.25s steps(1) infinite;
+        }
+        .key-tip-arrows {
+          display: flex;
+          gap: 60px;
+          font-size: 18px;
+          color: #fff;
+          text-shadow: 2px 2px 0 #000;
+          animation: keyTipBounce 0.5s ease-in-out infinite alternate;
+        }
+        @keyframes keyTipBlink {
+          0% {
+            background: #d63cc8;
+            color: #fff;
+          }
+          50% {
+            background: #fff;
+            color: #d63cc8;
+          }
+        }
+        @keyframes keyTipBounce {
+          from {
+            transform: translateY(0);
+          }
+          to {
+            transform: translateY(6px);
+          }
+        }
+        @keyframes keyTipIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+        /* Touch screens have no key legend, so no arrows either */
+        @media (hover: none) {
+          .key-tip {
             display: none;
           }
         }
@@ -3366,12 +3693,24 @@ activeGame === "maze" ? (
 
         /* Now-playing ticker */
         .ticker-wrap {
+          display: block;
           overflow: hidden;
           white-space: nowrap;
           background: rgba(0, 0, 0, 0.06);
           border-top: 1px solid rgba(0, 0, 0, 0.15);
           padding: 4px 0;
           flex-shrink: 0;
+          text-decoration: none;
+          cursor: pointer;
+          position: relative;
+          z-index: 3; /* above the scanline overlay so it can be clicked */
+          transition: background 0.15s ease;
+        }
+        .ticker-wrap:hover {
+          background: rgba(214, 60, 200, 0.18);
+        }
+        .ticker-wrap:hover .ticker-track span {
+          text-decoration: underline;
         }
 
         .ticker-track {
@@ -3407,12 +3746,13 @@ activeGame === "maze" ? (
 
         /* Click wheel LED pulse, synced to the beat */
         .wheel-led-pulse {
-          box-shadow: 0 0 calc(var(--kick, 0) * 14px) calc(var(--kick, 0) * 4px) rgba(215, 239, 188, calc(var(--kick, 0) * 0.55));
+          box-shadow: 0 0 calc(var(--kick, 0) * 14px) calc(var(--kick, 0) * 4px) rgba(var(--screen-rgb, 215, 239, 188), calc(var(--kick, 0) * 0.55));
         }
 
-        /* The iPod gives a tiny speaker-thump on every beat (only in the menus, not during games) */
+        /* The iPod gives a tiny speaker-thump on every beat (only in the menus, not during games)
+           Bigger number = bigger pulse (was 0.008) */
         .beat-thump {
-          scale: calc(1 + var(--kick, 0) * 0.008);
+          scale: calc(1 + var(--kick, 0) * 0.004);
         }
       `}</style>
     </main>

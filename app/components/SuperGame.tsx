@@ -30,6 +30,9 @@ type Mode =
   | "levelSelect" // the list of levels
   | "levelDone"; // you hit the bong
 
+// The pause (Esc) menu, top to bottom
+const PAUSE_OPTIONS = ["RESUME", "RESTART", "PICK OUTFIT", "GAME TYPE", "HOME"];
+
 // One column of the level
 type Column = {
   ground: number; // row where the ground starts, -1 = pit
@@ -1009,7 +1012,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     camY: 0, // vertical camera offset: follows you up when you jump/fly higher than the screen
     killStreak: 0, // consecutive stomps without the streak timer running out
     killStreakTimer: 0,
-    pauseChoice: 0, // which option is highlighted on the pause menu: 0 resume, 1 restart, 2 home
+    pauseChoice: 0, // which option is highlighted on the pause menu (see PAUSE_OPTIONS)
+    fromPause: false, // true while picking an outfit from the pause menu (OK / Esc goes back to the pause menu)
     lastVoid: -1, // which Void map you saw last, so you get a different one next time
     followShown: false, // the FOLLOW ME ON SOUNDCLOUD room has already shown up once this game
     // Golden leaf
@@ -1903,7 +1907,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (s.hinted.includes(key)) return;
     s.hinted.push(key);
     s.hintText = text;
-    s.hintTime = 2.8;
+    s.hintTime = 4; // seconds the hint stays up
   };
 
   // Shoot one fireball (F / X / ↓, or the handheld's fire button)
@@ -2461,7 +2465,14 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         try {
           localStorage.setItem(OUTFIT_KEY, o.id);
         } catch {}
-        s.mode = s.gameMode === "levels" ? "levelSelect" : "ready";
+        if (s.fromPause) {
+          // came here from the pause menu: go back to it, the run is still waiting
+          s.fromPause = false;
+          s.mode = "paused";
+          s.pauseChoice = 0;
+        } else {
+          s.mode = s.gameMode === "levels" ? "levelSelect" : "ready";
+        }
       } else {
         s.flash = 1.2;
         s.flashText = `LOCKED \u2014 ${o.how}`;
@@ -2471,10 +2482,23 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     } else if (s.mode === "choose") {
       pickSpell(s.spellChoice);
     } else if (s.mode === "paused") {
-      if (s.pauseChoice === 1) {
-        newGame();
+      const picked = PAUSE_OPTIONS[s.pauseChoice];
+      if (picked === "RESTART") {
+        // restart this level if you're in one, otherwise a fresh infinite run
+        if (s.levelMode) startLevel(s.level);
+        else newGame();
         s.mode = "running";
-      } else if (s.pauseChoice === 2) {
+      } else if (picked === "PICK OUTFIT") {
+        s.fromPause = true;
+        const now = OUTFITS.findIndex((o) => o.id === s.outfit);
+        if (now >= 0) s.selectIndex = now;
+        s.mode = "select";
+      } else if (picked === "GAME TYPE") {
+        // back to the pink start screen: PINK RUN INFINITE or PINK LEVELS
+        s.fromPause = false;
+        s.homeChoice = s.gameMode === "levels" ? 1 : 0;
+        s.mode = "home";
+      } else if (picked === "HOME") {
         goHome();
       } else {
         resumeGame();
@@ -3423,6 +3447,20 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     ctx.fillStyle = SCREEN;
     ctx.fillRect(Math.round(W / 2 - w / 2), y - 2, Math.round(w), 12);
     ctx.fillStyle = INK;
+    ctx.fillText(text, W / 2, y);
+  };
+
+  // Same as textBox, but it flashes pink and white really fast so you can't miss it
+  // (used for power-up hints like PRESS S TO SHOOT)
+  const flashBox = (ctx: CanvasRenderingContext2D, text: string, y: number, t: number) => {
+    const w = ctx.measureText(text).width + 12;
+    const x = Math.round(W / 2 - w / 2);
+    const pinkTurn = Math.floor(t * 8) % 2 === 0; // swaps 8 times a second
+    ctx.fillStyle = INK; // dark outline
+    ctx.fillRect(x - 1, y - 4, Math.round(w) + 2, 16);
+    ctx.fillStyle = pinkTurn ? PINK : "#ffffff";
+    ctx.fillRect(x, y - 3, Math.round(w), 14);
+    ctx.fillStyle = pinkTurn ? "#ffffff" : PINK;
     ctx.fillText(text, W / 2, y);
   };
 
@@ -5584,6 +5622,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (blink) textBox(ctx, "PRESS OK TO START", 54);
       const top = boardRef.current[0];
       if (boardStatusRef.current === "ok" && top) textBox(ctx, `#1 ${top.name} ${pad(top.score)}`, 70);
+      textBox(ctx, "ESC: CHANGE GAME TYPE", 90);
     } else if ((s.mode === "running" || s.mode === "pipe") && s.flash > 0) {
       textBox(ctx, s.flashText, 36);
     } else if (s.mode === "dying") {
@@ -5593,10 +5632,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     } else if (s.mode === "entry") {
       textBox(ctx, "NEW TOP 10 SCORE!", 30);
       textBox(ctx, `YOU SMOKED ${Math.floor(s.score)} GRAMS`, 44);
-    }
-    // "How to use it" hint the first time you get a power-up
-    if (s.mode === "running" && s.hintTime > 0 && s.flash <= 0) {
-      textBox(ctx, s.hintText, 52);
     }
     // Hint on top of an unused pipe
     if (s.mode === "running" && pipeUnderFeet() >= 0 && blink) {
@@ -5609,23 +5644,30 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       const near = s.signs.find((sg) => Math.abs(sg.x + 8 - (s.x + SPRITE_W / 2)) < 36);
       if (near && near.text) near.text.split("\n").forEach((line, i) => textBox(ctx, line, 30 + i * 12));
     }
+    // "How to use it" hint the first time you get a power-up (PRESS S TO SHOOT etc.)
+    // Drawn AFTER the lore signs so it's always on top, and pushed below the sign's text so they don't overlap
+    if (s.mode === "running" && s.hintTime > 0 && s.flash <= 0) {
+      const sign = s.levelMode ? s.signs.find((sg) => Math.abs(sg.x + 8 - (s.x + SPRITE_W / 2)) < 36) : undefined;
+      const signLines = sign && sign.text ? sign.text.split("\n").length : 0;
+      const hintY = signLines > 0 ? Math.min(H - 30, 30 + signLines * 12 + 6) : 52;
+      flashBox(ctx, s.hintText, hintY, s.t);
+    }
     if (s.mode === "levelDone") drawLevelDone(ctx);
     if (s.mode === "paused") {
       ctx.fillStyle = "rgba(22, 12, 29, 0.7)";
       ctx.fillRect(0, 0, W, H);
-      textBox(ctx, "PAUSED", 40);
-      const options = ["RESUME", "RESTART", "HOME"];
-      options.forEach((label, i) => {
+      textBox(ctx, "PAUSED", 34);
+      PAUSE_OPTIONS.forEach((label, i) => {
         const picked = s.pauseChoice === i;
         const text = (picked ? "> " : "") + label;
-        const y = 62 + i * 16;
+        const y = 52 + i * 14;
         const w = ctx.measureText(text).width + 10;
         ctx.fillStyle = picked ? PINK : SCREEN;
         ctx.fillRect(Math.round(W / 2 - w / 2), y - 2, Math.round(w), 12);
         ctx.fillStyle = picked ? "#ffffff" : INK;
         ctx.fillText(text, W / 2, y);
       });
-      if (blink) textBox(ctx, "\u2191\u2193 CHOOSE \u00b7 OK CONFIRM", 118);
+      if (blink) textBox(ctx, "\u2191\u2193 CHOOSE \u00b7 OK CONFIRM", 128);
     }
   };
 
@@ -5709,9 +5751,15 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       const mode = state.current.mode;
       // Esc (or P) pauses / unpauses
       if (k === "Escape" || k === "p" || k === "P") {
+        const st = state.current;
         if (mode === "running") pauseGame();
         else if (mode === "paused") resumeGame();
-        else if (k === "Escape" && (mode === "select" || mode === "levelSelect")) state.current.mode = "home";
+        else if (k === "Escape" && mode === "select" && st.fromPause) {
+          // picking an outfit from the pause menu: Esc goes back to the pause menu
+          st.fromPause = false;
+          st.mode = "paused";
+        } else if (k === "Escape" && (mode === "select" || mode === "levelSelect")) st.mode = "home";
+        else if (k === "Escape" && mode === "ready") st.mode = st.levelMode ? "levelSelect" : "home";
         return;
       }
       // The pink start screen
@@ -5741,10 +5789,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         if (k === "ArrowRight" || k === "d" || k === "D") state.current.spellChoice = 1;
         return;
       }
-      // Choosing Resume / Restart / Home on the pause menu
+      // Choosing an option on the pause menu
       if (mode === "paused") {
-        if (k === "ArrowUp" || k === "w" || k === "W") state.current.pauseChoice = (state.current.pauseChoice + 2) % 3;
-        if (k === "ArrowDown" || k === "s" || k === "S") state.current.pauseChoice = (state.current.pauseChoice + 1) % 3;
+        const n = PAUSE_OPTIONS.length;
+        if (k === "ArrowUp" || k === "w" || k === "W") state.current.pauseChoice = (state.current.pauseChoice + n - 1) % n;
+        if (k === "ArrowDown" || k === "s" || k === "S") state.current.pauseChoice = (state.current.pauseChoice + 1) % n;
         return;
       }
       if (k === "ArrowLeft" || k === "a" || k === "A") heldRef.current.left = true;
@@ -5847,6 +5896,15 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
               const to = near(here + 1) ? here + 1 : here - 1;
               const pts = mapPath(here, to);
               mapMove(Math.sign(pts[1][0] - pts[0][0]), Math.sign(pts[1][1] - pts[0][1]));
+            }
+            return;
+          }
+          if (mode === "paused") {
+            // tap an option on the pause menu to pick it
+            const row = Math.floor((cy - 50) / 14);
+            if (row >= 0 && row < PAUSE_OPTIONS.length) {
+              state.current.pauseChoice = row;
+              press();
             }
             return;
           }
