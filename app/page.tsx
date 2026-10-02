@@ -2025,10 +2025,27 @@ activeGame === "maze" ? (
                         : "none",
                   }}
                 >
-                  {selected === index ? "> " : ""}
-                  {isMane ? "✦ " : ""}
-                  {item}
-                  {isMane ? " ✦" : ""}
+                  {menu === "games" && item !== "Back" ? (
+                    <span style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: "10px" }}>
+                      <span style={{ whiteSpace: "nowrap" }}>
+                        {selected === index ? "> " : ""}
+                        {isMane ? "✦ " : ""}
+                        {item}
+                        {isMane ? " ✦" : ""}
+                      </span>
+                      {/* [ MAIN GAME ] for Super Pinkmane, [mini game] for all the others */}
+                      <span style={{ fontSize: "0.55em", opacity: 0.85, whiteSpace: "nowrap" }}>
+                        {isMane ? "[ MAIN GAME ]" : "[mini game]"}
+                      </span>
+                    </span>
+                  ) : (
+                    <>
+                      {selected === index ? "> " : ""}
+                      {isMane ? "✦ " : ""}
+                      {item}
+                      {isMane ? " ✦" : ""}
+                    </>
+                  )}
 
                   {selected === index && ITEM_ICONS[item] && (
                     <img

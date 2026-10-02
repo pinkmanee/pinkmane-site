@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+public/sounds/dont-fight-skeletons.mp3
+public/sounds/hexed-up.mp3
+public/sounds/hounskull.mp3
+public/sounds/king-baldwin-iv.mp3
+public/sounds/no-mana-no-health.mp3
+public/sounds/warlord-song-2.mp3

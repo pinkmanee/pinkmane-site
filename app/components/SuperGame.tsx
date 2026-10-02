@@ -55,7 +55,9 @@ type Column = {
 };
 
 type Enemy = {
-  kind: "walker" | "flyer";
+  // eye = the walking eye (Pink Run only): jump on it and it turns into a little bong (kind "bong").
+  // Walk into the bong to kick it, a sliding bong knocks out every monster it touches.
+  kind: "walker" | "flyer" | "eye" | "bong";
   x: number;
   y: number;
   vx: number;
@@ -65,6 +67,8 @@ type Enemy = {
   alive: boolean;
   squash: number;
   shoot?: number; // IPOD USER drones: seconds until the next laser
+  kick?: number; // bong: short pause after a kick/stop so you can't re-kick it in the same frame
+  idle?: number; // bong: seconds it has been sitting still (it fades away after BONG_IDLE_LIFE)
 };
 type Leaf = { x: number; y: number; taken: boolean; small?: boolean; coin?: boolean }; // small = half size (words), coin = gold coin
 type Heart = { x: number; y: number; taken: boolean };
@@ -310,8 +314,8 @@ const ALL_LEVELS: LevelDef[] = [
     // Max ~40 characters per line; use \n to split a sign into two lines.
     signs: [
       "WELCOME TO WEEDLAND, PINKMANE'S HOME",
-      "PINKMANE: PRODUCER FROM SLOVAKIA",
-      "HE MAKES HIS OWN BEATS",
+      "PINKMANE IS AN ARTIST AND PRODUCER",
+      "HE MOSTLY MAKES CLOUD RAP/TRAP MUSIC\nWITH A LOT OF ARCADE INSPIRED SOUNDS",
       "HIS FAVOURITE ARTISTS:\nLIL PEEP, YUNG LEAN, GHOSTEMANE",
       "FIND PINKMANE ON SOUNDCLOUD",
       "THE EVIL LEAF GUARDS HIS BONG...",
@@ -653,7 +657,61 @@ const BONG = [
 const BONG_COLORS = { K: "#111111", C: "#b8f0d8", c: "#e8fff4", B: "#58b8ff", W: "#ffffff", O: "#ff7a00" };
 const BONG_W = 20;
 const BONG_H = 30;
+
+// ---- The walking EYE (Pink Run only) and the little BONG it turns into when you stomp it ----
+// The eye is your drawing from the Warlord level (the one with the black tentacles): 24 frames of it wiggling,
+// 18x20 pixels, drawn at 1x. It looks the way it was drawn when he walks left, and gets flipped when he walks right.
+const EYE_FRAMES: string[][] = [
+  ["...........A......", "...........A......", ".........AA.......", "..A....AAA........", "..A....AA.........", "..A.....A..AAAAAA.", "...AAAA.AAAA.AAA..", "......A.ABA.A.....", "......AABBBA.....A", "A.AAA.ABBFBBA...AA", ".A..AABBFAFBBA.AA.", ".....AABBFBBA.A.A.", ".......ABBBA......", "......AAABAAA.....", ".....AAA.AA.AAAAA.", "...AAAAA..A.....A.", "...A......A.....A.", "...A......A.....A.", "....A...AA........", ".................."],
+  ["..........A.......", "...........A......", "..A......AA.......", "..A.....AA........", "..A....AA.........", "..A.....A......AA.", "...AAA.AAA..AAAA..", "....A.A.ABAAA.....", "......AABBBA.....A", "A.AAA.ABBFBBA...AA", ".A..AABBFAFBBA.AA.", ".....AABBFBBA.A...", ".......ABBBAA.....", "......AAABA.AA....", ".....AAA.AAA.AAAA.", "...AAAA...A.....A.", "...A......A.....A.", "...A......A....A..", "....A...AA.....A..", "....A............."],
+  ["..........A.......", "...........A......", "...A.....AA.......", "..AA....AA........", "..A....AA.........", "..A.....A......A..", "...AAA.AAA..AAAA..", "...AA.A.ABAAA....A", "......AABBBA....AA", "A.AAA.ABBFBBA...AA", ".A...ABBFAFBBA.AA.", "......ABBFBBA.A...", ".......ABBBAA.....", "......AAABA.AA....", "....AAAA.AAA.AAAA.", "...AAAA...A....AA.", "...A......A.....A.", "...AA....A.....A..", "...A.A..AA.....A..", "....A............."],
+  ["..........A.......", "...........A......", "...A......AA......", "..AA.....AA.......", "...A...AA......A..", "...A....A......A..", "...AAA.AAA..AAAA..", "...AAAA.ABAAA....A", "......AABBBA....AA", "A.AAA.ABBFBBA..AA.", ".A...ABBFAFBBA.A..", "......ABBFBBA.A...", ".......ABBBAA.....", "......AAABA.AA....", "....AAA..AAA.AAAA.", "...AAAA...A....A..", "...A......A....A..", "....A....A.....A..", "....A..AA......A..", "....AA............"],
+  [".........A........", "..........A.......", "...A......AA......", "...A.....AA.......", "...A...AAA.....A..", "...A....A......A..", "...AAA.AAA..AAAA..", "...AAAA.ABAAAAA..A", "......AABBBA....AA", "A.AAA.ABBFBBA..AA.", ".A...ABBFAFBBAA...", "......ABBFBBA.A...", ".......ABBBAA.....", "......AAABA.AAA...", "....AAA..AAA...AA.", "...AAA....A....A..", "...AA.....A....A..", "....A...AA.....A..", "....A..AA......A..", "....AA............"],
+  [".........A........", "..........A.......", "...A......AA......", "...A.....AA.......", "...A....AA....AA..", "...A....A.....AA..", "...A...AAA..AAAA..", "...AAAA.ABAAAAA..A", "......AABBBA....AA", "A.A.A.ABBFBBA..AA.", ".A.A.ABBFAFBBAA...", "......ABBFBBA.A...", ".......ABBBAA.....", "....AAAAABA.AAA...", "....AAA..AAA...A..", "....A.....A....A..", "....A....A.....A..", ".....A..A......A..", "....AA.AA......A..", "....AA............"],
+  ["........AA........", "..........A.......", "...A......AA......", "...AA.....A...A...", "....A...AA....A...", "...A....A.....AA..", "...A...AAA...AAA..", "...AAAA.ABAAAAA.AA", "......AABBBA...AAA", "A.A.A.ABBFBBA..A..", ".A.A.ABBFAFBBAA...", "......ABBFBBA.A...", ".......ABBBAAA....", "....AAAAABA.AAA...", "....AAA..AAA...A..", "....A.....A....A..", "....A....A....A...", "....AA..A.....A...", ".....A.AA......A..", "....AAA..........."],
+  ["........A.........", ".........AA.......", "...A.....AAA......", "...AA.....AA..A...", "....A....AA...A...", "...A.....A....A...", "...A...AAA....A...", "...AAAA.ABAAAAA.A.", ".....AAABBBAA..AAA", "A.A.A.ABBFBBA.A..A", ".A.A.ABBFAFBBAA...", "......ABBFBBAA....", ".......ABBBAA.A...", "....AAAAABA.AAA...", "....AAA..AAA..A...", "....A....AA...AA..", "....A...A.....A...", "....A..AA.....A...", ".....A.AAA.....A..", "....AAA..........."],
+  ["........A.........", ".........A........", "...A.....AA.......", "...AA.....AA.AA...", "....A....AA..AA...", "....A....A....A...", "...AA..AAA....A...", "...AAAA.ABAAAAA.A.", ".....AAABBBAA..AAA", "......ABBFBBAAA..A", "AAA.AABBFAFBBAA...", "...A..ABBFBBAA....", ".......ABBBAA.A...", "....AAAAABA.AAA...", "....AA...AAA..A...", "....AA...AA...A...", ".....A..A.....A...", ".....A.AA.....A...", ".....A..AA.....A..", "....AA............"],
+  [".......A..........", "........AA........", "...A.....AA.......", "...AA.....AA.AA...", "....A....AA..AA...", "....A....A...AA...", "....A...AA...AA...", "....AAA.ABAAAAA.A.", "....AAAABBBAA..AA.", "......ABBFBBAAA..A", "AAA.AABBFAFBBAA...", "...A..ABBFBBAA....", ".......ABBBAA.A...", "....AAAAABA.AAA...", "....AA...AA...A...", "....AA...A....A...", "....AA..A.....A...", ".....A.AA.....A...", "....AA..AA.....A..", ".....A............"],
+  [".......A..........", "........A.........", "........AAA.......", "..AAA.....AA.AA...", "....A....AA..A....", "....A....A...A....", "....A...AA...AA...", "....AAA.ABAAAAA...", "....AAAABBBAA..AA.", "......ABBFBBAAA.AA", "AAA.AABBFAFBBA...A", "...A.AABBFBBAA....", "......AABBBAA.A...", "....AAA.ABA.AAA...", "....AA...AA...A...", ".....A...A...A....", ".....AA.A....AA...", ".....A.AA.....AAA.", "...AAA...AA.......", ".....A............"],
+  [".......A..........", "........A.........", "........AA........", "..AAA....AA..AA...", ".....A...AA..A....", "....AA....A..A....", "....A...AA...A....", "....AAA.ABAAAA.A..", "....AAAABBBAA.AAA.", "......ABBFBBAAA.A.", "AAA.AABBFAFBBA...A", "...A.AABBFBBAA....", "......AABBBAA.A...", "....AAA.ABA.AA....", "....AA...AA..A....", ".....A..AA...A....", ".....A..A....AA...", ".....AA.AA....AAA.", "...AAA...AA.......", ".................."],
+  [".......A..........", ".......A..........", ".......AAA........", "..AAA....AA..AA...", ".....A...AA..A....", "....AA....A..A....", "....AA..AA...A....", "....A.A.ABAAAA....", "....AAAABBBAAA.AA.", "......ABBFBBAAA.A.", ".A...ABBFAFBBA..AA", "A.AAAAABBFBBAA...A", ".......ABBBAA.A...", ".....AAAABA.AA....", ".....A...AA..A....", ".....AA.AA...A....", ".....AA.A....AA...", ".....AA.AA....AAA.", "..AAAA....AA......", ".................."],
+  ["........A.........", ".......A..........", ".......AAA........", "....A...AAA..AA...", "..AA.A...AA.AA....", "....AA....A.AA....", "....AA...A..AA....", ".....AA.ABAAA.....", ".....AAABBBA.A.A..", "......ABBFBBAAAAA.", ".A...ABBFAFBBA..AA", "A.AAAAABBFBBA....A", ".......ABBBAA.....", "......AAABA.AA....", ".....A...A...A....", "......A.A....A....", ".....AA.A....AA.AA", "..AA.AA.AA....AA..", "....AA....AA......", ".................."],
+  ["........A.........", ".......A..........", ".......AA.........", "...AA...AA...AAA..", ".AAA.A...AA.AAA...", ".....A....A.AA....", ".....A...A..AA....", ".....AA.ABAAA.....", ".....AAABBBA.A.A..", "......ABBFBBAAAAA.", ".A...ABBFAFBBA..A.", "A.AAAAABBFBBA....A", ".....A.ABBBAA.....", "......AAABA.AA....", ".....AA..A...A....", ".....AA.A....A....", "......A.A....AAAAA", "..AAAAAA.AA.......", "...AA.....AA......", ".................."],
+  ["........A.........", ".......A..........", "......AAA.........", ".......AAA...AA...", ".AAAAA...AA.AAAA..", "..A..A....A.AA....", ".....A...A..AA....", ".....AA.ABAAA.....", "......AABBBA.A.A..", "......ABBFBBAAAA..", ".A...ABBFAFBBA..A.", "A.AAAAABBFBBA...AA", ".....A.ABBBAA....A", "......AAABA.AA....", ".....AA..A...A....", ".....AA.A....A....", "......A.A....AAAAA", "..AAAAAA.AA.......", "...........AA.....", ".................."],
+  [".........A........", "........A.........", "......AA..........", ".......AAA...AA...", ".AAAAA...AA.AAAA..", ".AA..A....A.A.....", ".....A...A..A.....", ".....AA.ABAAA.....", "......AABBBA.A....", "......ABBFBBAAAA..", ".A...ABBFAFBBA.AA.", "A.AAAAABBFBBA...AA", ".....A.ABBBAA....A", "......AAABA.AA....", ".....AA..A..A.....", ".....AAAA...A.....", "......A.AA...AAAAA", "..AAAAA...AA......", "...........AA.....", ".................."],
+  [".........A........", "........A.........", "......AA..........", ".......AA.........", ".AAAAA..AA..AAAA..", ".AA..AA...A.A.....", ".....AA..A..A.....", ".....AA.ABAAA.....", "......AABBBA.A....", "......ABBFBBAAAA..", ".A.A.ABBFAFBBA.AA.", "A.A.AAABBFBBA...AA", ".....A.ABBBAA....A", "......AAABA.AA....", "......A..A..A.....", "......A.A...A..A..", "....AAAA.A...AAAAA", "..AAAAA...AA......", "...........AA.....", ".................."],
+  ["..........A.......", "........AA........", "......AA..........", "......AAA.........", ".A..AA..AA..AAAA..", ".AAA.AA...AAA..AA.", ".....AA..A.AA.....", ".....AA.ABAAA.....", "......AABBBA.A....", "......ABBFBBAAA...", ".A.A.ABBFAFBBA.A..", "A.A.AAABBFBBA..AAA", ".....A.ABBBAA...AA", "......AAABA.A.....", "......A..A..AA....", "......A.A...A..AA.", "...AAAAA.A...AA..A", "..A..AA...AA......", "...........AA.....", ".................."],
+  ["..........A.......", ".........A........", ".......AA.........", "......AA..........", ".A..AA.AA...AAAA..", ".AAA.AA..A.AAAAAA.", ".....AA..AAAA.....", ".....AA.ABA.A.....", "......AABBBA.A....", "......ABBFBBAA....", ".A.A.ABBFAFBBAAA.A", "A.A.AAABBFBBA..AAA", ".....A.ABBBA....A.", "......AAABAAA.....", "......AA.A..A.....", "......AA.A..AAAAA.", "...AAAAA..A......A", "..A........A......", "...........A......", ".................."],
+  ["..........A.......", ".........A........", ".......AA.........", "......AA..........", ".A.....AA...AA....", ".AAAAAA..A.AAAAAA.", ".....AA..AAAA.....", "......A.ABA.A.....", "......AABBBA......", "...A..ABBFBBAA....", "AAA.AABBFAFBBAAA.A", "....AAABBFBBA..AAA", ".....A.ABBBA....A.", "......AAABAAA.....", "......AA.A..A...A.", "......AA.A..AAAAA.", "...AAAAA..A......A", "..AA.......A......", "..........AA......", ".................."],
+  ["...........A......", ".........AA.......", ".......AAA........", "......AA..........", ".A.....AA.........", ".AAAAAA..A.AAAAAA.", "......A.AAAAA.....", "......A.ABA.A.....", "......AABBBA......", "...A..ABBFBBAA...A", "AAA.AABBFAFBBAAAAA", "....AAABBFBBA..AAA", ".....A.ABBBA....A.", "......AAABAAA.....", "......AA.AA.A...A.", "...AAAAA.A..AAAAA.", "...AAAAA..A......A", "..AA.......A......", "..A.......AA......", ".................."],
+  ["...........A......", "..........A.......", "........AA........", "..A...AAA.........", ".AA....AA.........", ".AAAAAA..A.AAAAAA.", "....AAA.AAAAA.AA..", "......A.ABA.A.....", "......AABBBA......", "...A..ABBFBBAA...A", "AAA.AABBFAFBBA.AAA", ".....AABBFBBA.A.A.", ".......ABBBA......", "......AAABAAA.....", "......A.AAA.A.AAA.", "...AAAAA.A..AA..A.", "...AAAAA..A.....A.", "...A.......A....A.", "...A.....AA.......", ".................."],
+  ["...........A......", "..........A.......", "........AA........", "..A....AA.........", ".AA....AA.........", ".AA..AA.A..AAAAAA.", "...AAAA.AAAA.AAA..", "......A.ABA.A.....", "......AABBBA.....A", "...A..ABBFBBAA..AA", "AAA.AABBFAFBBA..AA", ".....AABBFBBA.AAA.", ".......ABBBA......", "......AAABAAA.....", "......A.AAA.AAAAA.", "...AAAAA..A.....A.", "...A......A.....A.", "...A......A.....A.", "...A.....AA.......", ".................."],
+];
+const EYE_COLORS: Record<string, string> = { A: "#121216", B: "#cfd6df", F: "#8a93a1" };
+const EYE_FPS = 12; // how fast the tentacles wiggle
+// The little bong: the same bong as at the end of every level (tall glass tube, bowl on the side with the glowing ember, water bulb)
+const MINI_BONG = [
+  "...KKKK...",
+  "...KCcK...",
+  "...KCcK...",
+  "...KCcK.KK",
+  "...KCcKKOK",
+  "..KCCcCKK.",
+  ".KCCBBcCK.",
+  "KCBBBBBBCK",
+  "KCBBWBBBCK",
+  ".KCBBBBCK.",
+  "..KKKKKK..",
+];
+const EYE_PERCENT = 0.22; // how many of the walkers in Pink Run are eyes instead (0.22 = about 1 in 5)
+const BONG_KICK_SPEED = 190; // how fast a kicked bong slides
+const BONG_IDLE_LIFE = 14; // seconds a bong waits for a kick before it disappears
 // Weedland colours
+// Your own Weedland background. Put the picture at public/game/weedland-bg.png and it replaces the drawn sky,
+// sun, hills and leaves. No file there = the game keeps using the drawn one. The picture is 4.2 times as wide
+// as it is tall (like 2688x640) and wraps around, so make its left and right edges match.
+const WEEDLAND_BG = "/game/weedland-bg.png";
+const WEEDLAND_BG_PARALLAX = 0.3; // how fast it scrolls compared to the level (smaller = farther away)
 const WL_SKY_TOP = "#c8f5b0";
 const WL_SKY_BOTTOM = "#78cf6e";
 const WL_SOIL = "#2d4a22";
@@ -1433,6 +1491,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const stuttersRef = useRef<HTMLAudioElement | null>(null); // the secret Stutters remix
   if (stuttersRef.current) stuttersRef.current.muted = muted; // follows the iPod mute button
   const keepImgsRef = useRef<Record<string, HTMLImageElement>>({}); // Level 3 backdrop pictures
+  const weedBgRef = useRef<HTMLImageElement | null>(null); // your own Weedland background (public/game/weedland-bg.png)
   const levelMusicRef = useRef<HTMLAudioElement | null>(null); // Level 3 song
   const levelMusicOnRef = useRef(false); // told the page to pause its own music
   // Everything in the game that wants your own (PINKMANE) music off right now: "level" (a level with
@@ -2042,6 +2101,13 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     });
   };
 
+  // The walking eye: same walk as a walker, but stomping it leaves a little bong you can kick
+  const addEye = (i: number, ground: number, progress: number) => {
+    addWalker(i, ground, progress);
+    const list = state.current.enemies;
+    list[list.length - 1].kind = "eye";
+  };
+
   const addFlyer = (i: number, ground: number, progress: number) => {
     const baseY = Math.max(20, (ground - 3) * T + rand(-8, 8));
     state.current.enemies.push({
@@ -2138,7 +2204,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         s.cols.push(makeCol(s.genGround, zone));
         const more = hardness();
         if (s.genFlat > 1 && zone !== Z_CLOUDS && Math.random() < (0.05 + progress * 0.09 + (zone === 1 ? 0.03 : 0)) * more) {
-          addWalker(i, s.genGround, progress);
+          if (progress > 0.02 && Math.random() < EYE_PERCENT) addEye(i, s.genGround, progress);
+          else addWalker(i, s.genGround, progress);
         }
         if (progress > 0.06 && Math.random() < (0.015 + progress * 0.035 + (zone === Z_CLOUDS || zone === Z_TREES ? 0.03 : 0)) * more) {
           addFlyer(i, s.genGround, progress);
@@ -4039,7 +4106,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
       if (f.x < s.cam - 10 || f.x > s.cam + W + 10 || f.y > H) f.life = 0;
       for (const e of s.enemies) {
-        if (!e.alive) continue;
+        if (!e.alive || e.kind === "bong") continue;
         const ew = e.kind === "flyer" ? 18 : 14;
         if (f.x + 4 > e.x && f.x < e.x + ew && f.y + 4 > e.y && f.y < e.y + 14) {
           killEnemy(e, e.kind === "flyer" ? PTS_FLYER : PTS_WALKER);
@@ -4169,8 +4236,40 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         e.phase += dt * 2.6;
         e.x += e.vx * dt;
         e.y = e.baseY + Math.sin(e.phase) * 14;
+      } else if (e.kind === "bong") {
+        // Little bong: sits still until you walk into it. Kicked, it slides along, bounces off walls
+        // and knocks out every monster it touches (the kill streak multiplies the points).
+        e.kick = Math.max(0, (e.kick ?? 0) - dt);
+        e.vy = Math.min(420, e.vy + GRAVITY * dt);
+        e.x += e.vx * dt;
+        if (e.vx !== 0) {
+          const front = e.vx < 0 ? e.x : e.x + 14;
+          if (solidAt(front, e.y + 7)) e.vx = -e.vx;
+          if (Math.random() < 0.5) {
+            s.smoke.push({ x: e.x + 7 + rand(-3, 3), y: e.y + 2, vx: rand(-8, 8), vy: rand(-22, -8), r: rand(1, 2), life: rand(0.35, 0.7) });
+          }
+          for (const o of s.enemies) {
+            if (o === e || !o.alive || o.kind === "bong") continue;
+            const ow = o.kind === "flyer" ? 18 : 14;
+            if (e.x + 14 > o.x && e.x < o.x + ow && e.y + 14 > o.y && e.y < o.y + 14) {
+              killEnemy(o, o.kind === "flyer" ? PTS_FLYER : PTS_WALKER);
+            }
+          }
+        } else {
+          e.idle = (e.idle ?? 0) + dt;
+          if (Math.random() < dt * 3) {
+            s.smoke.push({ x: e.x + 12, y: e.y, vx: rand(-4, 4), vy: rand(-18, -8), r: rand(1, 2), life: rand(0.5, 1) });
+          }
+          if (e.idle > BONG_IDLE_LIFE) e.alive = false;
+        }
+        e.y += e.vy * dt;
+        if (solidAt(e.x + 7, e.y + 14)) {
+          e.y = Math.floor((e.y + 14) / T) * T - 14;
+          e.vy = 0;
+        }
+        if (e.y > H + 20) e.alive = false;
       } else {
-        // Walker: walks, turns at edges and walls
+        // Walker (and the walking eye): walks, turns at edges and walls
         e.vy = Math.min(420, e.vy + GRAVITY * dt);
         e.x += e.vx * dt;
         const front = e.vx < 0 ? e.x : e.x + 14;
@@ -4192,8 +4291,39 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       const py1 = hy();
       if (px1 + HB_W > e.x + 2 && px1 < e.x + ew - 2 && py1 + HB_H > e.y + 2 && py1 < e.y + 12) {
         const falling = s.vy > 0 && py1 + HB_H - e.y < 10;
-        if (falling) {
+        if (e.kind === "bong") {
+          // A bong never hurts you
+          if (e.vx !== 0) {
+            if (falling) {
+              // jump on a sliding bong: it stops
+              e.vx = 0;
+              e.idle = 0;
+              e.kick = 0.3;
+              s.vy = STOMP_BOUNCE;
+              beep(260, 180, 0.08, 0.04, "square");
+            }
+          } else if ((e.kick ?? 0) <= 0) {
+            // walk into it: it flies off the way you were going
+            const fromLeft = px1 + HB_W / 2 < e.x + 7;
+            const dir = falling ? (s.facing >= 0 ? 1 : -1) : fromLeft ? 1 : -1;
+            e.vx = dir * BONG_KICK_SPEED;
+            e.kick = 0.25;
+            if (falling) s.vy = STOMP_BOUNCE;
+            beep(300, 700, 0.1, 0.05, "square");
+          }
+        } else if (falling) {
+          const wasEye = e.kind === "eye";
           killEnemy(e, e.kind === "flyer" ? PTS_FLYER : PTS_WALKER);
+          if (wasEye) {
+            // the eye pops and leaves a little bong behind
+            e.kind = "bong";
+            e.alive = true;
+            e.squash = 0;
+            e.vx = 0;
+            e.vy = 0;
+            e.idle = 0;
+            e.kick = 0.3;
+          }
           s.vy = STOMP_BOUNCE;
         } else if (s.invuln <= 0) {
           hurt();
@@ -5047,6 +5177,14 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     g.addColorStop(1, WL_SKY_BOTTOM);
     ctx.fillStyle = g;
     ctx.fillRect(-4, -1200, W + 8, H + 1400);
+    const wb = weedBgRef.current;
+    const custom = !!wb && wb.complete && wb.naturalWidth > 0;
+    if (custom && wb) {
+      // your picture, scrolling slowly and wrapping (transparent parts show the green sky behind it)
+      const bw = H * (wb.naturalWidth / wb.naturalHeight);
+      const off = -((cam * WEEDLAND_BG_PARALLAX) % bw);
+      for (let x = Math.round(off); x < W; x += Math.round(bw)) ctx.drawImage(wb, x, 0, Math.round(bw) + 1, H);
+    } else {
     // soft sun
     ctx.fillStyle = "rgba(255, 250, 190, 0.8)";
     ctx.beginPath();
@@ -5074,6 +5212,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         const sway = Math.sin(s.t * 0.9 + idx) * 0.12;
         drawBigLeaf(ctx, x, H - 40 - hash(idx + 3) * 20, size, sway, color);
       }
+    }
     }
     // glowing spores floating up
     for (let k = 0; k < 22; k++) {
@@ -6897,6 +7036,24 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     // Monsters (squashed flat when beaten)
     for (const e of s.enemies) {
       const x = e.x - cam;
+      if (e.kind === "eye") {
+        if (e.alive) {
+          const frame = EYE_FRAMES[Math.floor(s.t * EYE_FPS + e.x * 0.05) % EYE_FRAMES.length];
+          drawPixels(ctx, e.vx > 0 ? flipRows(frame) : frame, x - 2, e.y - 6, EYE_COLORS, 1);
+        } else {
+          ctx.fillStyle = "#ff5fae";
+          ctx.fillRect(x, e.y + 10, 14, 4);
+        }
+        continue;
+      }
+      if (e.kind === "bong") {
+        const fading = e.vx === 0 && (e.idle ?? 0) > BONG_IDLE_LIFE - 3;
+        if (!fading || Math.floor(s.t * 8) % 2 === 0) {
+          const bob = e.vx === 0 ? Math.round(Math.sin(s.t * 4 + e.x) * 0.6) : 0;
+          drawPixels(ctx, MINI_BONG, x - 3, e.y - 8 + bob, BONG_COLORS, 2);
+        }
+        continue;
+      }
       const ez = colAt(Math.floor(e.x / T)).zone;
       if (ez === LEVEL_KEEP) {
         // Level 3: crows (with the smoke wisp), skeletons with knives, and oni
@@ -7700,6 +7857,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     });
     deathSoundRef.current = new Audio(DEATH_SOUND);
     window.addEventListener("pinkmane-level-control", levelMusicControl);
+    const weedBg = new Image();
+    weedBg.src = WEEDLAND_BG;
+    weedBgRef.current = weedBg;
     Object.entries(KEEP_IMAGES).forEach(([k, src]) => {
       const im = new Image();
       im.src = src;
