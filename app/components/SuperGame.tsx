@@ -84,6 +84,10 @@ type Popup = { x: number; y: number; text: string; life: number };
 type Entry = { name: string; score: number };
 type BoardStatus = "loading" | "ok" | "offline";
 
+// The name of the game, shown on its start screens. Change it here and it changes everywhere in the game.
+// (The Games menu on the iPod has its own copy of the name: search page.tsx for "Pinkmane Void".)
+const GAME_TITLE = "PINKMANE VOID";
+
 // Game size in pixels. It gets scaled up to fill the screen.
 // Widened to match the aspect ratio of the screen cutout drawn in handheld.png (it's a
 // wide PSP-style screen, ~2.1:1) — this used to be a narrower 256, which is why there were
@@ -781,7 +785,7 @@ const OUTFIT_KEY = "pinksuper-outfit"; // currently worn outfit id
 type SpellId = "spike";
 type SpellDef = { id: SpellId; name: string; cost: number; info: [string, string] };
 const SHOP_SPELLS: SpellDef[] = [
-  { id: "spike", name: "SPIKE SHOT", cost: 200, info: ["SHOOTS SPIKES IN EVERY DIRECTION", "IN THE ? BOXES + AT BOSS FIGHTS"] },
+  { id: "spike", name: "SPIKE SHOT", cost: 200, info: ["SHOOTS SPIKES IN EVERY DIRECTION", "IN THE STASH BOXES + AT BOSS FIGHTS"] },
 ];
 // Greyed-out lines under the spells (just text for now: add or remove names as you like)
 const SHOP_SOON = ["MORE SPELLS"];
@@ -3193,7 +3197,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         ? `FIGHT THE ${bossLabel}!`
         : `${bossLabel} #${s.bossCount + 1}!`;
     s.hinted = s.hinted.filter((h) => h !== "bossjump");
-    showHint("bossjump", s.kboss ? "1 DOUBLE JUMP! MORE IN THE ? BOXES" : "FREE DOUBLE JUMPS HERE!");
+    showHint("bossjump", s.kboss ? "1 DOUBLE JUMP! MORE IN THE STASH BOXES" : "FREE DOUBLE JUMPS HERE!");
     s.hintTime = 4;
     playPowerUp();
   };
@@ -5958,29 +5962,60 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     ctx.fillRect(x + 11, by + 8, 1, 8);
   };
 
+  // The way down into the Void: a dark well with the void swirling in its mouth and sparks drifting up
+  // out of it. Once you've been in, it goes grey and shuts. (In the code it's still called "pipe".)
+  // It's drawn in two halves, one per tile: left half first, then the right half.
   const drawPipe = (ctx: CanvasRenderingContext2D, c: Column, x: number) => {
     const s = state.current;
     const top = c.ground * T;
     const left = c.pipe === 1;
-    // body
+    const used = c.pipeUsed;
+    // the well itself: a dark block with straight sides
     ctx.fillStyle = INK;
-    ctx.fillRect(x, top + 6, T, H - top);
-    ctx.fillStyle = c.pipeUsed ? "#6c6474" : DARK_PINK;
-    ctx.fillRect(x + (left ? 2 : 0), top + 6, T - 2, H - top);
-    ctx.fillStyle = c.pipeUsed ? "#8a8292" : PINK;
-    if (left) ctx.fillRect(x + 4, top + 6, 3, H - top);
-    // rim
-    ctx.fillStyle = INK;
-    ctx.fillRect(x - (left ? 2 : 0), top, T + 2, 7);
-    ctx.fillStyle = c.pipeUsed ? "#8a8292" : PINK;
-    ctx.fillRect(x - (left ? 1 : 0), top + 1, T + (left ? 1 : -1), 5);
-    // the dark opening, with a little glow while it can still be used
-    if (!c.pipeUsed && left) {
-      const glow = Math.floor(s.t * 3) % 2 === 0 ? "#ff7a00" : "#ffc800";
-      ctx.fillStyle = glow;
-      ctx.fillRect(x + 10, top - 6, 12, 2);
-      ctx.fillStyle = INK;
-      ctx.fillRect(x + 15, top - 10, 2, 3);
+    ctx.fillRect(x, top, T, H - top);
+    ctx.fillStyle = used ? "#6c6474" : "#2a1240";
+    ctx.fillRect(x + (left ? 2 : 0), top + 2, T - 2, H - top);
+    // a lighter stripe down the outside edge
+    ctx.fillStyle = used ? "#8a8292" : "#5a2a86";
+    ctx.fillRect(left ? x + 2 : x + T - 5, top + 2, 3, H - top);
+    if (!used) {
+      // pink streaks getting pulled down into it
+      for (let k = 0; k < 3; k++) {
+        const fall = (s.t * 22 + k * 11 + (left ? 0 : 5)) % 30;
+        ctx.fillStyle = k === 1 ? "#ff8ff0" : PINK;
+        ctx.fillRect(x + (left ? 7 : 3) + k * 3, Math.round(top + 9 + fall), 1, 4);
+      }
+    }
+    if (left) return;
+    // (from here on: things that stretch across both halves, drawn with the right half so nothing paints over them)
+    const x0 = x - T; // left edge of the whole well
+    if (used) {
+      // shut: a flat grey lid
+      ctx.fillStyle = "#8a8292";
+      ctx.fillRect(x0 + 2, top + 2, 2 * T - 4, 4);
+      ctx.fillStyle = "#555060";
+      ctx.fillRect(x0 + 6, top + 4, 2 * T - 12, 1);
+      return;
+    }
+    // the mouth: pitch black, with two bright bits circling round and round in it
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(x0 + 4, top + 2, 2 * T - 8, 6);
+    for (let k = 0; k < 2; k++) {
+      const a = s.t * 4 + k * Math.PI;
+      const sx = Math.round(x0 + T - 2 + Math.cos(a) * 9);
+      const sy = top + 4 + Math.round(Math.sin(a) * 1.5);
+      ctx.fillStyle = k === 0 ? "#ff8ff0" : "#c070ff";
+      ctx.fillRect(sx, sy, 4, 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(sx + (Math.cos(a) > 0 ? 3 : 0), sy, 1, 1);
+    }
+    // sparks drifting up out of it
+    const sparkColors = [PINK, "#ffffff", "#c070ff"];
+    for (let k = 0; k < 3; k++) {
+      const rise = (s.t * 0.7 + k / 3) % 1;
+      if (rise > 0.85) continue; // each one blinks out near the top
+      ctx.fillStyle = sparkColors[k];
+      ctx.fillRect(Math.round(x0 + 8 + k * 7 + Math.sin(s.t * 3 + k * 2) * 2), Math.round(top - 2 - rise * 14), 2, 2);
     }
   };
 
@@ -5995,9 +6030,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     ctx.textBaseline = "top";
     ctx.textAlign = "center";
     ctx.fillStyle = INK;
-    ctx.fillText("SUPER PINKMANE", W / 2 + 1, 7);
+    ctx.fillText(GAME_TITLE, W / 2 + 1, 7);
     ctx.fillStyle = "#ffffff";
-    ctx.fillText("SUPER PINKMANE", W / 2, 6);
+    ctx.fillText(GAME_TITLE, W / 2, 6);
     const blocks = [
       { title: ["PINK RUN", "INFINITE"], text: ["SURVIVE THE", "LONGEST, COLLECT", "THE HIGHEST", "SCORE!"], foot: `HI ${pad(s.best)}` },
       {
@@ -6695,7 +6730,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     ctx.fillStyle = "#ffc800";
     const need = b ? b.maxHp : s.lboss ? s.lboss.maxHp : s.kboss ? s.kboss.maxHp : 0;
     const shots = s.kboss ? HORNED_AMMO : need + BOSS_SPARE_SHOTS;
-    ctx.fillText(s.kboss ? `${shots} SHOTS, IT TAKES ${need}. USE THE ? BOXES` : `${shots} SHOTS, IT TAKES ${need}`, W / 2, 26);
+    ctx.fillText(s.kboss ? `${shots} SHOTS, IT TAKES ${need}. USE THE STASH BOXES` : `${shots} SHOTS, IT TAKES ${need}`, W / 2, 26);
     const options = s.spells.includes("spike") ? 3 : 2;
     for (let i = 0; i < options; i++) {
       const bx = options === 3 ? 56 + i * 80 : i === 0 ? W / 2 - 78 : W / 2 + 14;
@@ -7753,7 +7788,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       const best = s.levelBest[String(s.level)];
       textBox(ctx, best ? `YOUR BEST: ${fmtTime(best)}` : "REACH THE BONG AS FAST AS YOU CAN", 70);
     } else if (s.mode === "ready") {
-      textBox(ctx, "SUPER PINKMANE", 36);
+      textBox(ctx, GAME_TITLE, 36);
       if (blink) textBox(ctx, "PRESS OK TO START", 54);
       const top = boardRef.current[0];
       if (boardStatusRef.current === "ok" && top) textBox(ctx, `#1 ${top.name} ${pad(top.score)}`, 70);

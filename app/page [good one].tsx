@@ -21,7 +21,7 @@ const GLYPH_IMAGES = ["/glyphs/heart.gif", "/glyphs/sparkle.gif"];
 
 // PINKMANE flying with a jetpack: made from the same pixels as the game character (pinkdude.png),
 // with a jetpack on his back. O / Y are the flame.
-// These fly across the background behind the handheld (Pinkmane Void / Pink Maze).
+// These fly across the background behind the handheld (Super Pinkmane / Pink Maze).
 const JET_DUDE = [
   ".............A.....A..........",
   ".......A.....AB...AB..........",
@@ -130,7 +130,7 @@ const ITEM_ICONS: Record<string, string> = {
   Extras: "/icons/extras.gif",
   Games: "/icons/games.gif",
   "Pink Run": "/icons/pinkrun.gif",
-  "Pinkmane Void": "/icons/superpinkmane.gif",
+  "Super Pinkmane": "/icons/superpinkmane.gif",
   "Pink Hexagon": "/icons/pinkhex.gif",
   "Pink Maze": "/icons/pinkmaze.gif",
   "Pink Vortex": "/icons/pinkvortex.gif",
@@ -181,14 +181,12 @@ function trackLink(track: { title: string; link?: string }) {
 
 // PHONES: the round pad under your left thumb, and which key each of its arrows holds down
 const TP_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight" } as const;
-// Pinkmane Void on the round pad: left / right win unless your thumb is clearly up or down.
+// Super Pinkmane on the round pad: left / right win unless your thumb is clearly up or down.
 // Bigger = harder to hit up (jump) / down (shoot) by accident. 1 = all four the same.
 const TP_WALK_BIAS = 1.7;
 
-// How many menu rows fit on the iPod screen at once (on a computer)
+// How many menu rows fit on the screen at once
 const VISIBLE_ROWS = 5;
-// ...and on a phone, where the iPod screen is much smaller: fewer rows, so each one is big enough to read
-const PHONE_ROWS = 4;
 
 // SEO: official profile links, readable by search engines
 const ARTIST_LINKS = [
@@ -386,7 +384,7 @@ const DpadArrow = ({ dir }: { dir: "up" | "down" | "left" | "right" }) => {
 
 // Small dancing bars next to the mute button, pulsing on the beat
 // WIGGLY BACKGROUND: the background picture gently wiggles like heat haze / water
-// (the same wiggle as the covers in Pinkmane Void), and a ~1.5 cm border around the
+// (the same wiggle as the covers in Super Pinkmane), and a ~1.5 cm border around the
 // edge of the screen shakes when an 808 hits. The middle never shakes.
 // If a browser can't do it, the normal still picture just shows instead.
 // WIGGLE_PX: how far the wiggle moves the picture sideways (0 = no wiggle)
@@ -684,7 +682,7 @@ export default function Home() {
   const [volume, setVolume] = useState(0.5);
   const [trackIndex, setTrackIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(true);
-  // A song from a game level (Pinkmane Void Level 3) is playing: the music buttons control that instead
+  // A song from a game level (Super Pinkmane Level 3) is playing: the music buttons control that instead
   type GameSong = { title: string; artist: string; paused: boolean };
   const [gameSong, setGameSong] = useState<GameSong | null>(null);
   const gameSongRef = useRef<GameSong | null>(null);
@@ -702,9 +700,9 @@ export default function Home() {
   // Which game is open, and how far the click wheel was turned (for Pink Vortex)
   const [activeGame, setActiveGame] = useState<"pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super">("pinkrun");
   const spinRef = useRef(0);
-  // Pink Maze and Pinkmane Void play on a wide handheld instead of the iPod
+  // Pink Maze and Super Pinkmane play on a wide handheld instead of the iPod
   const handheld = playing && (activeGame === "maze" || activeGame === "super");
-  // PHONES + TABLETS: on a touch screen, Pink Maze and Pinkmane Void get their own full-screen
+  // PHONES + TABLETS: on a touch screen, Pink Maze and Super Pinkmane get their own full-screen
   // layout with big thumb buttons instead of the drawn handheld.
   // To look at it on your computer, open the site with ?touch=1 at the end: http://localhost:3000/?touch=1
   const [isTouch, setIsTouch] = useState(false);
@@ -720,7 +718,7 @@ export default function Home() {
     return () => mq.removeEventListener?.("change", update);
   }, []);
   const [handheldBoot, setHandheldBoot] = useState(false);
-  // "CONTROL W THESE!" arrows pointing at the key legend, for 5 seconds after Pinkmane Void starts
+  // "CONTROL W THESE!" arrows pointing at the key legend, for 5 seconds after Super Pinkmane starts
   const [keyTip, setKeyTip] = useState(false);
   // Which background mode is picked (0, 1 or 2), remembered for next visit
   const [bgMode, setBgMode] = useState(0);
@@ -766,7 +764,7 @@ export default function Home() {
     socials: ["Instagram", "Twitch", "Releases", "Back"],
     releases: ["TOPSHELF", "Back"],
     games: [
-      "Pinkmane Void",
+      "Super Pinkmane",
       "Pink Hexagon",
       "Pink Maze",
       "Pink Vortex",
@@ -780,17 +778,8 @@ export default function Home() {
   const items = menus[menu as keyof typeof menus];
 
   // Which part of a long menu is visible (keeps the selected row on screen)
-  // (phones show PHONE_ROWS rows at a time, computers VISIBLE_ROWS)
-  const [visibleRows, setVisibleRows] = useState(VISIBLE_ROWS);
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 480px)");
-    const update = () => setVisibleRows(mq.matches ? PHONE_ROWS : VISIBLE_ROWS);
-    update();
-    mq.addEventListener?.("change", update);
-    return () => mq.removeEventListener?.("change", update);
-  }, []);
-  const listStart = Math.max(0, Math.min(selected - 2, items.length - visibleRows));
-  const visibleItems = items.slice(listStart, listStart + visibleRows);
+  const listStart = Math.max(0, Math.min(selected - 2, items.length - VISIBLE_ROWS));
+  const visibleItems = items.slice(listStart, listStart + VISIBLE_ROWS);
 
   const loadAndPlay = (i: number) => {
     const audio = songRef.current;
@@ -846,7 +835,7 @@ export default function Home() {
     }
   };
 
-  // Pinkmane Void asks the page to pause your music while the secret Stutters track plays, then resume it
+  // Super Pinkmane asks the page to pause your music while the secret Stutters track plays, then resume it
   const pausedForGameRef = useRef(false);
   // true from the game's "pause" until its "resume" (a level with its own songs, the secret track...):
   // your music must not start by itself during that time
@@ -1057,7 +1046,7 @@ export default function Home() {
         setActiveGame("maze");
         setPlaying(true);
       }
-      if (item === "Pinkmane Void") {
+      if (item === "Super Pinkmane") {
         spinRef.current = 0;
         setActiveGame("super");
         setPlaying(true);
@@ -1601,7 +1590,7 @@ activeGame === "maze" ? (
     return () => clearTimeout(t);
   }, [handheld]);
 
-  // Pinkmane Void: once the boot screen is gone, point at the keys for 5 seconds
+  // Super Pinkmane: once the boot screen is gone, point at the keys for 5 seconds
   useEffect(() => {
     if (!handheld || activeGame !== "super" || handheldBoot) {
       setKeyTip(false);
@@ -1752,7 +1741,7 @@ activeGame === "maze" ? (
     const dy = e.clientY - (r.top + r.height / 2);
     let key = tpKey.current; // in the little dead spot in the middle: keep going the way you were
     if (Math.max(Math.abs(dx), Math.abs(dy)) > r.width * 0.1) {
-      // Pinkmane Void: left / right win unless your thumb is clearly up or down
+      // Super Pinkmane: left / right win unless your thumb is clearly up or down
       // (so you don't jump or shoot by accident while walking). TP_WALK_BIAS: bigger = harder to hit up / down.
       const sideways = Math.abs(dx) * (activeGame === "super" ? TP_WALK_BIAS : 1) >= Math.abs(dy);
       key = sideways ? (dx > 0 ? "ArrowRight" : "ArrowLeft") : dy > 0 ? "ArrowDown" : "ArrowUp";
@@ -1767,7 +1756,7 @@ activeGame === "maze" ? (
     setTpAOn(false);
     setTpBOn(false);
   }, [handheld]);
-  // A: Pinkmane Void gets it straight away (jump the moment you touch, hold = fly). Pink Maze: start.
+  // A: Super Pinkmane gets it straight away (jump the moment you touch, hold = fly). Pink Maze: start.
   const tpA = (down: boolean) => {
     setTpAOn(down);
     if (activeGame === "super") {
@@ -2034,7 +2023,7 @@ activeGame === "maze" ? (
                   : activeGame === "maze"
                   ? "PINK MAZE"
                   : activeGame === "super"
-                  ? "PINKMANE VOID"
+                  ? "SUPER PINKMANE"
                   : "PINK RUN"
                 : menu === "main"
                 ? "PINKMANE"
@@ -2098,30 +2087,21 @@ activeGame === "maze" ? (
                 overflow: "hidden",
                 flex: 1,
                 position: "relative",
-                // the rows share whatever height the screen has, so the last one can never fall off the bottom
-                display: "flex",
-                flexDirection: "column",
               }}
             >
               {visibleItems.map((item, i) => {
                 const index = listStart + i;
-                const isMane = item === "Pinkmane Void";
+                const isMane = item === "Super Pinkmane";
                 return (
                 <div
                   key={`${menu}-${index}`}
                   className={isMane ? "mane-highlight" : undefined}
                   style={{
                     position: "relative",
-                    // as tall as it used to be on a computer (44px); on a phone the rows shrink together to fit
-                    flex: "1 1 0",
-                    minHeight: 0,
-                    maxHeight: "44px",
-                    boxSizing: "border-box",
-                    display: "flex",
-                    alignItems: "center",
-                    padding: "0 44px 0 10px",
-                    fontSize: "clamp(10px, 3vw, 14px)",
-                    lineHeight: "1.3",
+                    padding: "10px",
+                    paddingRight: "44px",
+                    fontSize: "clamp(11px, 3.2vw, 14px)",
+                    lineHeight: "1.6",
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
@@ -2137,25 +2117,25 @@ activeGame === "maze" ? (
                   }}
                 >
                   {menu === "games" && item !== "Back" ? (
-                    <span style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: "10px", rowGap: "1px", minWidth: 0 }}>
+                    <span style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: "10px" }}>
                       <span style={{ whiteSpace: "nowrap" }}>
                         {selected === index ? "> " : ""}
                         {isMane ? "✦ " : ""}
                         {item}
                         {isMane ? " ✦" : ""}
                       </span>
-                      {/* [ MAIN GAME ] for Pinkmane Void, [mini game] for all the others */}
+                      {/* [ MAIN GAME ] for Super Pinkmane, [mini game] for all the others */}
                       <span style={{ fontSize: "0.55em", opacity: 0.85, whiteSpace: "nowrap" }}>
                         {isMane ? "[ MAIN GAME ]" : "[mini game]"}
                       </span>
                     </span>
                   ) : (
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    <>
                       {selected === index ? "> " : ""}
                       {isMane ? "✦ " : ""}
                       {item}
                       {isMane ? " ✦" : ""}
-                    </span>
+                    </>
                   )}
 
                   {selected === index && ITEM_ICONS[item] && (
@@ -2184,12 +2164,12 @@ activeGame === "maze" ? (
               })}
 
               {/* Little scrollbar on the right when the menu is longer than the screen */}
-              {items.length > visibleRows && (
+              {items.length > VISIBLE_ROWS && (
                 <div className="list-scroll">
                   <div
                     className="list-thumb"
                     style={{
-                      height: `${(visibleRows / items.length) * 100}%`,
+                      height: `${(VISIBLE_ROWS / items.length) * 100}%`,
                       top: `${(listStart / items.length) * 100}%`,
                     }}
                   />
@@ -2508,7 +2488,7 @@ activeGame === "maze" ? (
           {activeGame === "super" && (
             <button
               className={`tp-btn tp-b ${tpBOn ? "tp-on" : ""}`}
-              aria-label="Shoot, or go down into the Void"
+              aria-label="Shoot, or go down a pipe"
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.currentTarget.setPointerCapture(e.pointerId);
@@ -2542,7 +2522,7 @@ activeGame === "maze" ? (
         </div>
       )}
 
-      {/* The PINKMANE handheld: a wide screen for Pink Maze and Pinkmane Void */}
+      {/* The PINKMANE handheld: a wide screen for Pink Maze and Super Pinkmane */}
       {handheld && !isTouch && (
         <div className={`hh-overlay ${twitchMode ? "hh-twitch-on" : ""}`}>
           {/* Background picture: wiggles, and its border shakes on the 808s */}
@@ -2864,7 +2844,7 @@ activeGame === "maze" ? (
               ? [
                   [["A", "D", "←", "→"], "walk"],
                   [["W", "↑", "SPACE"], "jump"],
-                  [["S", "↓"], "shoot / enter"],
+                  [["S", "↓"], "shoot / pipe"],
                   [["M"], "sounds"],
                   [["ESC"], "pause"],
                   [["BACKSPACE"], "menu"],
@@ -2891,7 +2871,7 @@ activeGame === "maze" ? (
           <div className={`hh-hint ${pixelFont.className}`}>
             best played on a laptop with a keyboard ·{" "}
             {activeGame === "super"
-              ? "d-pad / stick = walk · bottom button = jump · left button = fire · d-pad down = go into the Void · right button = back"
+              ? "d-pad / stick = walk · bottom button = jump · left button = fire · d-pad down = go into pipes · right button = back"
               : "d-pad / stick = move · bottom button = start · right button = back · top button = play/pause"}
             <span className="hh-rotate"> · turn your phone sideways for a bigger screen</span>
           </div>
@@ -3024,7 +3004,7 @@ activeGame === "maze" ? (
           width: 80%;
           height: 80%;
         }
-        /* Pinkmane Void: left / right are the main ones, up / down are small */
+        /* Super Pinkmane: left / right are the main ones, up / down are small */
         .tp-dpad-walk .tp-arrow-up,
         .tp-dpad-walk .tp-arrow-down {
           opacity: 0.5;
@@ -3341,7 +3321,7 @@ activeGame === "maze" ? (
           image-rendering: pixelated;
           filter: drop-shadow(2px 2px 0 #000);
         }
-        /* Left one: TRIPPY PINKMANE (the outfit from Pinkmane Void) */
+        /* Left one: TRIPPY PINKMANE (the outfit from Super Pinkmane) */
         .quake-dude-trippy {
           background-image: url("/game/pinkdude-pinkfit.png");
         }
@@ -3499,7 +3479,7 @@ activeGame === "maze" ? (
           max-width: min(560px, 96vw);
         }
 
-        /* CONTROL W THESE! arrows pointing at the keys (Pinkmane Void, first 5 seconds) */
+        /* CONTROL W THESE! arrows pointing at the keys (Super Pinkmane, first 5 seconds) */
         .hh-keys-wrap {
           position: relative;
           z-index: 2;
@@ -4374,7 +4354,7 @@ activeGame === "maze" ? (
           }
         }
 
-        /* The mane game (Pinkmane Void) in the Games menu: pink, glowing, unmissable */
+        /* The mane game (Super Pinkmane) in the Games menu: pink, glowing, unmissable */
         .mane-highlight::after {
           content: "";
           position: absolute;
