@@ -179,12 +179,6 @@ function trackLink(track: { title: string; link?: string }) {
   return `https://soundcloud.com/search/sounds?q=${encodeURIComponent(`pinkmane ${name}`)}`;
 }
 
-// PHONES: the round pad under your left thumb, and which key each of its arrows holds down
-const TP_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight" } as const;
-// Super Pinkmane on the round pad: left / right win unless your thumb is clearly up or down.
-// Bigger = harder to hit up (jump) / down (shoot) by accident. 1 = all four the same.
-const TP_WALK_BIAS = 1.7;
-
 // How many menu rows fit on the screen at once
 const VISIBLE_ROWS = 5;
 
@@ -702,21 +696,6 @@ export default function Home() {
   const spinRef = useRef(0);
   // Pink Maze and Super Pinkmane play on a wide handheld instead of the iPod
   const handheld = playing && (activeGame === "maze" || activeGame === "super");
-  // PHONES + TABLETS: on a touch screen, Pink Maze and Super Pinkmane get their own full-screen
-  // layout with big thumb buttons instead of the drawn handheld.
-  // To look at it on your computer, open the site with ?touch=1 at the end: http://localhost:3000/?touch=1
-  const [isTouch, setIsTouch] = useState(false);
-  const [padDir, setPadDir] = useState<string | null>(null); // which way the round pad is pushed (lights up its arrow)
-  const [tpAOn, setTpAOn] = useState(false);
-  const [tpBOn, setTpBOn] = useState(false);
-  useEffect(() => {
-    const forced = new URLSearchParams(window.location.search).get("touch") !== null;
-    const mq = window.matchMedia("(pointer: coarse)");
-    const update = () => setIsTouch(forced || mq.matches);
-    update();
-    mq.addEventListener?.("change", update);
-    return () => mq.removeEventListener?.("change", update);
-  }, []);
   const [handheldBoot, setHandheldBoot] = useState(false);
   // "CONTROL W THESE!" arrows pointing at the key legend, for 5 seconds after Super Pinkmane starts
   const [keyTip, setKeyTip] = useState(false);
@@ -724,17 +703,6 @@ export default function Home() {
   const [bgMode, setBgMode] = useState(0);
   // Same thing for the handheld (PSP) view (0-3), remembered separately
   const [hhBgMode, setHhBgMode] = useState(0);
-
-  // TWITCH MODE: only shows on your own computer (localhost), never on the real site.
-  // Rate the songs people send you while you play: MIX and OVERALL VIBE from 0 to 100, and a replay-able tick.
-  const [twitchMode, setTwitchMode] = useState(false);
-  const [twMix, setTwMix] = useState(0);
-  const [twVibe, setTwVibe] = useState(0);
-  const [twReplay, setTwReplay] = useState(false);
-  useEffect(() => {
-    const h = window.location.hostname;
-    setTwitchMode(h === "localhost" || h === "127.0.0.1" || h === "[::1]" || /^(192\.168\.|10\.)/.test(h));
-  }, []);
 
   // Glitch flicker on menu change
   const [glitch, setGlitch] = useState(false);
@@ -1543,7 +1511,6 @@ activeGame === "maze" ? (
                   spinRef={spinRef}
                   fontFamily={pixelFont.style.fontFamily}
                   muted={isMuted}
-                  touchPad={isTouch}
                 />
               ) : activeGame === "hex" ? (
                 <HexGame
@@ -1713,64 +1680,6 @@ activeGame === "maze" ? (
   const stickRelease = () => {
     if (stickKey.current) padKey(stickKey.current, "keyup");
     stickKey.current = null;
-  };
-
-  // ---------- PHONES + TABLETS: the big thumb buttons ----------
-  // A tiny buzz when a button is pressed (Android phones; iPhones don't allow it)
-  const buzz = () => {
-    try {
-      navigator.vibrate?.(8);
-    } catch {}
-  };
-  // The round pad under your left thumb. It holds the arrow key for the side your thumb is on,
-  // and you can slide from one side to the other without lifting.
-  const tpKey = useRef<string | null>(null);
-  const tpSet = (key: string | null) => {
-    if (key === tpKey.current) return;
-    if (tpKey.current) padKey(tpKey.current, "keyup");
-    if (key) {
-      padKey(key, "keydown");
-      buzz();
-    }
-    tpKey.current = key;
-    setPadDir(key);
-  };
-  const tpMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    const dx = e.clientX - (r.left + r.width / 2);
-    const dy = e.clientY - (r.top + r.height / 2);
-    let key = tpKey.current; // in the little dead spot in the middle: keep going the way you were
-    if (Math.max(Math.abs(dx), Math.abs(dy)) > r.width * 0.1) {
-      // Super Pinkmane: left / right win unless your thumb is clearly up or down
-      // (so you don't jump or shoot by accident while walking). TP_WALK_BIAS: bigger = harder to hit up / down.
-      const sideways = Math.abs(dx) * (activeGame === "super" ? TP_WALK_BIAS : 1) >= Math.abs(dy);
-      key = sideways ? (dx > 0 ? "ArrowRight" : "ArrowLeft") : dy > 0 ? "ArrowDown" : "ArrowUp";
-    }
-    tpSet(key);
-  };
-  // Leaving the game lets go of everything
-  useEffect(() => {
-    if (handheld) return;
-    tpKey.current = null;
-    setPadDir(null);
-    setTpAOn(false);
-    setTpBOn(false);
-  }, [handheld]);
-  // A: Super Pinkmane gets it straight away (jump the moment you touch, hold = fly). Pink Maze: start.
-  const tpA = (down: boolean) => {
-    setTpAOn(down);
-    if (activeGame === "super") {
-      window.dispatchEvent(new CustomEvent("pinkmane-pad", { detail: { btn: "a", down } }));
-    } else if (down) {
-      selectItem();
-    }
-    if (down) buzz();
-  };
-  // B: the same as the down arrow key (shoot, or go into a pipe you're standing on)
-  const tpB = (down: boolean) => {
-    setTpBOn(down);
-    padKey("ArrowDown", down ? "keydown" : "keyup");
-    if (down) buzz();
   };
 
   // While a game level plays its own song, the ticker and the play/pause buttons show that song
@@ -2403,128 +2312,9 @@ activeGame === "maze" ? (
       </div>
       </div>
 
-      {/* PHONES + TABLETS: the game fills the screen, with big see-through thumb buttons on top */}
-      {handheld && isTouch && (
-        <div className={`tp-overlay ${pixelFont.className}`} onContextMenu={(e) => e.preventDefault()}>
-          {/* Background picture (still, to save battery) */}
-          <div
-            className="hh-bg"
-            aria-hidden="true"
-            style={{
-              backgroundImage: HH_BG_MODES[hhBgMode].sources.map((src) => `url('${src}')`).join(", "),
-              backgroundPosition: `center ${HH_BG_MODES[hhBgMode].focus * 100}%`,
-            }}
-          />
-
-          {/* The game */}
-          <div className="tp-screen">
-            {gameElement}
-            {handheldBoot && (
-              <div className="screen-overlay">
-                <div className="hh-boot-dude" />
-                <div className="screen-overlay-label">PINKMANE</div>
-                <div className="screen-overlay-loading">LOADING...</div>
-                <SegmentedBar duration={1.4} active={handheldBoot} />
-              </div>
-            )}
-            {osd && (
-              <div className="hh-osd">
-                <span>{osd.kind === "vol" ? `VOL ${Math.round(osd.value * 10)}` : osd.text}</span>
-              </div>
-            )}
-            <div className="crt-overlay" />
-          </div>
-
-          {/* Small buttons, top left: leave the game, pause */}
-          <div className="tp-corner tp-corner-l">
-            <button className="tp-small" onClick={goBack} aria-label="Leave the game">
-              EXIT
-            </button>
-            {activeGame === "super" && (
-              <button className="tp-small" onClick={() => tapKey("Escape")} aria-label="Pause">
-                PAUSE
-              </button>
-            )}
-          </div>
-
-          {/* Small buttons, top right: your music */}
-          <div className="tp-corner tp-corner-r">
-            <button className="tp-small" onClick={hhPlay} aria-label="Play or pause music">
-              <PixelIcon name={musicPaused ? "play" : "pause"} />
-            </button>
-            <button className="tp-small" onClick={() => hhSong(1)} aria-label="Next song">
-              <PixelIcon name="next" />
-            </button>
-            <button className="tp-small" onClick={hhMute} aria-label={isMuted ? "Unmute music" : "Mute music"}>
-              <PixelIcon name={isMuted ? "muted" : "sound"} />
-            </button>
-          </div>
-
-          {/* Left thumb: one round pad. Touch it and slide, no need to lift your thumb to change direction */}
-          <div
-            className={`tp-dpad ${activeGame === "super" ? "tp-dpad-walk" : ""}`}
-            role="group"
-            aria-label="Direction pad"
-            onPointerDown={(e) => {
-              e.preventDefault();
-              e.currentTarget.setPointerCapture(e.pointerId);
-              tpMove(e);
-            }}
-            onPointerMove={(e) => {
-              if (e.currentTarget.hasPointerCapture(e.pointerId)) tpMove(e);
-            }}
-            onPointerUp={() => tpSet(null)}
-            onPointerCancel={() => tpSet(null)}
-            onLostPointerCapture={() => tpSet(null)}
-          >
-            {(["up", "down", "left", "right"] as const).map((d) => (
-              <span key={d} className={`tp-arrow tp-arrow-${d} ${padDir === TP_KEYS[d] ? "tp-on" : ""}`}>
-                <DpadArrow dir={d} />
-              </span>
-            ))}
-          </div>
-
-          {/* Right thumb: A = jump (hold it to fly with the jetpack) / OK in the menus, B = shoot or go down a pipe */}
-          {activeGame === "super" && (
-            <button
-              className={`tp-btn tp-b ${tpBOn ? "tp-on" : ""}`}
-              aria-label="Shoot, or go down a pipe"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                e.currentTarget.setPointerCapture(e.pointerId);
-                tpB(true);
-              }}
-              onPointerUp={() => tpB(false)}
-              onPointerCancel={() => tpB(false)}
-              onLostPointerCapture={() => tpB(false)}
-            >
-              <span>B</span>
-              <small>FIRE</small>
-            </button>
-          )}
-          <button
-            className={`tp-btn tp-a ${tpAOn ? "tp-on" : ""}`}
-            aria-label={activeGame === "super" ? "Jump" : "Start"}
-            onPointerDown={(e) => {
-              e.preventDefault();
-              e.currentTarget.setPointerCapture(e.pointerId);
-              tpA(true);
-            }}
-            onPointerUp={() => tpA(false)}
-            onPointerCancel={() => tpA(false)}
-            onLostPointerCapture={() => tpA(false)}
-          >
-            <span>A</span>
-            <small>{activeGame === "super" ? "JUMP" : "START"}</small>
-          </button>
-
-          <div className="tp-rotate">TURN YOUR PHONE SIDEWAYS FOR A BIGGER SCREEN</div>
-        </div>
-      )}
-
       {/* The PINKMANE handheld: a wide screen for Pink Maze and Super Pinkmane */}
-      {handheld && !isTouch && (
-        <div className={`hh-overlay ${twitchMode ? "hh-twitch-on" : ""}`}>
+      {handheld && (
+        <div className="hh-overlay">
           {/* Background picture: wiggles, and its border shakes on the 808s */}
           <div
             className="hh-bg"
@@ -2740,76 +2530,6 @@ activeGame === "maze" ? (
             </div>
           </div>
 
-          {/* TWITCH MODE (localhost only): rate the song you're listening to */}
-          {twitchMode && (
-            <div className={`twitch-panel ${pixelFont.className}`}>
-              <div className="twitch-slider">
-                <label className="quake-title" htmlFor="tw-mix">
-                  MIX <span className="quake-num">{twMix}%</span>
-                </label>
-                <input
-                  id="tw-mix"
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={twMix}
-                  aria-label="Mix rating"
-                  className="quake-slider"
-                  style={{ "--fill": `${twMix}%` } as React.CSSProperties}
-                  onChange={(e) => setTwMix(Number(e.target.value))}
-                  onPointerUp={(e) => e.currentTarget.blur()}
-                  onTouchEnd={(e) => e.currentTarget.blur()}
-                />
-              </div>
-              <div className="twitch-slider">
-                <label className="quake-title" htmlFor="tw-vibe">
-                  OVERALL VIBE <span className="quake-num">{twVibe}%</span>
-                </label>
-                <input
-                  id="tw-vibe"
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={twVibe}
-                  aria-label="Overall vibe rating"
-                  className="quake-slider"
-                  style={{ "--fill": `${twVibe}%` } as React.CSSProperties}
-                  onChange={(e) => setTwVibe(Number(e.target.value))}
-                  onPointerUp={(e) => e.currentTarget.blur()}
-                  onTouchEnd={(e) => e.currentTarget.blur()}
-                />
-              </div>
-              <div className="twitch-replay">
-                <button
-                  type="button"
-                  role="checkbox"
-                  aria-checked={twReplay}
-                  className={`twitch-box ${twReplay ? "twitch-box-on" : ""}`}
-                  onClick={() => setTwReplay((v) => !v)}
-                  onMouseDown={noFocus}
-                >
-                  {twReplay ? "✔" : ""}
-                </button>
-                <span className="twitch-replay-text">REPLAY-ABLE?</span>
-                {twReplay && <span className="twitch-verified">VERIFIED</span>}
-              </div>
-              <button
-                type="button"
-                className="twitch-reset"
-                onClick={() => {
-                  setTwMix(0);
-                  setTwVibe(0);
-                  setTwReplay(false);
-                }}
-                onMouseDown={noFocus}
-              >
-                NEXT SONG
-              </button>
-            </div>
-          )}
-
           {/* Volume slider + what the buttons do */}
           <div className={`hh-under ${pixelFont.className}`}>
             <span>VOL</span>
@@ -2883,217 +2603,6 @@ activeGame === "maze" ? (
         body {
           overflow-x: hidden;
           margin: 0;
-        }
-
-        /* PHONES: holding a finger on a button used to pop up "Copy" and select its text.
-           Nothing on the site can be selected any more (boxes you type in still work),
-           no grey flash when you tap, and no zooming in by double-tapping. */
-        main {
-          -webkit-user-select: none;
-          user-select: none;
-          -webkit-touch-callout: none;
-          -webkit-tap-highlight-color: transparent;
-          touch-action: manipulation;
-        }
-        main input,
-        main textarea {
-          -webkit-user-select: text;
-          user-select: text;
-        }
-
-        /* ---------- PHONES + TABLETS: full-screen game with thumb buttons ----------
-           Sideways: the game fills the screen, buttons sit see-through on top of its corners.
-           Upright: the game is across the top, buttons underneath.
-           Sizes you might want to change are marked SIZE. */
-        .tp-overlay {
-          position: fixed;
-          inset: 0;
-          z-index: 50;
-          overflow: hidden;
-          background: #000;
-          touch-action: none;
-          overscroll-behavior: none;
-          animation: hhFadeIn 0.25s ease-out;
-        }
-        .tp-screen {
-          position: absolute;
-          left: 50%;
-          top: 50%;
-          transform: translate(-50%, -50%);
-          /* as big as fits, leaving a thin strip each side for the small buttons */
-          height: min(100vh, calc((100vw - 116px) * 30 / 64));
-          height: min(100dvh, calc((100vw - 116px) * 30 / 64));
-          width: min(calc(100vh * 64 / 30), calc(100vw - 116px));
-          width: min(calc(100dvh * 64 / 30), calc(100vw - 116px));
-          background: #242842;
-          overflow: hidden;
-        }
-        .tp-corner {
-          position: absolute;
-          top: max(6px, env(safe-area-inset-top));
-          z-index: 3;
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-        .tp-corner-l {
-          left: max(6px, env(safe-area-inset-left));
-        }
-        .tp-corner-r {
-          right: max(6px, env(safe-area-inset-right));
-          align-items: flex-end;
-        }
-        .tp-small {
-          min-width: 46px;
-          height: 32px;
-          padding: 0 6px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-family: inherit;
-          font-size: 7px;
-          color: #fff;
-          background: rgba(17, 17, 17, 0.6);
-          border: 2px solid rgba(255, 255, 255, 0.75);
-          border-radius: 0;
-          touch-action: manipulation;
-        }
-        .tp-small:active {
-          background: #d63cc8;
-        }
-        /* The round pad, bottom left */
-        .tp-dpad {
-          position: absolute;
-          left: max(10px, env(safe-area-inset-left));
-          bottom: max(12px, env(safe-area-inset-bottom));
-          width: min(38vh, 144px); /* SIZE of the round pad (sideways) */
-          aspect-ratio: 1;
-          z-index: 3;
-          border-radius: 50%;
-          background: rgba(17, 17, 17, 0.32);
-          border: 2px solid rgba(255, 255, 255, 0.55);
-          touch-action: none;
-        }
-        .tp-arrow {
-          position: absolute;
-          width: 34%;
-          height: 34%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: rgba(255, 255, 255, 0.85);
-          pointer-events: none;
-        }
-        .tp-arrow-up {
-          left: 33%;
-          top: 3%;
-        }
-        .tp-arrow-down {
-          left: 33%;
-          bottom: 3%;
-        }
-        .tp-arrow-left {
-          left: 3%;
-          top: 33%;
-        }
-        .tp-arrow-right {
-          right: 3%;
-          top: 33%;
-        }
-        .tp-arrow .hh-arrow {
-          width: 80%;
-          height: 80%;
-        }
-        /* Super Pinkmane: left / right are the main ones, up / down are small */
-        .tp-dpad-walk .tp-arrow-up,
-        .tp-dpad-walk .tp-arrow-down {
-          opacity: 0.5;
-          scale: 0.6;
-        }
-        .tp-arrow.tp-on {
-          color: #ff8ff0;
-          opacity: 1;
-        }
-        /* A and B, bottom right */
-        .tp-btn {
-          position: absolute;
-          z-index: 3;
-          aspect-ratio: 1;
-          padding: 0;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 4px;
-          font-family: inherit;
-          font-size: 16px;
-          color: #fff;
-          text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.6);
-          border: 2px solid rgba(255, 255, 255, 0.65);
-          border-radius: 50%;
-          touch-action: none;
-        }
-        .tp-btn small {
-          font-size: 7px;
-        }
-        .tp-a {
-          right: max(10px, env(safe-area-inset-right));
-          bottom: max(12px, env(safe-area-inset-bottom));
-          width: min(26vh, 96px); /* SIZE of the A button (sideways) */
-          background: rgba(214, 60, 200, 0.45);
-        }
-        .tp-b {
-          right: calc(max(10px, env(safe-area-inset-right)) + min(15vh, 56px));
-          bottom: calc(max(12px, env(safe-area-inset-bottom)) + min(27vh, 100px));
-          width: min(19vh, 70px); /* SIZE of the B button (sideways) */
-          font-size: 13px;
-          background: rgba(138, 31, 134, 0.45);
-        }
-        .tp-btn.tp-on {
-          background: rgba(255, 143, 240, 0.9);
-          scale: 0.94;
-        }
-        .tp-rotate {
-          display: none;
-        }
-        /* Upright phones: game across the top, small buttons in a row above it, thumb buttons at the bottom */
-        @media (orientation: portrait) {
-          .tp-screen {
-            top: calc(max(6px, env(safe-area-inset-top)) + 40px);
-            transform: translateX(-50%);
-            width: 100vw;
-            height: calc(100vw * 30 / 64);
-          }
-          .tp-corner {
-            flex-direction: row;
-          }
-          .tp-dpad {
-            left: 14px;
-            bottom: max(30px, env(safe-area-inset-bottom));
-            width: min(44vw, 180px); /* SIZE of the round pad (upright) */
-          }
-          .tp-a {
-            right: 14px;
-            bottom: max(30px, env(safe-area-inset-bottom));
-            width: min(27vw, 108px); /* SIZE of the A button (upright) */
-          }
-          .tp-b {
-            right: calc(14px + min(21vw, 84px));
-            bottom: calc(max(30px, env(safe-area-inset-bottom)) + min(24vw, 96px));
-            width: min(20vw, 78px); /* SIZE of the B button (upright) */
-          }
-          .tp-rotate {
-            display: block;
-            position: absolute;
-            left: 10px;
-            right: 10px;
-            top: calc(max(6px, env(safe-area-inset-top)) + 40px + 100vw * 30 / 64 + 14px);
-            text-align: center;
-            font-size: 7px;
-            line-height: 1.7;
-            color: #fff;
-            text-shadow: 1px 1px 0 #000;
-          }
         }
 
         /* SEO: hides content visually but keeps it readable for Google and screen readers */
@@ -3745,73 +3254,6 @@ activeGame === "maze" ? (
         .hh-osd-bar span.on {
           background: #d63cc8;
         }
-        /* TWITCH MODE panel under the handheld (localhost only). The handheld gets a bit smaller to make room. */
-        .hh-twitch-on .hh-device {
-          width: min(96vw, 1300px, calc((100dvh - 250px) * 2.41));
-        }
-        .twitch-panel {
-          position: relative;
-          z-index: 1;
-          display: flex;
-          flex-wrap: wrap;
-          align-items: flex-end;
-          justify-content: center;
-          gap: 12px 26px;
-          padding: 10px 16px 12px;
-          color: #fff;
-          text-shadow: 2px 2px 0 #000;
-          background: rgba(0, 0, 0, 0.45);
-          border: 2px solid #fff;
-          box-shadow: 0 3px 0 #fff;
-        }
-        .twitch-slider {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-          width: clamp(160px, 22vw, 260px);
-        }
-        .twitch-replay {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 9px;
-          padding-bottom: 2px;
-        }
-        .twitch-box {
-          width: 22px;
-          height: 22px;
-          padding: 0;
-          font-family: inherit;
-          font-size: 14px;
-          line-height: 1;
-          color: #fff;
-          background: rgba(0, 0, 0, 0.45);
-          border: 2px solid #fff;
-          box-shadow: 0 2px 0 #fff;
-          cursor: pointer;
-        }
-        .twitch-box-on {
-          background: #1fae4b;
-        }
-        .twitch-verified {
-          color: #5dff8a;
-          text-shadow: 1px 1px 0 #000, 0 0 8px rgba(93, 255, 138, 0.8);
-        }
-        .twitch-reset {
-          font-family: inherit;
-          font-size: 8px;
-          padding: 6px 8px;
-          color: #fff;
-          background: rgba(214, 60, 200, 0.5);
-          border: 2px solid #fff;
-          box-shadow: 0 3px 0 #fff;
-          cursor: pointer;
-        }
-        .twitch-reset:active {
-          transform: translateY(2px);
-          box-shadow: 0 1px 0 #fff;
-        }
-
         .hh-under {
           position: relative;
           z-index: 1;

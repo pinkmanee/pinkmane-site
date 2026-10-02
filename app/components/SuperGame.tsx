@@ -11,6 +11,9 @@ type Props = {
   fontFamily: string;
   // Follows the iPod mute button
   muted: boolean;
+  // true on phones / tablets: the page shows its own big thumb buttons, so touching the game
+  // screen itself no longer walks or jumps (menus can still be tapped)
+  touchPad?: boolean;
 };
 
 // golden = paused on the golden leaf screen, choose = picking your spell before a boss, paused = Esc
@@ -1477,7 +1480,9 @@ function getOwnerCode() {
   }
 }
 
-export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: Props) {
+export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, touchPad }: Props) {
+  const touchPadRef = useRef(false);
+  touchPadRef.current = !!touchPad;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const spritesRef = useRef<Partial<Record<OutfitId, HTMLImageElement>>>({});
   const levelSpritesRef = useRef<Record<string, HTMLImageElement>>({}); // outfits worn only in one level
@@ -8024,6 +8029,19 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     window.addEventListener("keydown", keyDown);
     window.addEventListener("keyup", keyUp);
     window.addEventListener("blur", releaseAll);
+    // The big A button on phones. It comes straight from the page the moment the finger touches it:
+    // OK in the menus, JUMP in the game, and keeping it held flies the jetpack.
+    const padButton = (e: Event) => {
+      const d = (e as CustomEvent<{ btn?: string; down?: boolean }>).detail;
+      if (!d || d.btn !== "a") return;
+      if (d.down) {
+        heldRef.current.up = true;
+        press();
+      } else {
+        heldRef.current.up = false;
+      }
+    };
+    window.addEventListener("pinkmane-pad", padButton);
 
     let raf = 0;
     let last = performance.now();
@@ -8041,6 +8059,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       window.removeEventListener("keydown", keyDown);
       window.removeEventListener("keyup", keyUp);
       window.removeEventListener("blur", releaseAll);
+      window.removeEventListener("pinkmane-pad", padButton);
       audioCtxRef.current?.close().catch(() => {});
       stopStutters();
       levelMusicRef.current?.pause();
@@ -8145,6 +8164,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
             press();
             return;
           }
+          // phones with the big thumb buttons: the screen itself doesn't walk or jump any more
+          if (touchPadRef.current) return;
           if (cx < W * 0.33) {
             e.currentTarget.setPointerCapture(e.pointerId);
             touchRef.current = -1;
