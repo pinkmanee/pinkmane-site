@@ -233,7 +233,7 @@ const GIANT_DAZE_TIME = 3.5; // seconds you have to jump on his head once he's d
 const GIANT_DAZE_HP = 3; // miss the window and he gets back up with this much health
 const PTS_GIANT = 2000;
 
-const MY_GOATS = ["LIL PEEP", "YUNG LEAN", "GHOSTEMANE", "SMOKEDOPE2016", "DRIPPIN SO PRETTY"];
+const MY_GOATS = ["LIL PEEP", "YUNG LEAN", "GHOSTEMANE", "WARLORD COLOSSUS", "SMOKEDOPE2016", "DRIPPIN SO PRETTY"];
 // Second sign, further left behind the jetpack
 const SHOUT_OUTS = ["O1M4DE", "TOMBFELL", "LEOHWASFOUND", "STUTTERS", "SLITFACE", "SALADE", "LIL SAD K", "HELL JEXX"];
 
