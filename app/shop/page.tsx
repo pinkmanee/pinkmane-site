@@ -318,6 +318,17 @@ export default function Shop() {
   const [selected, setSelected] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  // PHONES + TABLETS: on a touch screen you can tap a row on the screen to open it (same as on the iPod page).
+  // On a computer the screen doesn't react to clicks. To try it on your computer: http://localhost:3000/shop?touch=1
+  const [isTouch, setIsTouch] = useState(false);
+  useEffect(() => {
+    const forced = new URLSearchParams(window.location.search).get("touch") !== null;
+    const mq = window.matchMedia("(pointer: coarse)");
+    const update = () => setIsTouch(forced || mq.matches);
+    update();
+    mq.addEventListener?.("change", update);
+    return () => mq.removeEventListener?.("change", update);
+  }, []);
 
   const [showBoot, setShowBoot] = useState(true);
   const [bootFadeOut, setBootFadeOut] = useState(false);
@@ -383,10 +394,11 @@ export default function Shop() {
     }, 3000);
   };
 
-  const selectItem = () => {
+  // pick = which row to open (when a row is tapped on a phone). Without it: the highlighted row.
+  const selectItem = (pick?: unknown) => {
     if (activeCategory) return; // already on a placeholder screen
     playSelectSound();
-    const item = items[selected];
+    const item = items[typeof pick === "number" ? pick : selected];
 
     if (menu === "main") {
       if (item === "Clothes / Merch") {
@@ -581,10 +593,9 @@ export default function Shop() {
           </button>
 
           <div
-            className={pixelFont.className}
+            className={`${pixelFont.className} psp-screen`}
             style={{
               background: "#0d0d10",
-              aspectRatio: "560 / 340",
               borderRadius: "8px",
               overflow: "hidden",
               boxSizing: "border-box",
@@ -636,6 +647,14 @@ export default function Shop() {
                     className={`psp-item ${
                       selected === index ? "psp-item-active" : ""
                     }`}
+                    onClick={
+                      isTouch
+                        ? () => {
+                            setSelected(index);
+                            selectItem(index);
+                          }
+                        : undefined
+                    }
                   >
                     {selected === index ? "> " : ""}
                     {item}
@@ -722,6 +741,27 @@ export default function Shop() {
       </div>
 
       <style jsx global>{`
+        /* PHONES: holding a finger on a button used to pop up "Copy" and select its text.
+           Nothing on the page can be selected any more, no grey flash when you tap,
+           and no zooming in by double-tapping. (Same as the iPod page.) */
+        main {
+          -webkit-user-select: none;
+          user-select: none;
+          -webkit-touch-callout: none;
+          -webkit-tap-highlight-color: transparent;
+          touch-action: manipulation;
+        }
+
+        /* The handheld's screen. On phones it's a bit taller, so all five rows have room. */
+        .psp-screen {
+          aspect-ratio: 560 / 340;
+        }
+        @media (max-width: 480px) {
+          .psp-screen {
+            aspect-ratio: 560 / 420;
+          }
+        }
+
         .shop-col {
           position: relative;
           z-index: 1;
@@ -874,16 +914,29 @@ export default function Shop() {
           letter-spacing: 1px;
         }
 
+        /* The rows share whatever height the screen has, so the last one (Home / Back)
+           can never fall off the bottom. On a computer they're as tall as before (41px);
+           on a phone they shrink together to fit. */
         .psp-list {
           padding: clamp(10px, 3vw, 16px) clamp(14px, 4vw, 20px);
           flex: 1;
           overflow: hidden;
+          display: flex;
+          flex-direction: column;
         }
 
         .psp-item {
-          padding: 9px 10px;
+          flex: 1 1 0;
+          min-height: 0;
+          max-height: 41px;
+          box-sizing: border-box;
+          display: flex;
+          align-items: center;
+          padding: 0 10px;
           font-size: clamp(10px, 3vw, 13px);
-          line-height: 1.7;
+          line-height: 1.3;
+          white-space: nowrap;
+          overflow: hidden;
           color: #cfcfd4;
           border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         }

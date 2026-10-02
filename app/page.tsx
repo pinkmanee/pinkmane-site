@@ -181,9 +181,6 @@ function trackLink(track: { title: string; link?: string }) {
 
 // PHONES: the round pad under your left thumb, and which key each of its arrows holds down
 const TP_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight" } as const;
-// Pinkmane Void on the round pad: left / right win unless your thumb is clearly up or down.
-// Bigger = harder to hit up (jump) / down (shoot) by accident. 1 = all four the same.
-const TP_WALK_BIAS = 1.7;
 
 // How many menu rows fit on the iPod screen at once (on a computer)
 const VISIBLE_ROWS = 5;
@@ -957,14 +954,15 @@ export default function Home() {
     }, 3000);
   };
 
-  const selectItem = () => {
+  // pick = which row to open (when a row is tapped on a phone). Without it: the highlighted row.
+  const selectItem = (pick?: unknown) => {
     // Inside the game, OK means jump
     if (playing) {
       setJumpSignal((n) => n + 1);
       return;
     }
 
-    const item = items[selected];
+    const item = items[typeof pick === "number" ? pick : selected];
 
     if (menu === "main" && item === "Merch") {
       navigateToShop();
@@ -1064,6 +1062,40 @@ export default function Home() {
       }
       if (item === "Back") goBack();
     }
+  };
+
+  // ---------- PHONES: the iPod screen itself works by touch ----------
+  // Tap a menu row = open it (the same as highlighting it and pressing OK).
+  // Swipe up / down on the screen = move through the menu (the same as turning the wheel).
+  // Only on touch screens; on a computer the screen doesn't react to clicks, like before.
+  const SWIPE_STEP = 24; // how far your finger has to slide to move one row (bigger = slower)
+  const swipeRef = useRef({ y: 0, acc: 0, moved: false, on: false });
+  const swipeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    swipeRef.current = { y: e.clientY, acc: 0, moved: false, on: true };
+  };
+  const swipeMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const sw = swipeRef.current;
+    if (!sw.on) return;
+    sw.acc += e.clientY - sw.y;
+    sw.y = e.clientY;
+    while (sw.acc <= -SWIPE_STEP) {
+      goDown(); // finger slides up = further down the menu
+      sw.acc += SWIPE_STEP;
+      sw.moved = true;
+    }
+    while (sw.acc >= SWIPE_STEP) {
+      goUp();
+      sw.acc -= SWIPE_STEP;
+      sw.moved = true;
+    }
+  };
+  const swipeEnd = () => {
+    swipeRef.current.on = false;
+  };
+  const tapRow = (index: number) => {
+    if (swipeRef.current.moved) return; // that was a swipe, not a tap
+    setSelected(index);
+    selectItem(index);
   };
 
   const toggleMute = () => {
@@ -1733,8 +1765,8 @@ activeGame === "maze" ? (
       navigator.vibrate?.(8);
     } catch {}
   };
-  // The round pad under your left thumb. It holds the arrow key for the side your thumb is on,
-  // and you can slide from one side to the other without lifting.
+  // Left thumb. Pinkmane Void: two squares, left and right. Pink Maze: a round pad with all four directions.
+  // Either way it holds the arrow key for the side your thumb is on, and you can slide across without lifting.
   const tpKey = useRef<string | null>(null);
   const tpSet = (key: string | null) => {
     if (key === tpKey.current) return;
@@ -1752,9 +1784,7 @@ activeGame === "maze" ? (
     const dy = e.clientY - (r.top + r.height / 2);
     let key = tpKey.current; // in the little dead spot in the middle: keep going the way you were
     if (Math.max(Math.abs(dx), Math.abs(dy)) > r.width * 0.1) {
-      // Pinkmane Void: left / right win unless your thumb is clearly up or down
-      // (so you don't jump or shoot by accident while walking). TP_WALK_BIAS: bigger = harder to hit up / down.
-      const sideways = Math.abs(dx) * (activeGame === "super" ? TP_WALK_BIAS : 1) >= Math.abs(dy);
+      const sideways = Math.abs(dx) >= Math.abs(dy);
       key = sideways ? (dx > 0 ? "ArrowRight" : "ArrowLeft") : dy > 0 ? "ArrowDown" : "ArrowUp";
     }
     tpSet(key);
@@ -1767,6 +1797,11 @@ activeGame === "maze" ? (
     setTpAOn(false);
     setTpBOn(false);
   }, [handheld]);
+  // The two squares (Pinkmane Void): left half = walk left, right half = walk right
+  const tpWalk = (e: React.PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    tpSet(e.clientX < r.left + r.width / 2 ? "ArrowLeft" : "ArrowRight");
+  };
   // A: Pinkmane Void gets it straight away (jump the moment you touch, hold = fly). Pink Maze: start.
   const tpA = (down: boolean) => {
     setTpAOn(down);
@@ -1777,7 +1812,7 @@ activeGame === "maze" ? (
     }
     if (down) buzz();
   };
-  // B: the same as the down arrow key (shoot, or go into a pipe you're standing on)
+  // S (FIRE/DOWN): the same as the S / down arrow key (shoot, or go down into the Void when you're standing on a well)
   const tpB = (down: boolean) => {
     setTpBOn(down);
     padKey("ArrowDown", down ? "keydown" : "keyup");
@@ -2093,11 +2128,17 @@ activeGame === "maze" ? (
             </div>
           ) : (
             <div
+              onPointerDown={isTouch ? swipeStart : undefined}
+              onPointerMove={isTouch ? swipeMove : undefined}
+              onPointerUp={isTouch ? swipeEnd : undefined}
+              onPointerCancel={isTouch ? swipeEnd : undefined}
               style={{
                 padding: "clamp(14px, 4vw, 20px)",
                 overflow: "hidden",
                 flex: 1,
                 position: "relative",
+                // phones: a finger sliding on the menu moves through it instead of scrolling the page
+                touchAction: isTouch ? "none" : undefined,
                 // the rows share whatever height the screen has, so the last one can never fall off the bottom
                 display: "flex",
                 flexDirection: "column",
@@ -2110,6 +2151,7 @@ activeGame === "maze" ? (
                 <div
                   key={`${menu}-${index}`}
                   className={isMane ? "mane-highlight" : undefined}
+                  onClick={isTouch ? () => tapRow(index) : undefined}
                   style={{
                     position: "relative",
                     // as tall as it used to be on a computer (44px); on a phone the rows shrink together to fit
@@ -2480,31 +2522,59 @@ activeGame === "maze" ? (
             </button>
           </div>
 
-          {/* Left thumb: one round pad. Touch it and slide, no need to lift your thumb to change direction */}
-          <div
-            className={`tp-dpad ${activeGame === "super" ? "tp-dpad-walk" : ""}`}
-            role="group"
-            aria-label="Direction pad"
-            onPointerDown={(e) => {
-              e.preventDefault();
-              e.currentTarget.setPointerCapture(e.pointerId);
-              tpMove(e);
-            }}
-            onPointerMove={(e) => {
-              if (e.currentTarget.hasPointerCapture(e.pointerId)) tpMove(e);
-            }}
-            onPointerUp={() => tpSet(null)}
-            onPointerCancel={() => tpSet(null)}
-            onLostPointerCapture={() => tpSet(null)}
-          >
-            {(["up", "down", "left", "right"] as const).map((d) => (
-              <span key={d} className={`tp-arrow tp-arrow-${d} ${padDir === TP_KEYS[d] ? "tp-on" : ""}`}>
-                <DpadArrow dir={d} />
+          {/* Left thumb. Pinkmane Void: two squares, walk left and walk right (slide between them without lifting).
+              Pink Maze needs all four directions, so it keeps the round pad. */}
+          {activeGame === "super" ? (
+            <div
+              className="tp-walk"
+              role="group"
+              aria-label="Walk left or right"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                tpWalk(e);
+              }}
+              onPointerMove={(e) => {
+                if (e.currentTarget.hasPointerCapture(e.pointerId)) tpWalk(e);
+              }}
+              onPointerUp={() => tpSet(null)}
+              onPointerCancel={() => tpSet(null)}
+              onLostPointerCapture={() => tpSet(null)}
+            >
+              <span className={`tp-sq ${padDir === "ArrowLeft" ? "tp-on" : ""}`}>
+                <DpadArrow dir="left" />
               </span>
-            ))}
-          </div>
+              <span className={`tp-sq ${padDir === "ArrowRight" ? "tp-on" : ""}`}>
+                <DpadArrow dir="right" />
+              </span>
+            </div>
+          ) : (
+            <div
+              className="tp-dpad"
+              role="group"
+              aria-label="Direction pad"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                tpMove(e);
+              }}
+              onPointerMove={(e) => {
+                if (e.currentTarget.hasPointerCapture(e.pointerId)) tpMove(e);
+              }}
+              onPointerUp={() => tpSet(null)}
+              onPointerCancel={() => tpSet(null)}
+              onLostPointerCapture={() => tpSet(null)}
+            >
+              {(["up", "down", "left", "right"] as const).map((d) => (
+                <span key={d} className={`tp-arrow tp-arrow-${d} ${padDir === TP_KEYS[d] ? "tp-on" : ""}`}>
+                  <DpadArrow dir={d} />
+                </span>
+              ))}
+            </div>
+          )}
 
-          {/* Right thumb: A = jump (hold it to fly with the jetpack) / OK in the menus, B = shoot or go down a pipe */}
+          {/* Right thumb: A = jump (hold it to fly with the jetpack) / OK in the menus,
+              S = shoot, or go down into the Void (the game's hints say PRESS S TO SHOOT, so the button says S) */}
           {activeGame === "super" && (
             <button
               className={`tp-btn tp-b ${tpBOn ? "tp-on" : ""}`}
@@ -2518,8 +2588,8 @@ activeGame === "maze" ? (
               onPointerCancel={() => tpB(false)}
               onLostPointerCapture={() => tpB(false)}
             >
-              <span>B</span>
-              <small>FIRE</small>
+              <span>S</span>
+              <small>FIRE/DOWN</small>
             </button>
           )}
           <button
@@ -3024,11 +3094,34 @@ activeGame === "maze" ? (
           width: 80%;
           height: 80%;
         }
-        /* Pinkmane Void: left / right are the main ones, up / down are small */
-        .tp-dpad-walk .tp-arrow-up,
-        .tp-dpad-walk .tp-arrow-down {
-          opacity: 0.5;
-          scale: 0.6;
+        /* Pinkmane Void: two squares, bottom left */
+        .tp-walk {
+          position: absolute;
+          left: max(10px, env(safe-area-inset-left));
+          bottom: max(12px, env(safe-area-inset-bottom));
+          z-index: 3;
+          display: flex;
+          gap: 8px;
+          touch-action: none;
+        }
+        .tp-sq {
+          width: min(22vh, 78px); /* SIZE of each square (sideways) */
+          aspect-ratio: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: rgba(255, 255, 255, 0.9);
+          background: rgba(17, 17, 17, 0.32);
+          border: 2px solid rgba(255, 255, 255, 0.6);
+          pointer-events: none;
+        }
+        .tp-sq .hh-arrow {
+          width: 50%;
+          height: 50%;
+        }
+        .tp-sq.tp-on {
+          color: #fff;
+          background: rgba(255, 143, 240, 0.9);
         }
         .tp-arrow.tp-on {
           color: #ff8ff0;
@@ -3056,6 +3149,9 @@ activeGame === "maze" ? (
         .tp-btn small {
           font-size: 7px;
         }
+        .tp-b small {
+          font-size: 6px; /* FIRE/DOWN is a long word for a round button */
+        }
         .tp-a {
           right: max(10px, env(safe-area-inset-right));
           bottom: max(12px, env(safe-area-inset-bottom));
@@ -3065,7 +3161,7 @@ activeGame === "maze" ? (
         .tp-b {
           right: calc(max(10px, env(safe-area-inset-right)) + min(15vh, 56px));
           bottom: calc(max(12px, env(safe-area-inset-bottom)) + min(27vh, 100px));
-          width: min(19vh, 70px); /* SIZE of the B button (sideways) */
+          width: min(23vh, 84px); /* SIZE of the S (fire / down) button (sideways) */
           font-size: 13px;
           background: rgba(138, 31, 134, 0.45);
         }
@@ -3092,6 +3188,13 @@ activeGame === "maze" ? (
             bottom: max(30px, env(safe-area-inset-bottom));
             width: min(44vw, 180px); /* SIZE of the round pad (upright) */
           }
+          .tp-walk {
+            left: 14px;
+            bottom: max(30px, env(safe-area-inset-bottom));
+          }
+          .tp-sq {
+            width: min(22vw, 90px); /* SIZE of each square (upright) */
+          }
           .tp-a {
             right: 14px;
             bottom: max(30px, env(safe-area-inset-bottom));
@@ -3100,7 +3203,7 @@ activeGame === "maze" ? (
           .tp-b {
             right: calc(14px + min(21vw, 84px));
             bottom: calc(max(30px, env(safe-area-inset-bottom)) + min(24vw, 96px));
-            width: min(20vw, 78px); /* SIZE of the B button (upright) */
+            width: min(23vw, 90px); /* SIZE of the S (fire / down) button (upright) */
           }
           .tp-rotate {
             display: block;

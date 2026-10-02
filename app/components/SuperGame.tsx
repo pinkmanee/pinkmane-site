@@ -3943,7 +3943,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       s.jetpack = true;
       s.bonus += 100;
       popup(ji.x + 9, ji.y - 4, "JETPACK!");
-      showHint("jet", "HOLD SPACE TO FLY");
+      showHint("jet", touchPadRef.current ? "HOLD A TO FLY" : "HOLD SPACE TO FLY");
       burst(ji.x + 9, ji.y + 9, 22, [PINK, "#ffc800", "#ffffff"], 70);
       playPowerUp();
     }
