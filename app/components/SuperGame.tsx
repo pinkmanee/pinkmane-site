@@ -28,10 +28,13 @@ type Mode =
   | "paused"
   | "home" // the pink start screen: PINK RUN INFINITE or PINK LEVELS
   | "levelSelect" // the list of levels
-  | "levelDone"; // you hit the bong
+  | "levelDone" // you hit the bong
+  | "shop" // the PINK SHOP (from the pink start screen)
+  | "cards" // your BOSS CARDS (from the pink start screen)
+  | "bossIntro"; // frozen on a boss's card right before his fight
 
 // The pause (Esc) menu, top to bottom
-const PAUSE_OPTIONS = ["RESUME", "RESTART", "PICK OUTFIT", "GAME TYPE", "HOME"];
+const PAUSE_OPTIONS = ["RESUME", "RESTART", "PICK OUTFIT", "SHOP", "GAME TYPE", "HOME"];
 
 // One column of the level
 type Column = {
@@ -65,9 +68,10 @@ type Enemy = {
 };
 type Leaf = { x: number; y: number; taken: boolean; small?: boolean; coin?: boolean }; // small = half size (words), coin = gold coin
 type Heart = { x: number; y: number; taken: boolean };
-type PowerKind = "fire" | "ice" | "double";
+type PowerKind = "fire" | "ice" | "double" | "spike";
 type PowerUp = { x: number; y: number; vx: number; vy: number; kind: PowerKind };
-type Fireball = { x: number; y: number; vx: number; vy: number; life: number; ice: boolean };
+// spike = one spike of a SPIKE SHOT, volley = which burst it belongs to (a burst can only hurt a boss once)
+type Fireball = { x: number; y: number; vx: number; vy: number; life: number; ice: boolean; spike?: boolean; volley?: number };
 type Particle = { x: number; y: number; vx: number; vy: number; color: string; life: number };
 type Popup = { x: number; y: number; text: string; life: number };
 type Entry = { name: string; score: number };
@@ -170,6 +174,12 @@ const ICE_AMMO = 5;
 const ICE_SPEED = 230;
 // Double-jump leaf (turquoise, rarest): 3 extra jumps in mid-air
 const DOUBLE_JUMPS = 3;
+// SPIKE SHOT (purple, bought in the shop): every shot throws spikes in every direction at once.
+// They fly straight and only about half as far as fire or ice.
+const SPIKE_AMMO = 4; // shots you get from one purple leaf
+const SPIKE_COUNT = 8; // spikes per shot (8 = every 45 degrees)
+const SPIKE_SPEED = 210;
+const SPIKE_LIFE = 0.6; // seconds a spike flies before it fades
 
 // Secret at the very start: walk LEFT instead of right. There's a jetpack and two signs
 // (one before the jetpack, one further left behind it). Hold jump to fly. It runs out once you reach this score.
@@ -252,6 +262,12 @@ function testStartZone() {
   const n = Number(q);
   return Number.isInteger(n) && n >= 1 && n <= ZONE_NAMES.length ? n - 1 : -1;
 }
+// On your own computer (localhost) every level is open, so you can test new ones straight away
+function localTesting() {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1";
+}
 // =====================================================================================
 // PINK LEVELS
 // =====================================================================================
@@ -267,9 +283,25 @@ function testStartZone() {
 const LEVEL_ZONE = 30; // the "weed fantasy" look
 // zone = the look (LEVEL_ZONE = Weedland, LEVEL_SNOW = snowy mountains), boss = which boss waits in the arena,
 // outfit = a picture PINKMANE wears only in this level (leave it out to wear your own outfit)
-type LevelDef = { name: string; map: string[]; signs: string[]; bossHp: number; zone?: number; boss?: "leaf" | "snowman"; outfit?: string };
+// music = songs that play through the whole level, one after another (mp3s in public/sounds/)
+type LevelDef = { name: string; map: string[]; signs: string[]; bossHp: number; zone?: number; boss?: "leaf" | "snowman"; outfit?: string; music?: LevelSong[] };
 const LEVEL_SNOW = 31; // the snowy mountain valley look
-const LEVELS: LevelDef[] = [
+const LEVEL_KEEP = 32; // LEVEL 3: Warlord's Keep (the dark cathedral with the wiggly drawings)
+// The songs for Level 3, played one after another (then back to the first).
+// Put each mp3 in public/sounds/ with exactly this file name. The title is what the little
+// purple box on the handheld shows for a few seconds when a song starts. A song whose file is
+// missing just gets skipped.
+// The handheld's music buttons (play/pause, next, previous, volume) control these while you play.
+type LevelSong = { file: string; title: string; artist: string };
+const KEEP_MUSIC: LevelSong[] = [
+  { file: "/sounds/king-baldwin-iv.mp3", title: "KING BALDWIN IV", artist: "WARLORD COLOSSUS" },
+  { file: "/sounds/stressin.mp3", title: "STRESSIN", artist: "WARLORD COLOSSUS" },
+  { file: "/sounds/dont-fight-skeletons.mp3", title: "DON'T FIGHT SKELETONS", artist: "WARLORD COLOSSUS" },
+  { file: "/sounds/hounskull.mp3", title: "HOUNSKULL", artist: "WARLORD COLOSSUS" },
+  { file: "/sounds/no-mana-no-health.mp3", title: "NO MANA, NO HEALTH", artist: "WARLORD COLOSSUS" },
+  { file: "/sounds/hexed-up.mp3", title: "HEXED UP", artist: "WARLORD COLOSSUS" },
+];
+const ALL_LEVELS: LevelDef[] = [
   {
     // Other name ideas: "BONG LVL 1", "THE FIRST HIT", "WEEDLAND", "GREEN DREAM", "HIGH GROUND"
     name: "PINKMANE LIKES WEED",
@@ -326,15 +358,189 @@ const LEVELS: LevelDef[] = [
       "########################...#######################......############################...#############################...##.......########################################################################################",
     ],
   },
+  {
+    // LEVEL 3: the boss level for WARLORD COLOSSUS (3 fights: horned warrior, skeleton knight, WARLORD)
+    // Other name ideas: "THE KEEP", "KING BALDWIN'S HALL", "NEPHILIM KEEP"
+    name: "WARLORD'S KEEP",
+    bossHp: 0, // not used here: this level has its own knights (see LEVEL 3 below)
+    zone: LEVEL_KEEP,
+    music: KEEP_MUSIC,
+    // Lore signs, in order (one per S on the map). Max ~40 characters per line, \n = new line.
+    signs: [
+      "WELCOME TO WARLORD'S KEEP",
+      "PINKMANE FOUND WARLORD COLOSSUS WHEN\nHEXED UP (2020) DROPPED. FAN EVER SINCE",
+      "WARLORD MAKES SHADOW RAP",
+      "THE HORNED WARRIOR: 3 SHOTS, THEN HE\nRAGES. JUMP HIM, GET AMMO FROM THE BOX",
+      "INFLUENCES: DMX, FLATBUSH\nZOMBIES AND $UICIDEBOY$",
+      "THE SKELETON KNIGHT IS NEXT.\nSHOTS WON'T WORK: JUMP ON HIM!",
+      "WARLORD LEADS THE NEPHILIM GANG\nAND RUNS NEPHILIM RECORDS",
+      "FIND WARLORD COLOSSUS ON\nSPOTIFY AND SOUNDCLOUD",
+      "HIS SHIELD BLOCKS SHOTS. JUMP ON HIS\nHEAD AND DODGE THE WAVE FROM HIS EYES!",
+      "YOU BEAT THE WARLORD!\nGO HIT THE BONG",
+    ],
+    map: [
+      "........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................",
+      "........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................",
+      "........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................",
+      "....................................................................................C...................................................................................................f..........................L..f....................C.......................................................................................................................C......f.............................................................................................................................",
+      "...................C..............................L..L................f...............................H...f...................................................L..L....................C...................................................---.................f............H.........................................................f.............LLL................f.........................L..L...........H........f...............................................................................",
+      "..................=?==............................----....................LLL......=?=...............---.................................?......?.............=?==..................----...........LLL............=?=.................---.................................==?=.....................................................................###............=?=...........................----..........=?==......................................................................................",
+      "........LLL...........................LLLLLL..............................###.....................................LLL..........................................................w...................###............................---.....................LLL.................................................................LLL...............######......w...................................................................LLL.....................................................................",
+      "...S..........S.........w.............######..w..........S........w.......######........w...w.................S.........w......H...M................................w.......######..........S......###.....w...w..............................w...................w...w.........S...w..............K......................S.......w..........#########...######...................w..w..w.................S.........w...............w...........S........W........................S.......B.............",
+      "############################..###############################...################################..##########################..##########################################...#####################..####..######################...################..#####################################..##############################################...###########...###################################..#######...####################..##########################################################################",
+      "############################..###############################...################################..##########################..##########################################...#####################..####..######################...################..#####################################..##############################################...###########...###################################..#######...####################..##########################################################################",
+    ],
+  },
 ];
+
+// =====================================================================================
+// LEVEL 3: WARLORD'S KEEP
+// =====================================================================================
+// Map letters only this level uses (each one starts an arena, exactly one screen wide, keep it flat):
+//   M  the HORNED WARRIOR: fast! You start with HORNED_AMMO shots and ONE double jump. After those
+//      shots he RAGES (even faster): double jump over him and bump the ? boxes for more ammo.
+//      Jumping on him just bounces you off.
+//   K  the SKELETON KNIGHT: quick, long sword swings. Shots bounce off, jump on his head.
+//   W  WARLORD COLOSSUS: huge sword + shield. The shield blocks every shot, jump on his head.
+//      He throws you off after every hit, and shoots sound waves out of his eyes.
+// Which Warlord to use: "A" = beaked helmet + crown, "B" = the photo version (face mask + gold cross)
+const WARLORD_LOOK: "A" | "B" = "A";
+const HORNED_HP = 6; // shots to beat the horned warrior
+const HORNED_AMMO = 3; // shots you start the fight with (the ? boxes give +3 and a double jump)
+const HORNED_SPEED = 72; // how fast he runs at you (you run at 100)
+const HORNED_RAGE_SPEED = 108; // once he rages: faster than you, so you have to jump over him
+// His spiked ball never swings higher than his own head, and the chain doesn't go out as far as it
+// used to: a double jump over him now clears the ball. He also never starts a big swing while you're in the air.
+const HORNED_BALL_UP = 28; // how high the ball can rise above his hand
+const HORNED_SWING_REACH = 26; // extra chain he lets out on a big swing (was 44)
+const SKELETON_HP = 5; // stomps to beat the skeleton knight
+const SKELETON_REACH = 58; // how far his sword reaches in front of him
+const WARLORD_HP = 6; // stomps to beat WARLORD COLOSSUS (he gets faster + angrier at half)
+const KEEP_TILE = 318; // the cathedral backdrop repeats every 318px (pillar to pillar)
+type KnightKind = "horned" | "skeleton" | "warlord";
+type Knight = {
+  kind: KnightKind;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  hp: number;
+  maxHp: number;
+  hit: number; // flashes white after a hit
+  inv: number; // can't be stomped again until this runs out
+  dead: number; // counts down while he falls apart
+  facing: number; // -1 = looking left
+  act: "walk" | "wind" | "swing" | "rest" | "stagger" | "hop" | "beam";
+  timer: number;
+  cool: number; // time until the next attack
+  ang: number; // horned: where the mace is on its circle. warlord: sword angle
+  reach: number; // horned: chain length
+  waves: number; // warlord: sound waves still to fire in this blast
+};
+// w/h = size on screen, scale = pixel size, foot = how far down his feet are, hb = his body (left..right),
+// top = top of his head (where you land on him)
+const KN_DIM: Record<KnightKind, { w: number; h: number; scale: number; foot: number; hb: [number, number]; top: number }> = {
+  horned: { w: 48, h: 52, scale: 2, foot: 52, hb: [8, 40], top: 6 },
+  skeleton: { w: 56, h: 66, scale: 2, foot: 58, hb: [18, 42], top: 10 },
+  warlord: { w: 108, h: 102, scale: 3, foot: 102, hb: [30, 96], top: 8 },
+};
+const KN_NAMES: Record<KnightKind, string> = { horned: "HORNED WARRIOR", skeleton: "SKELETON KNIGHT", warlord: "WARLORD COLOSSUS" };
+// Warlord's giant sword: where his back hand holds it, and the angles of the swing (radians, 0 = pointing right)
+const WL_PIVOT = WARLORD_LOOK === "A" ? { x: 85, y: 81 } : { x: 88, y: 79 };
+const SW_IDLE = (-65 * Math.PI) / 180; // resting over his shoulder
+const SW_BACK = (-15 * Math.PI) / 180; // pulled back before the swing
+const SW_SLAM = (-190 * Math.PI) / 180; // smashed into the floor in front of him
+const SW_GRIP = 52; // which row of WL_SWORD sits in his hand
+const KNIGHT_DUST = ["#2c3038", "#5c636f", "#a9b2bf", "#ffffff"];
+// WARLORD's eyes (where the sound waves come out), measured on his picture facing left
+const WL_EYES = WARLORD_LOOK === "A" ? { x: 52, y: 22 } : { x: 54, y: 22 };
+const EYE_WAVE_SPEED = 120; // how fast his sound waves fly
+const EYE_WAVES = 2; // sound waves per blast (fired one after the other, each aimed at you)
+
+// Mirrors a picture left-to-right (kept, so it isn't redone every frame)
+const flipCache = new Map<string[], string[]>();
+const flipRows = (rows: string[]) => {
+  let f = flipCache.get(rows);
+  if (!f) {
+    f = rows.map((r) => r.split("").reverse().join(""));
+    flipCache.set(rows, f);
+  }
+  return f;
+};
+// Same picture, every colour white (for the hit flash)
+const whiteCache = new Map<Record<string, string>, Record<string, string>>();
+const whiteOf = (colors: Record<string, string>) => {
+  let w = whiteCache.get(colors);
+  if (!w) {
+    w = Object.fromEntries(Object.keys(colors).map((k) => [k, "#ffffff"]));
+    whiteCache.set(colors, w);
+  }
+  return w;
+};
+
+// ---- Level 3 art (made from your Procreate edits). Frames with 8 pictures = the wiggly drawings moving ----
+const KN_SKEL = [["............................", "............................", "............................", "............................", ".........AAAABBBCCCB........", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", "........AAAAABBBCCCB........", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", "........AAAAABBBBCCCB.......", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", "........AABAAABBBBCCCB......", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", ".........AAAAAABBBCCCB......", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", "..........AAAAABBBCCCB......", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", "..........AAAAABBCCCB.......", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", "..........AAAABBBCCB........", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"]];
+const KN_SKEL_COLORS: Record<string, string> = {"A": "#121216", "B": "#121215", "C": "#111116", "D": "#eef2f6", "E": "#41454e", "F": "#7a808b", "G": "#a9b2bf", "H": "#ece6d6", "I": "#b9b0a0", "J": "#f0c030", "K": "#5a3a22", "L": "#26262a", "M": "#8c8c90"};
+const KN_ONI = [["...................", "...................", "...................", "...................", "...................", "...A.A....BBBBC....", "...AADEE...B.BDC...", ".....FG.....G......", "......GHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...................", "...A........BC.....", "...AAAE.....BBBC...", "...ADDG.....G......", "......GHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "....A..............", "...A..E.....B......", "...A..E.....BBBC...", "...AADG.....GDB....", "......GHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", ".....A.............", "....A..............", "....A..E....B.B....", "...AA.E.....BBC....", "...AAAG.....GBB....", ".....DGHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", ".....A.............", ".....A..E....C.....", "....AA.E....BB.....", "....AA.E....BB.....", "....DAG.....GB.....", ".....DGHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", ".....A.............", ".....A..E...BC.....", ".....A..E.BBBD.....", ".....A..E...BB.....", ".....DGB....G......", "......GHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "....AA.....BBC.....", ".....AA.E.BBB......", ".....DAB....B......", ".....DG.....G......", "......GHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........B.......", "...AAAAE..BBBCC....", ".....DA.E..BD......", ".....FGB....G......", "......GHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."]];
+const KN_ONI_COLORS: Record<string, string> = {"A": "#3a0c1a", "B": "#3a0b1a", "C": "#3a0c19", "D": "#3b0c1a", "E": "#3b0b1a", "F": "#3b0c19", "G": "#121216", "H": "#c4282e", "I": "#ffe14a", "J": "#7a1418", "K": "#eef2f6", "L": "#26262a"};
+const KN_CROW = [["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAA......", "....AAAA.AAAB......", ".....AAAAAACCB.....", "......AAAAAA.BB....", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAA......", "....AAAA.AAAB......", ".....AAAAAACCB.....", "......AAAAAA.BB....", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAA......", "....AAAA.AAAB......", ".....AAAAAACCBB....", "......AAAAAA.......", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAA......", "....AAAA.AAABBB....", ".....AAAAAACCB.....", "......AAAAAA.......", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAAB.....", "....AAAA.AAABBB....", ".....AAAAAACC......", "......AAAAAA.......", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAAB.....", "....AAAA.AAABBB....", ".....AAAAAACC......", "......AAAAAA.......", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAAB.....", "....AAAA.AAABB.....", ".....AAAAAACCBB....", "......AAAAAA.......", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAA......", "....AAAA.AAABB.....", ".....AAAAAACCB.....", "......AAAAAA..B....", "......AAAAA........", "...................", "...................", "...................", "..................."]];
+const KN_CROW_COLORS: Record<string, string> = {"A": "#1e1e28", "B": "#511d1b", "C": "#ffaa28"};
+const KN_MACE = [["..........................", "..........................", "..........................", "..........................", "...............A..........", "...............B..........", ".............BB...........", "......C....BBB............", "......C....AA.............", "......C.....A..AADDDD.....", ".......BCCC.AAAA.DDD......", "..........A.AEA.A.........", "..........AAEEEA.....A....", "....C.CDD.AEEFEEA...BA....", ".....A..DAEEFAFEEA.AA.....", ".........DAEEFEEA.A.A.....", "...........AEEEA..........", "..........AAAEAAA.........", ".........AAA.AA.AAACC.....", ".......BBBBA..A.....C.....", ".......B......A.....A.....", ".......A......C.....A.....", "........A...CC............", "..........................", "..........................", "..........................", ".........................."], ["..........................", "..........................", "..........................", "..........................", "..............A...........", "...............B..........", ".......C......BB..........", "......CC.....BB...........", ".......C...AA......D......", ".......A....A......D......", ".......BCC.AAA..ADDD......", ".......CCCA.AEAAA....A....", "..........CAEEEA....AA....", "....C.CDD.AEEFEEA..AA.....", ".....A...AEEFAFEEA.A......", "..........AEEFEEA.A.......", "...........AEEEAA.........", "..........AAAEA.AA........", "........BAA..AAA.AACC.....", ".......BBBB...A....C......", ".......B......A....C......", "........B....C.....A......", "........A..CC......A......", "........AA................", "..........................", "..........................", ".........................."], ["..........................", "..........................", "..........................", "..........................", "............AA............", "..............B...........", ".......C......BB..........", ".......CC.....B...D.......", "........A...AA....D.......", ".......A....A.....DD......", ".......B...AAA...ADD......", ".......CCCA.AEAAAAD.AA....", "..........CAEEEA...AAA....", "....C.C.D.AEEFEEA..A......", ".....A.D.AEEFAFEEAA.......", "..........AEEFEEA.A.......", "...........AEEEAAA........", "........AAAAAEA.AAA.......", "........BBA..AAA...C......", "........B.....A....C......", "........B....A....C.......", "........AB..C.....C.......", ".........B.CC......A......", "........AAA...............", "..........................", "..........................", ".........................."], ["..........................", "..........................", "..........................", "..........................", "...........A..............", "............BB............", ".......C.....BB...........", ".......CC.....BB.DD.......", "........A....AA..DD.......", "........B....A...DD.......", "........B...AA...AD.......", "........CCA.AEAAAAD.A.....", "........CCAAEEEAA..AA.....", "..........AEEFEEAAA..A....", "....CAC.DAEEFAFEEAA.......", ".......D..AEEFEEAA........", "...........AEEEAA.A.......", "........AAAAAEA.AAA.......", "........AB...AA...A.......", "........BB...A....C.......", "........BB..A.....C.......", ".........B.CC.....C.......", "........AB..CC.....A......", ".........A................", "..........................", "..........................", ".........................."], ["..........................", "..........................", "..........................", "..........................", "...........A..............", "...........B..............", "...........BBB............", "......CCC....BB..DD.......", ".........B...AA..D........", "........BC....A..D........", "........CC..AA...D........", "........C.A.AEAAAA........", "........CCAAEEEAAA.AA.....", "..........AEEFEEAAA.A.....", ".....A...AEEFAFEEA..AA....", "....C.CDDDAEEFEEAA...A....", "...........AEEEAA.A.......", ".........AAAAEA.AA........", ".........A...AA..A........", ".........BB.AA...A........", ".........BB.A....CC.......", ".........BB.CC....CAA.....", "......AAAB....CC..........", "..........................", "..........................", "..........................", ".........................."], ["..........................", "..........................", "..........................", "..........................", "............A.............", "...........B..............", "..........BBB.............", "...........BAB...DA.......", ".....CCCAB...AA.DDDD......", "......C..C....A.AD........", ".........C...A..AD........", ".........CA.AEAAA.........", "..........CAEEEA.A.A......", "..........AEEFEEAAAA......", ".....A...AEEFAFEEA..A.....", "....C.CDDAAEEFEEA...AA....", ".........D.AEEEAA....A....", "..........AAAEA.AA........", ".........AA..A...A........", ".........AB.A....A........", "..........B.A....CCCAA....", "......AABBBB.CC...........", "...............CC.........", "..........................", "..........................", "..........................", ".........................."], ["..........................", "..........................", "..........................", "..........................", "..............A...........", "............BA............", "..........BB..............", "..........BAB.............", ".....C..AB..AA..DDDA......", ".....CCA.CC...ACD..DD.....", ".........CC..A.AA.........", ".........CA.AEAAA.........", "..........CAEEEA.A........", "..........AEEFEEAAA.......", ".....A.D.AEEFAFEEA.A......", "....C.C.DAAEEFEEA..AAA....", ".........D.AEEEAA...AA....", "..........AAAEA.A.........", "..........A..A..AA........", "..........A.A...A..CC.....", ".......BBBBB.A...CC..A....", "......A..BB...CC..........", "...............CC.........", "..........................", "..........................", "..........................", ".........................."], ["..........................", "..........................", "..........................", "..........................", "...............A..........", ".............BB...........", "...........BBB............", "..........BB..............", ".....C.....AA.............", ".....CCACCC..A.ADDDDD.....", "..........C.AAAAA.........", "..........A.AEA.A.........", "..........AAEEEA..........", ".......D..AEEFEEAA...A....", "....CAC.DAEEFAFEEAAABA....", "........DAAEEFEEA..AAA....", ".........D.AEEEA....A.....", "..........AAAEAAA.........", "..........AA.AA.A...C.....", ".......BBBBA.A..AACCC.....", ".......BBBBB..A......A....", "......AA.......C..........", "......A.......CC..........", "..........................", "..........................", "..........................", ".........................."]];
+const KN_MACE_COLORS: Record<string, string> = {"A": "#121216", "B": "#111116", "C": "#121215", "D": "#111115", "E": "#cfd6df", "F": "#8a93a1"};
+const KN_HORNED = ["..ABAA............AACAA.", "..ADDAAAAAAAAAAAA.ADDAA.", "..ADDAAAAAAAAAAAAEADDAA.", "...ADDBDDBDDBDDBDADDAA..", "....ADBDDBDDBDDBDDDAA...", ".....ABDDBDDBDDBDDAA....", ".....ADDFGFGFGFGDDAH....", "....ABBDGFGFGFGFDBBAA...", "....ABBDFGFGFGFGDBBAA...", "....ABBDGFGFGFGFDBBAA...", "....ABBDIIJIIJIIDBBAA...", "....ABBDDJJJJJJDDBBAA...", "....ABBAAJJJJJJAABBAA...", ".AAAKKLLLLLLLLLLLLKKAAA.", "AMIILLLLLLLKKLLLLLLLLLAA", "AMNMLLLLLLLKKLLLLLLLLLAA", "AMMILLLLLLLKKLLOLLLLLLAA", "ANMILLLOLLLKKLLLLLLLLLAA", "APNILLLLOLLKKLLLLLLLLLAA", "AMQMLLLLLLLKKLOLLLLLLLAA", "AIMMLLLLLLLKKLLLLLLLMMAA", "AIMMLLKKKKKKKKKKKKLLMMAA", ".ARAAAKKKKKKKKKKKKAAAAS.", ".ARAAAADDDAAAADDDATAAA..", ".ARA..ADDDAAAADDDAA.....", ".AAA..ADDDA..ADDDAA....."];
+const KN_HORNED_COLORS: Record<string, string> = {"A": "#121216", "B": "#8c8c90", "C": "#1a1a1e", "D": "#26262a", "E": "#131317", "F": "#41454e", "G": "#7a808b", "H": "#151519", "I": "#d9a07a", "J": "#3a2418", "K": "#8a93a1", "L": "#cfd6df", "M": "#3b0c1a", "N": "#2f3a4a", "O": "#8a5530", "P": "#3a0f1d", "Q": "#391220", "R": "#5a3a22", "S": "#181619", "T": "#18181d"};
+const KN_SKEL_WALK = [[".AAAA..", ".BABA..", ".AAAA..", "..BAB.C", "ABAAABD", "..ABA..", ".A...A."], [".AAAA..", ".BABA..", ".AAAA..", "..BAB.C", "ABAAABD", "..ABA..", "..A.A.."]];
+const KN_SKEL_WALK_COLORS: Record<string, string> = {"A": "#ece6d6", "B": "#121216", "C": "#eef2f6", "D": "#5a3a22"};
+const WARLORD_A = [[".................ABABABABA..........", ".................ABBBBBBBA..........", ".................ACBDBDBCA..........", ".................AEEEEEEEA..........", "................AEFFFEEEEEA.........", "...............AEFFFFEEEEEEA........", ".............AAFEEGEEEEEEHHA........", "...........AAFAIIAAIAAEEEHHA........", ".........AAFFEEEEEEEEEEEEHHA........", ".......AAFFEEEAEEEEEEEEEEHHA........", "......AFFEEEAEEEEEEEEEEEEHHA........", ".....AFHAHAEEEAEEEEEEEEEEHHA........", "......AA.AHHAEEEEEEEEEEEEHHA........", "..........AAAHHHEEEEEEEEEHHA........", "..........AAAAAJKJKJKJKJKJKAAAAA....", ".........AEFFFEKJKJKJKJKJKJEFFFEA...", ".........AEEEEEJKJKJKJKJKJKEEEEEA...", "..........AAAAEEEEEEFHEEEEEAAAAA....", ".........AEFEEEEFFEEFHEEHHHEFEEEA...", ".........AEEEEEEFFEEFHEEHHHEEEEEA...", ".........AEEEEEEFFEEFHEEHHHEEEEA....", ".........AEFEEEEFFEEFHEEHHHEEFEA....", "..........AAAAAAAAAAAAAAAAAAAAA.....", ".........AEEEEEEEEEEFHEEHHHEEEEA....", ".........AEEEEEEEEEEFHEEHHHEEEEA....", "........AHHHHHADDDDDBBDDDDAEEEEA....", "........AHHHHHEFFEEEEEEEHHHHHHHA....", ".........AAAAAAAAAAAAAAAHHHHHHHA....", ".............AEFFEEEEEEEHHHAAAA.....", ".............AEEEEEEEEEEHHHA........", "..............AEFEEAAAEFEEA.........", "...............AAAA...AAAA..........", "..............AEEEEA.AEEEEA.........", ".............AHHHHHA.AHHHHHA........"], [".................ABABABABA..........", ".................ABBBBBBBA..........", ".................ACBDBDBCA..........", ".................AEEEEEEEA..........", "................AEFFFEEEEEA.........", "...............AEFFFFEEEEEEA........", ".............AAIEEGIEEEEEHHA........", "...........AAFILIIILIIEEEHHA........", ".........AAFFEEDEEEDEEEEEHHA........", ".......AAFFEEEAEEEEEEEEEEHHA........", "......AFFEEEAEEEEEEEEEEEEHHA........", ".....AFHAHAEEEAEEEEEEEEEEHHA........", "......AA.AHHAEEEEEEEEEEEEHHA........", "..........AAAHHHEEEEEEEEEHHA........", "..........AAAAAJKJKJKJKJKJKAAAAA....", ".........AEFFFEKJKJKJKJKJKJEFFFEA...", ".........AEEEEEJKJKJKJKJKJKEEEEEA...", "..........AAAAEEEEEEFHEEEEEAAAAA....", ".........AEFEEEEFFEEFHEEHHHEFEEEA...", ".........AEEEEEEFFEEFHEEHHHEEEEEA...", ".........AEEEEEEFFEEFHEEHHHEEEEA....", ".........AEFEEEEFFEEFHEEHHHEEFEA....", "..........AAAAAAAAAAAAAAAAAAAAA.....", ".........AEEEEEEEEEEFHEEHHHEEEEA....", ".........AEEEEEEEEEEFHEEHHHEEEEA....", "........AHHHHHADDDDDBBDDDDAEEEEA....", "........AHHHHHEFFEEEEEEEHHHHHHHA....", ".........AAAAAAAAAAAAAAAHHHHHHHA....", ".............AEFFEEEEEEEHHHAAAA.....", ".............AEEEEEEEEEEHHHA........", "..............AEFEEAAAEFEEA.........", "...............AAAA...AAAA..........", "..............AEEEEA.AEEEEA.........", ".............AHHHHHA.AHHHHHA........"]];
+const WARLORD_A_COLORS: Record<string, string> = {"A": "#0c0c10", "B": "#f0c030", "C": "#a8800f", "D": "#8a1820", "E": "#3b404b", "F": "#7d8695", "G": "#a8b0bd", "H": "#22252c", "I": "#ff2a2a", "J": "#565c67", "K": "#2a2d34", "L": "#ffb0a0"};
+const WARLORD_B = [["................AABAABAABA..........", "...............ABBBCBBBCBBA.........", "..............ABBCBBBCBBBBBA........", "..............ABBBBBBBBBCBBA........", ".............ABBBBBBBBBBBBBBA.......", ".............ABCDDDDDDDDEECBA.......", "............ABBBAADDAADDEEBBBA......", ".............ABBDADDDADDEEBBA.......", "............ABBBFFFFFFFFFEBBA.......", ".............AAFFGGGFFFFFFBBBA......", ".............AAFFGGGFFFFFFBBA.......", "............AHAFFFFFFFFFFHAA........", "............AHIIHHHHJJJJJJJA........", "............AHHHHHHHJJJJJJJA........", ".........AAAAJJJJJJJJJJJJJJAAAAA....", "........AKLKLHHHHHHHHHHHHJJJLKLKA...", "........ALKLKHHIIIMNNMHHHJJJKLKLA...", "........AKLKLHHIIHHMMHHHHJJJLKLKA...", "........ALKLKHHIIHHMNHHHHJJJKLKLA...", "........AKLKLHMIIHHMMHHHHMJJLKLKA...", "........ALKLKHMMMMMMMMMMMMJJKLKLA...", "........AKLKLHMMNMMMMMMNMMJJLKLKA...", "........ALKLKHMIIHHMMHHHHMJJKLKLA...", "........AKLKLHHHHHHMMHHHHJJJLKLKA...", ".......ADDDODJJJJJJMMJJJJJJJKLKLA...", ".......ADPODDJJJJJMNNMJJJJJJQQQQA...", ".......ADDDDDLKLKLKLKLKLKLKLDODDA...", "........AAAAAKLKLKLKLKLKLKLKPDODA...", "............ALKLKLKLKLKLKLKLAAAA....", "............AKLKLKLKLKLKLKLKA.......", ".............AGGGGGAAAGGGGGA........", ".............AGGGGGA.AGGGGGA........", "............AFFFFFFA.AFFFFFFA.......", "............AFFFFFFA.AFFFFFFA......."], ["................AABAABAABA..........", "...............ABBBCBBBCBBA.........", "..............ABBCBBBCBBBBBA........", "..............ABBBBBBBBBCBBA........", ".............ABBBBBBBBBBBBBBA.......", ".............ABCDDDDDDDDEECBA.......", "............ABBBAADDAADDEEBBBA......", ".............ABBRADDRADDEEBBA.......", "............ABBBFFFFFFFFFEBBA.......", ".............AAFFGGGFFFFFFBBBA......", ".............AAFFGGGFFFFFFBBA.......", "............AHAFFFFFFFFFFHAA........", "............AHIIHHHHJJJJJJJA........", "............AHHHHHHHJJJJJJJA........", ".........AAAAJJJJJJJJJJJJJJAAAAA....", "........AKLKLHHHHHHHHHHHHJJJLKLKA...", "........ALKLKHHIIIMNNMHHHJJJKLKLA...", "........AKLKLHHIIHHMMHHHHJJJLKLKA...", "........ALKLKHHIIHHMNHHHHJJJKLKLA...", "........AKLKLHMIIHHMMHHHHMJJLKLKA...", "........ALKLKHMMMMMMMMMMMMJJKLKLA...", "........AKLKLHMMNMMMMMMNMMJJLKLKA...", "........ALKLKHMIIHHMMHHHHMJJKLKLA...", "........AKLKLHHHHHHMMHHHHJJJLKLKA...", ".......ADDDODJJJJJJMMJJJJJJJKLKLA...", ".......ADPODDJJJJJMNNMJJJJJJQQQQA...", ".......ADDDDDLKLKLKLKLKLKLKLDODDA...", "........AAAAAKLKLKLKLKLKLKLKPDODA...", "............ALKLKLKLKLKLKLKLAAAA....", "............AKLKLKLKLKLKLKLKA.......", ".............AGGGGGAAAGGGGGA........", ".............AGGGGGA.AGGGGGA........", "............AFFFFFFA.AFFFFFFA.......", "............AFFFFFFA.AFFFFFFA......."]];
+const WARLORD_B_COLORS: Record<string, string> = {"A": "#0c0c10", "B": "#1c1712", "C": "#3a2c22", "D": "#d9a07a", "E": "#a8714f", "F": "#18181c", "G": "#2c2c32", "H": "#8fa4bd", "I": "#d4e0ee", "J": "#566a82", "K": "#26292f", "L": "#4c515b", "M": "#e2b33a", "N": "#9a7516", "O": "#c8323c", "P": "#3a6a3a", "Q": "#c9ced6", "R": "#ff2a2a"};
+const WL_SHIELD = [".KKKKKKKK.", "KggggggggK", "KgRRGGRRgK", "KgRRGGRRgK", "KgRRGGRRgK", "KgGGGGGGgK", "KgGGGGGGgK", "KgRRGGRRgK", "KgRrGGrRgK", ".KgRGGRgK.", ".KgrGGrgK.", "..KgGGgK..", "..KgggK...", "...KggK...", "....KK...."];
+const WL_SHIELD_COLORS: Record<string, string> = {"K": "#0c0c10", "g": "#a8800f", "G": "#f0c030", "R": "#b8202c", "r": "#6e1218"};
+const WL_SWORD = ["...K...", "..KWK..", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", ".KWWwK.", "KKKKKKK", "GGGGGGG", "KKKKKKK", "..KLK..", "..KLK..", "..KLK..", "..KLK..", ".KGGGK.", "..KKK.."];
+const WL_SWORD_COLORS: Record<string, string> = {"K": "#0c0c10", "W": "#eef2f6", "w": "#9aa3b0", "G": "#f0c030", "L": "#4a2e1a"};
+// =====================================================================================
+// THE WARLORD SWITCH
+// =====================================================================================
+// false = visitors of the real site see nothing of WARLORD COLOSSUS: Level 3 says "coming soon"
+//         on the map and can't be played, and his skin and the three Level 3 boss cards are gone.
+//         On your own computer (localhost) everything still shows, so you can keep working on it.
+//         To see exactly what visitors see, open  http://localhost:3000/?visitor=1
+// true  = everything is live for everyone. Change false to true the day he says yes.
+const WARLORD_LIVE = false;
+// What the map says on the Level 3 stop while it's hidden
+const WARLORD_SOON_TEXT = "WARLORD LEVEL COMING SOON";
+function warlordShown() {
+  if (WARLORD_LIVE) return true;
+  if (!localTesting()) return false;
+  return new URLSearchParams(window.location.search).get("visitor") === null;
+}
+const WARLORD_SHOWN = warlordShown();
+const WARLORD_STOP = ALL_LEVELS.findIndex((lv) => lv.zone === LEVEL_KEEP); // his stop on the map
+// The levels the game actually uses (without Level 3 while it's hidden)
+const LEVELS: LevelDef[] = WARLORD_SHOWN ? ALL_LEVELS : ALL_LEVELS.filter((lv) => lv.zone !== LEVEL_KEEP);
+
+const KEEP_IMAGES: Record<string, string> = {
+  back: "data:image/png;base64,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",
+  vines: "data:image/png;base64,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",
+  grey: "data:image/png;base64,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",
+  candles: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAVAAAACACAYAAABdoTFCAAABvElEQVR42u3YO0oDYRiG0S+Ti4iKQQsvIGJlYa0GtHIJgthbuAI3Y+MG3INVBMUVWNqIjaKEGMzVLigyGAbNCJ5TpfhJMQ95J/wRAAAAAAAAAAD/2uBid/ATZ9CJ7AppIQt79cJ3sdPOML4fpU46kV+nxJvSPxp0I1unxCMDyMaAAoxjQN3R5G+UBjrpxniUPsZrXx8Nkm4jSjvnqSE70xuRdJ6iN7kaEXVPMAethf1IOo/Rnt1MbfC6dBjFt4foTq3rlJPmynGUmrfRm1hMbdBYO4nKy030y/M65aRdrUWxdRf98lxUtk4LaS+37uXBoF+aicr22fDM8MPz/dWny9Pqcu3LF41yht+lk1b8nU7uQAEyMqAABhTAgAIYUAADCoABBTCgAAYUwIACGFAADCiAAQUwoAAGFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAU7z7AlOmqMd6lAAAAAElFTkSuQmCC",
+  title: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAVAAAACACAYAAABdoTFCAAAQZklEQVR42u3dW3MbR5IF4JNZjQvvlCxrxjEP+///1MbuODZkSbziDnRXnX2obqDRbICg7PXMmudTOEIkgSZAN1NVWVlZgIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIyHs1D4HP5tRPQkTkrQHUA9vBdNb6uLFw59oVZOX/J9ePQNr+Owz41BPo3mppTsfuMgWBIYhlK1iuPDDBsIJh3gmiS3eW7px2RrD3oXjza5uEwLU7l3/A+xJRAJWD/iOWRgC/N4i6Gc5SMgD4FgomEMOUjACaQFYCuEzRblI0wDCtg+jcnQ7DEoaB2f51efxlPXjgxp3N6Pc5FHQASxgMxDTsv6+FBz4rsIoCqPxRPqRoAT8eU6bmBNP24ysmbCzfanceYPW1I4lJHbwuUrQhDCt3DgGMUrTrFA3gXiogHPm+dx5IM5RmGIKYeeBNrOwyRqMZ7mnohsqNGUYgVu5chMDvoeA/vVBAFZEftwg/HkRW7vxqOVTNQsHli+n5Lox186KLzghxYvs50okHPh14be2R5FM9bW8+fqy/tjDnqifnOvfApQeWdU52pbysaAQqP6o8MFWehMCFO38thr0PmJkTMPyN0fKUO22n8g1rjW7LTkA9j3HvsdfM0/7txyla3zR+4oHD1jNvY7QKhmWdQ2X9nPP6emVn8YoAzlK0QUo2SqmTOBBRAJUTzeqpcJ9BHXJ+TrH/6waMUzsI7l/nvyzQOumCub1cRNpnWLvzoQ60fdN4gujGVYLbb2+t93OWkk3qV9EeabZHsE7gPgw0ChUFUHmbyyM50EUdXHqn7uZsh9XnEMjOdT4a0A29n2Jl3UDbVgEoAIQ6Qqaex9ykZNWL95HM6usauRcgf2K0tdn2F+AyRRuAuK8fEw24aL2bJkequ0MUQOVVMREzd37vLKj8lKLRclBr++IFYcB5a7pewjDoPG4MInWC5TQU9APx89GcYxBrGG6Yr30o1AYS005OtUkX3DKZdYL5dSddcJ6SndeLT+OUzOt/FEpzDshtABdRAJWjbpnsMiW7MPZMl4HK9heALpjATmj7FCsrW59rypS6I0iSOOsEs+11DVjBcN5KCxwKZBdMVnSCZPuhp4wfz1KyJugvYfA6DbA01y+LKIDKG28QEg+dVe8IQ+T+SLDAy6l5M3VeeuDEA2NdyhRb+cj/9IKHSpOW7kz19HqbQvDA+VuWeFoPrdy3q/GNhLwy3w3o3z3wJkUbkjZIyS5TftVPQSVOogAqJ0owfIzVNgzNQuAIxE8p7k2JCwO8J2+6NgNAbADcxspWBIatGtHLF+PWbGXOAsC4s4IfzfApRTscL3df+ub7C1ZDJnzoPNcAtBfMHut0ws8934MkBprGiwKonGLas0MnkFjUQaqEbbdmLsz3VrobAwBT7ILeNZMNsVvx/twKVHPL+YKlOYMBM/PeEfEhc3NWrSB+btgL6QmGWcg7lUp3btxZkHvz/HMmzA9kWQkgqL5JRF7zPRRc96w6dxt/rFtBtq8pyLznGnN3rlqfX7hz4oGl5cBW2q5k6cW0/kh3p0Vvs5Ld55bujGZce+CqLprv7o9fHimnWnWK80U0ApVeQxJV2o8Vs57g0f7EpjNyW7oz9ozmVuaw1qivgqEAkSznJB/dcUZi1RMQacDXA3lI673BiUkddB1AZYZRijaui+bPeqbq0wPlSivmGtSpyplEAVSOuUnR0JmSr81fFKtXRwJYCcN1K3/aOGNCe6/Pdb1AUzEvRv3EhIEBgenFiDOZ46pnGj93Z9kTQXNw3gX4gsTiyChyDcMoEdOeke5tHWwL5UFFAVRes8L+7pwzphc5QO+M9l4dEjYjwc7o1mC4YLIlDM8wFCnZAobCgLvWjiBPCRVyW7v26rnVf7oK5DKoZvSam4fkrZx9U/7bFK10x6jntc89F1B1t6aKAqjICz+laEXnc4tOkPJWPWh3Pf3wgo/hivtBqFmXv0zRPtYjvRsmSwDO2pWjlkeslynBkfOSADCBYcCETZ1PbR4eAXys9+Vfx2gBhikMCbk/aWXG7mLZRaxsg5c53SGIUreFKIDKqazz95tOznAccznTt7rvZlu0/tuLPeVOdmDr6LMHDEk8WVOEb1h44NoMYyazlKfkV0gIAObmGCMvHs1C2KsxffS8tfQ2RRulZF8tYGOOM/BFLeiQ2Nsx1Sw2nWv0KQqgcvoNwlfn5EsYLtgTFg+NQDuffuwJvo3PVWklDKM6Z1qAcBDXdSB/ckcAUMCwYU4zPIUAINdsbloveWT7u6D+EUs7T9HmdapgP/jv8rtTdw7A3rIqEZGDmjzhwgOfi/7uRBN3lvZyz+f0QClSdxEnd4U/Xh4033arD7+rT+mXA89fu3MS2iVZu7+X6g8qGoHKjyiRmxw7iJuq7B2CJhiqntHpzHxvAajRnQYvzXDzytT4ov76xZFdSK+pYPjlwPMjgOafgLmHbW+8JnCONXWXHrop5FWzULBg+ksHkS+hYILhH7G0tQcuAYwt77xaAbhSABUFUJHjnkLBERMSgBGJufmLhTMRkT/dt3/zTkaTenvnxp3RnQvlPeUVyoHKn+bsB3fwPPxZxw6boSmoWlIlSyLyL3BXDNi3b37mgd+L084ZugsFfw2D3DnJjo8El9qbLiL/bh48cBoKfjtxBPjggRPL099YT4W7pUxPJ1xr2unUdKwD0tID70LB6QnXnYTAdX2s8cI0PRdN4eX/wGMouHHnDROuYmW3Vp/H3hk9/tY6L2kWcvPiYIYKuZFIAHAOonJnExSHJB5fyYWuCDzXjzlP+RjiqieQzt05NcOnWNlVinZsqv9cDDgkceeOmQd4T+/SR3WbF5Hfax0Cn3qmxYv6TPgHD3zywOZ4i+dQsG9k+d0CZ+5cdqbhixNGi/edYPbkgatOQXvfqPO/Oofgzd155wVX7mw3Rpm7c2L71/rmSgWIyO+wdO9tpNwedU5D4K+tAvnJCYGnbAW+Rc+upa7ZkR1D7en98feSGydvzNhti7cwZ/t8o+mJwXP1SkpB3pdCPwJpC8h9OQ/5e2r6e+Yj5L6HgocagWyDnjnbC/CFOxDj0edcpmhPHnjbqcEkDE/mvGWyqj5S5FB7OTOgJHBFWncDfrLcvWlmzqX7i337kxA4JrGB4TJFewgFz5l0g8ge5UBlGwhXIfe79DcU7wzBo8cFTz0wGLAMu75I1YnlTH15ygRg7flaAxLLToOPie+O3Vgyv76FB/7W2VKaT9k0mBt+jpXBgKfB7jEjEhG7E0HPmba/LKM6YC/NOVXeVOR9W7izqlfN39o048nD0YLz0p3d6fgpK+AzD3sr6/ceuPb9M4maBiPTkAvg2/81+cyH+mynjTufXwl27UYli/rn0U4H3PU8P/a8P9EIVN6JpefjgyfmGKZkb93v3kyxZz150/u6KUf7XPfmxM3jgcxZkbhqPe8KRAluR38A4MwLUmMSpRlKAoOULMG25zN9jJWNYr7OOB1PG8zN9vp+OnYd+Q15X/yLlEd9ZrzuJAVQeYcK5C7zH3vOLjrVeUpWkC9azZ2De2cfoU4PTD0cvV6C4bbVsf5rKJgAXLaC55MHVu4IIAYp2XmMdr59DvGp1flz4U5DLq065ooJsZUrjQDG9ccVgAvwpDpWUQCVd2DuztgaRf4e45QsgPtnKNU1nPvBEfh0oC3e7qbcv87fYmXdozQ25hgxYdLT5JjYrY4uzDgA8MUCCsur+JUZm2D/vc6NTjzQYNsgPbMcdNtHjZQwXIJYqQhfFEDF66L3P0pEXsXfC2b29th8kZINsctxNiPldq7xcyxtmJL93DNynrX66AfLNQK/MOYKA3NMPWAAonTnDfO0fpin+NtrjSxP29furdcVbWMGumbsogD67gXyD61jKwB084FGYunt0zNPc5aitQ+pe/Jw8s06NKLJdo5SPpguIedHL2JlH2JlC3OU9av6zcKLUqyEfMTxbbUfoM9jtLMYbRYCF9qDrwCqH8H7lQAk5sYd05BXvRceeH9iw4+2hXtvleQGtlfmZMiHu50U4Fuh65eqtFNf1JjEupNeGHUWx25jZefMGdrr+srthbBUb0Vt+y0ULOvHFAAGADYqqlcAlfcpn5FOfEgRZylhBKLIp1biLb0wJx5YsP+89OsU9wJfBcMZTrx0Z9XbDa/mH79aDnA3J1QTrNwJEoN6tDkkt8GdeHnOfTADUj46eRyjDWI0MztpJ5YogMpfzHWMFki7N0dB2jAlG6ZkJX9gi5od/1pTQ7k2gwOY1fWaswMBceXOqrNAxCaKYrc3vhu8Ljonbx5NOZBYmWOQkl2naGsYxtuXTMTOm/q5Ko31628MYrSgW0kBVN6vz528ZXrjws91ipZgKK2/qNwADOsJ/rAOTEU9Gh1ZrrX8EgZsuinNQ8EIw1Ws7K4unt+4syAxrms6L0CAwDmJZk/7JBQcgpickGl9CAUr971a0xHT9nz6AsC6Z6S8geFb69emNNcGz3dMe+FlzxcvOEBC+cbnjVO0VX1+elfCbtTmJKIZBszPmXrgBYgLxu3CTyIxBLFyZwFiQ2DjtjejX1veoz5350WKeAoFx0wozfA5vl6W5dgvjM8dorh3cN6HnjTAi6J5y2fIi8g791D3AX1Lt6FnD5y3Fl9WPdPydav70tqdi3qxqvnczAOXne+5dOcqFPxnGJyw7fPtZxjN6vOPAOC3+u/tRs7lideKrv3wGoHKu7YyJwwomFDCcHZiYf3KAwMTrNUhCQAKw7b50cQ8l4I2oz3mhaohaQdHdWgWpE6bHF8eWTCae+AIuaxpCsOn+ntVAEbN1N0MIHFVj1ynHphOWOh6CAWRIgI0iX+vlAN978HTd3vTZ28Mns6EAWlT8+3WyztzBOTtl4/mPDNgztYlzbCxP+e2m4SCYxBlfaPfgliFggsPXJshIu99X2AX8L95wTMQ1ZE88HNRcO3OMxLrUOjwuXdM/+PfuaUHFvV+8kOPmbrTYBgY8GSOMYlzJixhuO4JuIui4ChG0Axr5J1FzdcePfDDn9R8o3RnJDCug/vMnQOzvdxnhVwnuq73ywfkHOzEHOfIGw1mMDSveeaB7TKsmQfcvLI1VRRA5S9q6oHjIwF0HgJHJFI9ijMQZO7e9PFIIPwWCiYY/h7/dcFl4YGVGa472z3vLXDsQOD+9s2lB8KAr17gl6rMqQgzkMQMBjPgggTzPwT4XJW29sCRujGJvE/PoWB0511P+dHEA8tO0+AnD3x+B7tvNvWi1H3u+sRoxujGyp3TH9ipJSJ/UaueRsqPociF7u90v3fpuzOTnupa1LXvn6MkIoJfw4DRnWsP/J9iwEnIo67lO97nvdIedxE5eSpf10JGN0b3vdrO9+hOI00Reau5OR+CcnwiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiJ9/hdpfpjA7Hed3wAAAABJRU5ErkJggg==",
+  echo: "data:image/png;base64,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",
+};
+const WARLORD_ROWS = WARLORD_LOOK === "A" ? WARLORD_A : WARLORD_B; // [0] = normal, [1] = angry (eyes glow)
+const WARLORD_ROW_COLORS = WARLORD_LOOK === "A" ? WARLORD_A_COLORS : WARLORD_B_COLORS;
+
 // The level map: stops (one per level) joined by a winding path, like a Mario world map.
 // icon = the look of that stop. `path` = the corners walked on the way TO that stop from the one before.
 // A stop is locked until you beat the level before it. Stops without a level yet say COMING SOON.
-type MapIcon = "weed" | "snow" | "speaker" | "roof" | "cloud" | "tree" | "ship" | "coral" | "bong";
+type MapIcon = "weed" | "snow" | "speaker" | "roof" | "cloud" | "tree" | "ship" | "coral" | "bong" | "skull";
+// The skull on the map (Level 3: Warlord's Keep), drawn 2x bigger
+const MAP_SKULL = [".WWWWW.", "WWWWWWW", "WKKWKKW", "WKKWKKW", "WWWKWWW", ".WWWWW.", ".WKWKW."];
 const MAP_NODES: { x: number; y: number; icon: MapIcon; path: [number, number][] }[] = [
   { x: 28, y: 128, icon: "weed", path: [] },
   { x: 84, y: 128, icon: "snow", path: [] },
-  { x: 84, y: 80, icon: "roof", path: [] },
+  { x: 84, y: 80, icon: "skull", path: [] }, // Level 3: Warlord's Keep
   { x: 148, y: 80, icon: "cloud", path: [] },
   { x: 148, y: 128, icon: "tree", path: [] },
   { x: 212, y: 128, icon: "ship", path: [] },
@@ -351,6 +557,7 @@ const MAP_BADGE: Record<MapIcon, string> = {
   ship: "#c6b9d6",
   coral: "#3ec6c0",
   bong: "#ff5fe0",
+  skull: "#8a1820",
 };
 const MAP_WALK_SPEED = 95;
 const LEVEL_PROGRESS_KEY = "pinksuper-levels"; // { "1": best ms } for every level you finished
@@ -466,14 +673,28 @@ const OWNER_KEY = "pinkrun-owner";
 // Coins are just your lifetime grams total, added up every time you die. Some outfits
 // cost coins, some unlock from an achievement. Add PNGs at the given paths to use them;
 // until you do, that outfit just shows as a flat-colored dude (see OUTFIT_FALLBACK below).
-type OutfitId = "classic" | "ghost" | "icy" | "og";
-const OUTFITS: { id: OutfitId; name: string; file: string; how: string }[] = [
+type OutfitId = "classic" | "ghost" | "icy" | "og" | "toxic" | "bloody" | "shadow" | "gold" | "warlord";
+// cost = price in gold coins (those outfits are sold in the shop and on the outfit screen).
+// recolor = no PNG needed: the game repaints the classic picture by itself (see RECOLOR below).
+//           If you ever draw your own, save it at the `file` path and your drawing is used instead.
+type RecolorId = "toxic" | "bloody" | "shadow" | "gold";
+type OutfitDef = { id: OutfitId; name: string; file: string; how: string; cost?: number; recolor?: RecolorId };
+const ALL_OUTFITS: OutfitDef[] = [
   { id: "classic", name: "CLASSIC PINKMANE", file: "/game/pinkdude.png", how: "ALWAYS UNLOCKED" },
   { id: "og", name: "TRIPPY PINKMANE", file: "/game/pinkdude-pinkfit.png", how: "REACH SCORE 30000" },
   { id: "ghost", name: "GHOSTY PINKMANE", file: "/game/pinkdude-ghost.png", how: "BEAT A TROLL" },
-  { id: "icy", name: "ICY PINKMANE", file: "/game/pinkdude-icy.png", how: "BUY FOR 100 COINS" },
+  { id: "icy", name: "ICY PINKMANE", file: "/game/pinkdude-icy.png", how: "", cost: 100 },
+  { id: "toxic", name: "TOXIC PINKMANE", file: "/game/pinkdude-toxic.png", how: "", cost: 150, recolor: "toxic" },
+  { id: "bloody", name: "BLOODY PINKMANE", file: "/game/pinkdude-bloody.png", how: "", cost: 200, recolor: "bloody" },
+  { id: "shadow", name: "SHADOW PINKMANE", file: "/game/pinkdude-shadow.png", how: "", cost: 300, recolor: "shadow" },
+  { id: "gold", name: "GOLD PINKMANE", file: "/game/pinkdude-gold.png", how: "", cost: 500, recolor: "gold" },
+  // Play as WARLORD (the look with his hair and mask). Made from pixel art in this file (see makeWarlordSprite), no PNG needed.
+  { id: "warlord", name: "WARLORD COLOSSUS", file: "/game/pinkdude-warlord.png", how: "", cost: 700 },
 ];
-const ICY_COST = 100; // gold coins
+// The outfits the game actually uses (without the WARLORD skin while he's hidden, see THE WARLORD SWITCH)
+const OUTFITS: OutfitDef[] = ALL_OUTFITS.filter((o) => WARLORD_SHOWN || o.id !== "warlord");
+// What the outfit screen says when it's still locked
+const howToGet = (o: OutfitDef) => (o.cost ? `BUY FOR ${o.cost} COINS` : o.how);
 // Gold coins: some of the weed leaves in the level are gold coins instead (about 1 in 14).
 // Leaves are only for your score; coins are what you spend on outfits.
 const COIN_CHANCE = 0.07;
@@ -483,10 +704,300 @@ const OUTFIT_FALLBACK: Record<OutfitId, string> = {
   og: "#d63cc8",
   ghost: "#bfe9d8",
   icy: "#8fd9ff",
+  toxic: "#6fdc5a",
+  bloody: "#d21e1e",
+  shadow: "#3b2456",
+  gold: "#ffd700",
+  warlord: "#3b404b",
 };
-const COINS_KEY = "pinksuper-goldcoins"; // gold coins you have (spent on outfits)
+const COINS_KEY = "pinksuper-goldcoins"; // gold coins you have (spent in the shop)
 const UNLOCKED_KEY = "pinksuper-outfits"; // JSON array of unlocked outfit ids
 const OUTFIT_KEY = "pinksuper-outfit"; // currently worn outfit id
+
+// ---------- PINK SHOP (on the pink start screen: press UP, then OK) ----------
+// Spells you can buy with gold coins. Once you own one, its leaf can pop out of the ? boxes and
+// you can pick it before a boss fight. Change `cost` to change the price.
+type SpellId = "spike";
+type SpellDef = { id: SpellId; name: string; cost: number; info: [string, string] };
+const SHOP_SPELLS: SpellDef[] = [
+  { id: "spike", name: "SPIKE SHOT", cost: 200, info: ["SHOOTS SPIKES IN EVERY DIRECTION", "IN THE ? BOXES + AT BOSS FIGHTS"] },
+];
+// Greyed-out lines under the spells (just text for now: add or remove names as you like)
+const SHOP_SOON = ["MORE SPELLS"];
+const SPELLS_KEY = "pinksuper-spells"; // JSON array of the spells you bought
+// The shop's list, top to bottom. Every outfit with a `cost` shows up under SKINS by itself.
+type ShopRow =
+  | { kind: "head"; label: string }
+  | { kind: "spell"; spell: SpellDef }
+  | { kind: "soon"; label: string }
+  | { kind: "skin"; outfit: OutfitDef }
+  | { kind: "back" };
+const SHOP_ROWS: ShopRow[] = [
+  { kind: "head", label: "SPELLS" },
+  ...SHOP_SPELLS.map((spell): ShopRow => ({ kind: "spell", spell })),
+  ...SHOP_SOON.map((label): ShopRow => ({ kind: "soon", label })),
+  { kind: "head", label: "SKINS" },
+  ...OUTFITS.filter((o) => !!o.cost).map((outfit): ShopRow => ({ kind: "skin", outfit })),
+  { kind: "back" },
+];
+const SHOP_VISIBLE = 11; // rows that fit on the screen (a longer list scrolls)
+const SHOP_TOP = 18; // y of the first row
+const SHOP_ROW_H = 9;
+
+// ---------- BOSS CARDS ----------
+// Every boss has a card. It pops up (and freezes the game) right before his fight, and once you
+// beat him the card is yours: see them all under CARDS on the pink start screen.
+// name = on top of the card, moves = the lines under his picture (max 3, about 17 letters each),
+// weak = how you beat him, where = shown on the grey locked card.
+// color / sky / ground = the card's colours.
+// main: true = a MAIN BOSS: his card blinks and a light runs round its gold edge.
+type BossId = "troll" | "giant" | "leaf" | "snowman" | "horned" | "skeleton" | "warlord";
+type BossCard = { id: BossId; main?: boolean; name: string; moves: string[]; weak: string; where: string; color: string; sky: string; ground: string };
+const ALL_BOSS_CARDS: BossCard[] = [
+  { id: "troll", name: "TROLL", moves: ["CHASES YOU DOWN", "JUMPS AT YOU"], weak: "WEAK: YOUR SHOTS", where: "INFINITE RUN", color: "#8fce5a", sky: "#d7efbc", ground: "#2e9e3a" },
+  { id: "giant", name: "GIANT", moves: ["BIGGER + TOUGHER", "GETS BACK UP"], weak: "WEAK: SHOTS+STOMP", where: "INFINITE RUN", color: "#e0913c", sky: "#f6d9a8", ground: "#8a5a2b" },
+  { id: "leaf", main: true, name: "EVIL LEAF", moves: ["FLIES ABOVE YOU", "DIVES AT YOU"], weak: "WEAK: YOUR SHOTS", where: "LEVEL 1", color: "#5ab85a", sky: "#c8f5b0", ground: "#2d4a22" },
+  { id: "snowman", main: true, name: "EVIL SNOWMAN", moves: ["COLD HORNED BRUTE", "GETS DIZZY"], weak: "WEAK: SHOTS+STOMP", where: "LEVEL 2", color: "#8fc8ee", sky: "#dff2ff", ground: "#ffffff" },
+  { id: "horned", name: "HORNED WARRIOR", moves: ["SWINGS HIS MACE", "RAGES WHEN HURT"], weak: "WEAK: YOUR SHOTS", where: "LEVEL 3", color: "#c8684a", sky: "#3a1418", ground: "#55505a" },
+  { id: "skeleton", name: "SKELETON KNIGHT", moves: ["LONG SWORD SLASH", "ARMOUR EATS SHOTS"], weak: "WEAK: HEAD STOMP", where: "LEVEL 3", color: "#b9b2c8", sky: "#2a1a2e", ground: "#55505a" },
+  { id: "warlord", main: true, name: "WARLORD COLOSSUS", moves: ["GIANT SWORD SLAM", "FLOOR SHOCKWAVES", "EYE SOUND WAVES"], weak: "WEAK: HEAD STOMP", where: "LEVEL 3", color: "#d23a3a", sky: "#200a10", ground: "#55505a" },
+];
+// The cards the game actually uses (without the three Level 3 bosses while WARLORD is hidden)
+const BOSS_CARDS: BossCard[] = ALL_BOSS_CARDS.filter((c) => WARLORD_SHOWN || !["horned", "skeleton", "warlord"].includes(c.id));
+const CARDS_KEY = "pinksuper-cards"; // JSON array of the boss cards you won
+const CARD_W = 164;
+const CARD_H = 148;
+// The boss's own pixel picture (the giant is the troll drawn bigger)
+function bossArt(id: BossId): { rows: string[]; colors: Record<string, string>; scale: number } {
+  if (id === "troll") return { rows: TROLL, colors: TROLL_COLORS, scale: 2 };
+  if (id === "giant") return { rows: TROLL, colors: TROLL_COLORS, scale: 3 };
+  if (id === "leaf") return { rows: EVIL_LEAF, colors: EVIL_COLORS, scale: 2 };
+  if (id === "snowman") return { rows: EVIL_SNOWMAN, colors: EVIL_SNOWMAN_COLORS, scale: 2 };
+  if (id === "horned") return { rows: KN_HORNED, colors: KN_HORNED_COLORS, scale: 2 };
+  if (id === "skeleton") return { rows: KN_SKEL[0], colors: KN_SKEL_COLORS, scale: 2 };
+  return { rows: WARLORD_ROWS[0], colors: WARLORD_ROW_COLORS, scale: 2 };
+}
+// Writes text centred on cx. If it's wider than maxW it gets squeezed until it fits,
+// so a long line can never stick out of its box.
+function fitText(ctx: CanvasRenderingContext2D, text: string, cx: number, y: number, maxW: number) {
+  const w = ctx.measureText(text).width;
+  if (w <= maxW) {
+    ctx.fillText(text, cx, y);
+    return;
+  }
+  ctx.save();
+  ctx.translate(cx, y);
+  ctx.scale(maxW / w, 1);
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+// Draws one card with its top-left corner at x, y. owned = false draws the grey locked card.
+// t = the game clock (for the main bosses' shine).
+function drawBossCard(ctx: CanvasRenderingContext2D, card: BossCard, x: number, y: number, owned: boolean, t = 0) {
+  const shiny = owned && !!card.main;
+  const ink = "#111111";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = ink;
+  ctx.fillRect(x - 1, y - 1, CARD_W + 2, CARD_H + 2);
+  ctx.fillStyle = owned ? (shiny && Math.floor(t * 4) % 2 === 0 ? "#ffe27a" : "#f0c030") : "#8a8a8a"; // the border
+  ctx.fillRect(x, y, CARD_W, CARD_H);
+  ctx.fillStyle = owned ? card.color : "#5a5a5a";
+  ctx.fillRect(x + 4, y + 4, CARD_W - 8, CARD_H - 8);
+  // his name
+  ctx.fillStyle = owned ? ink : "#2a2a2a";
+  fitText(ctx, owned ? card.name : "? ? ?", x + CARD_W / 2, y + 7, CARD_W - 14);
+  // his picture
+  const wx = x + 8;
+  const wy = y + 18;
+  const ww = CARD_W - 16;
+  const wh = 68;
+  ctx.fillStyle = ink;
+  ctx.fillRect(wx - 1, wy - 1, ww + 2, wh + 2);
+  ctx.fillStyle = owned ? card.sky : "#6e6e6e";
+  ctx.fillRect(wx, wy, ww, wh);
+  ctx.fillStyle = owned ? card.ground : "#606060";
+  ctx.fillRect(wx, wy + wh - 6, ww, 6);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(wx, wy, ww, wh);
+  ctx.clip();
+  const art = bossArt(card.id);
+  const aw = art.rows[0].length * art.scale;
+  const ah = art.rows.length * art.scale;
+  const ax = Math.round(wx + ww / 2 - aw / 2);
+  // stands on the ground strip; if he's too tall for the window you see him from the head down
+  const ay = ah > wh - 4 ? wy + 2 : wy + wh - 4 - ah;
+  const shadow: Record<string, string> = {};
+  Object.keys(art.colors).forEach((k) => (shadow[k] = "#2c2c2c"));
+  drawPixels(ctx, art.rows, ax, ay, owned ? art.colors : shadow, art.scale);
+  ctx.restore();
+  // his moves
+  ctx.fillStyle = owned ? "rgba(255, 255, 255, 0.72)" : "#4a4a4a";
+  ctx.fillRect(x + 8, y + 90, CARD_W - 16, 33);
+  ctx.fillStyle = owned ? ink : "#a0a0a0";
+  (owned ? card.moves : ["BEAT THIS BOSS", "TO GET HIS CARD"]).slice(0, 3).forEach((m, i) => fitText(ctx, m, x + CARD_W / 2, y + 93 + i * 10, CARD_W - 22));
+  // how to beat him (or, on a locked card, where he lives)
+  ctx.fillStyle = owned ? ink : "#2a2a2a";
+  fitText(ctx, owned ? card.weak : card.where, x + CARD_W / 2, y + 129, CARD_W - 14);
+  if (shiny) {
+    // MAIN BOSS: two lights chase each other round the gold edge, and the corners sparkle
+    const w = CARD_W - 4;
+    const h = CARD_H - 4;
+    const round = 2 * (w + h);
+    const edge = (d: number): [number, number] => {
+      let p = ((d % round) + round) % round;
+      if (p < w) return [x + p, y];
+      p -= w;
+      if (p < h) return [x + w, y + p];
+      p -= h;
+      if (p < w) return [x + w - p, y + h];
+      return [x, y + h - (p - w)];
+    };
+    for (const start of [0, round / 2]) {
+      for (let d = 0; d < 44; d += 4) {
+        const [ex, ey] = edge(t * 170 + start + d);
+        ctx.fillStyle = d > 30 ? "#ffffff" : "#fff3a0";
+        ctx.fillRect(Math.round(ex), Math.round(ey), 4, 4);
+      }
+    }
+    const corners: [number, number][] = [[x - 2, y - 2], [x + CARD_W + 1, y - 2], [x - 2, y + CARD_H + 1], [x + CARD_W + 1, y + CARD_H + 1]];
+    corners.forEach(([sx, sy], i) => {
+      if (Math.floor(t * 6 + i * 1.5) % 3 !== 0) return;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(sx - 3, sy, 7, 1);
+      ctx.fillRect(sx, sy - 3, 1, 7);
+    });
+  }
+}
+
+// ---------- Skins made from the classic picture ----------
+// Colour maths: red/green/blue (0-255) <-> hue (0-360), saturation (0-1), lightness (0-1)
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255;
+  g /= 255;
+  b /= 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h *= 60;
+  return [h, s, l];
+}
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = (((h % 360) + 360) % 360) / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  const [r1, g1, b1] = hp < 1 ? [c, x, 0] : hp < 2 ? [x, c, 0] : hp < 3 ? [0, c, x] : hp < 4 ? [0, x, c] : hp < 5 ? [x, 0, c] : [c, 0, x];
+  const m = l - c / 2;
+  return [Math.round((r1 + m) * 255), Math.round((g1 + m) * 255), Math.round((b1 + m) * 255)];
+}
+function hexToRgb(hex: string): [number, number, number] {
+  return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+}
+// Picks a colour from a list of colours going from dark to light (t = 0..1)
+function colorRamp(stops: string[], t: number): [number, number, number] {
+  const p = Math.max(0, Math.min(1, t)) * (stops.length - 1);
+  const i = Math.min(stops.length - 2, Math.floor(p));
+  const a = hexToRgb(stops[i]);
+  const b = hexToRgb(stops[i + 1]);
+  const k = p - i;
+  return [Math.round(a[0] + (b[0] - a[0]) * k), Math.round(a[1] + (b[1] - a[1]) * k), Math.round(a[2] + (b[2] - a[2]) * k)];
+}
+// RECOLOR: what each made-up skin does to one pixel of the classic picture.
+// "hair" = the pink mane, "skin" = the yellow face and hands. Everything else stays as it is
+// (except SHADOW and GOLD, which repaint the whole dude).
+function recolorPixel(kind: RecolorId, r: number, g: number, b: number): [number, number, number] {
+  const [h, s, l] = rgbToHsl(r, g, b);
+  const hair = s > 0.25 && h >= 270 && h <= 345;
+  const skin = s > 0.5 && h >= 30 && h <= 65;
+  if (kind === "toxic") {
+    // slime-green mane, sickly green face
+    if (hair) return hslToRgb(105, Math.min(1, s * 1.05), l);
+    if (skin) return hslToRgb(80, s * 0.7, Math.min(0.82, l * 1.3));
+    return [r, g, b];
+  }
+  if (kind === "bloody") {
+    // blood-red mane, pale face
+    if (hair) return hslToRgb(355, Math.min(1, s * 1.2), l * 0.88);
+    if (skin) return hslToRgb(28, 0.3, Math.min(0.9, l * 1.65));
+    return [r, g, b];
+  }
+  if (kind === "shadow") {
+    // a dark purple shadow with glowing pink eyes
+    if (l > 0.9) return hexToRgb("#ff5fe0");
+    return colorRamp(["#0a0510", "#3b2456", "#6a4a8c"], l);
+  }
+  // gold: a golden statue
+  if (l < 0.12) return hexToRgb("#3a2600");
+  return colorRamp(["#6b4a00", "#c89400", "#ffd700", "#fff3a0"], l);
+}
+// Repaints a whole picture and hands back the new one (null if the browser won't allow it)
+function recolorSprite(src: HTMLImageElement, kind: RecolorId): HTMLImageElement | null {
+  try {
+    const c = document.createElement("canvas");
+    c.width = src.naturalWidth;
+    c.height = src.naturalHeight;
+    const cx = c.getContext("2d");
+    if (!cx) return null;
+    cx.drawImage(src, 0, 0);
+    const data = cx.getImageData(0, 0, c.width, c.height);
+    const d = data.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] === 0) continue; // see-through pixel
+      const [r, g, b] = recolorPixel(kind, d[i], d[i + 1], d[i + 2]);
+      d[i] = r;
+      d[i + 1] = g;
+      d[i + 2] = b;
+    }
+    cx.putImageData(data, 0, 0);
+    const out = new Image();
+    out.src = c.toDataURL("image/png");
+    return out;
+  } catch {
+    return null;
+  }
+}
+// ---------- WARLORD skin ----------
+// Built from WARLORD_B (the one with his hair, face mask and gold cross), at your size. The armoured
+// one with the crown stays the boss only. It makes the same kind of picture as pinkdude.png: 2 walking frames side by side.
+// If you ever draw your own, save it as /game/pinkdude-warlord.png and that one is used instead.
+function makeWarlordSprite(): HTMLImageElement | null {
+  try {
+    // he's drawn facing left and you face right, so mirror him
+    const rows = WARLORD_B[0].map((r) => r.split("").reverse().join(""));
+    // he's a bit wider than you: keep the 24 columns that have the most of him in them
+    let from = 0;
+    let best = -1;
+    for (let start = 0; start + SPRITE_W <= rows[0].length; start++) {
+      let n = 0;
+      for (const r of rows) for (let col = start; col < start + SPRITE_W; col++) if (r[col] !== ".") n++;
+      if (n > best) {
+        best = n;
+        from = start;
+      }
+    }
+    const stand = rows.map((r) => r.slice(from, from + SPRITE_W));
+    // second walking frame: his feet take a small step
+    const step = stand.map((r, i) => (i >= stand.length - 3 ? "." + r.slice(0, SPRITE_W - 1) : r));
+    const c = document.createElement("canvas");
+    c.width = SPRITE_W * 2;
+    c.height = SPRITE_H;
+    const cx = c.getContext("2d");
+    if (!cx) return null;
+    const top = SPRITE_H - stand.length; // feet on the bottom edge, like yours
+    drawPixels(cx, stand, 0, top, WARLORD_B_COLORS, 1);
+    drawPixels(cx, step, SPRITE_W, top, WARLORD_B_COLORS, 1);
+    const out = new Image();
+    out.src = c.toDataURL("image/png");
+    return out;
+  } catch {
+    return null;
+  }
+}
 
 // Plays on Game Over: public/sounds/killed.mp3
 const DEATH_SOUND = "/sounds/killed.mp3";
@@ -532,12 +1043,20 @@ const BOOM = [PINK, "#ffc800", INK, "#777777", "#ffffff"];
 const FIRE = ["#ff7a00", "#ffc800", "#d21e1e", "#ffffff"];
 const ICE = ["#4aa3ff", "#bfe3ff", "#1d4fa8", "#ffffff"];
 const TURQ = ["#3de0c8", "#b8fff3", "#138a7a", "#ffffff"];
+const SPIKE = ["#c070ff", "#f0d8ff", "#6a2a9a", "#ffffff"];
 // Leaf colours for each power-up: [main, dark]
 const POWER_COLORS: Record<PowerKind, [string, string]> = {
   fire: ["#ff7a00", "#d21e1e"],
   ice: ["#4aa3ff", "#1d4fa8"],
   double: ["#3de0c8", "#138a7a"],
+  spike: ["#b050f0", "#5a1a8a"],
 };
+// The spark colours that go with a spell / a shot
+const powerSparks = (kind: string) => (kind === "spike" ? SPIKE : kind === "ice" ? ICE : kind === "double" ? TURQ : FIRE);
+const shotSparks = (f: Fireball) => (f.spike ? SPIKE : f.ice ? ICE : FIRE);
+// The little shot icons at the top of the screen: [main colour, shine]
+const hudShot = (power: string): [string, string] =>
+  power === "spike" ? ["#b050f0", "#ffffff"] : power === "ice" ? ["#4aa3ff", "#ffffff"] : ["#ff7a00", "#ffc800"];
 
 // Haters: grumpy grey clouds that walk around (drawn 2x bigger)
 const HATER = [
@@ -913,6 +1432,19 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const deathSoundRef = useRef<HTMLAudioElement | null>(null);
   const stuttersRef = useRef<HTMLAudioElement | null>(null); // the secret Stutters remix
   if (stuttersRef.current) stuttersRef.current.muted = muted; // follows the iPod mute button
+  const keepImgsRef = useRef<Record<string, HTMLImageElement>>({}); // Level 3 backdrop pictures
+  const levelMusicRef = useRef<HTMLAudioElement | null>(null); // Level 3 song
+  const levelMusicOnRef = useRef(false); // told the page to pause its own music
+  // Everything in the game that wants your own (PINKMANE) music off right now: "level" (a level with
+  // its own songs) and "stutters" (the secret track). Your music only comes back when ALL of them
+  // are done. Death sounds are not in here: they play on top of the music.
+  const pageMusicHoldsRef = useRef(new Set<string>());
+  const levelMusicTryRef = useRef(0);
+  const levelMusicIdxRef = useRef(0); // which song of the level is playing
+  const levelMusicBadRef = useRef(new Set<string>()); // songs whose file is missing (skipped)
+  const levelMusicUserPausedRef = useRef(false); // paused with the handheld's play/pause button
+  const levelMusicVolRef = useRef(0.8); // follows the handheld's volume
+  const levelMusicReportRef = useRef(""); // last song we told the page about
   const [showGolden, setShowGolden] = useState(false); // the golden leaf pause screen
   const [goldBefore, setGoldBefore] = useState(false); // found it in an earlier game already
   const sfxOnRef = useRef(true);
@@ -938,7 +1470,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     mode: "home" as Mode,
     // Pink Levels
     gameMode: "infinite" as "infinite" | "levels",
-    homeChoice: 0, // 0 = PINK RUN INFINITE, 1 = PINK LEVELS
+    homeChoice: 0, // 0 = PINK RUN INFINITE, 1 = PINK LEVELS, 2 = the SHOP button (top right)
     levelMode: false, // playing a level right now
     level: 1,
     levelPick: 0, // which stop on the level map you're standing on
@@ -967,9 +1499,26 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       speech: number; // seconds the speech bubble stays up
     },
     lbossState: "none" as "none" | "waiting" | "fight" | "done",
+    // Level 3 knights
+    kboss: null as null | Knight,
+    karenas: [] as { col: number; kind: KnightKind }[], // arenas still ahead of you, in order
+    kwaves: [] as { x: number; dir: number; life: number }[], // WARLORD's shockwaves
+    kfinalCol: 0, // first column of the WARLORD arena (lines up the backdrop)
+    kshots: [] as { x: number; y: number; vx: number; vy: number; life: number }[], // WARLORD's eye waves
+    knockT: 0, // thrown off by WARLORD: seconds until you can steer again
     outfit: "classic" as OutfitId,
     unlocked: ["classic"] as OutfitId[],
     coins: 0,
+    spells: [] as SpellId[], // spells you bought in the shop
+    shopIndex: 1, // which line of the shop is highlighted (see SHOP_ROWS)
+    shopFromPause: false, // opened the shop from the Esc menu (BACK / Esc returns to the Esc menu, the run is waiting)
+    cards: [] as BossId[], // boss cards you won
+    cardIndex: 0, // which card you're looking at on the BOSS CARDS screen
+    intro: null as null | { id: BossId; next: "choose" | "running"; at: number }, // the card shown before a fight
+    shopMsg: "", // "SPIKE SHOT UNLOCKED!" etc, shown for a moment at the bottom of the shop
+    shopMsgAt: -10,
+    spikeVolley: 0, // counts your spike shots
+    spikeHitVolley: -1, // the last spike shot that hurt a boss (the same burst can't hurt him twice)
     selectIndex: 0,
     storageOk: true, // false if this browser blocks localStorage; progress just won't save
     x: 40,
@@ -997,7 +1546,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     lasers: [] as { x: number; y: number; vx: number; ty: number; life: number }[], // drone lasers (jump over them!) // breathing underwater (coral field)
     bubbleTimer: 0,
     popups: [] as Popup[],
-    power: "none" as "none" | "fire" | "ice",
+    power: "none" as "none" | "fire" | "ice" | "spike",
     ammo: 0,
     fireTime: 0,
     doubleJumps: 0,
@@ -1024,7 +1573,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     bossState: "none" as "none" | "placed" | "fight",
     bossCount: 0, // trolls beaten this game
     bossSpell: "fire" as PowerKind, // the spell you picked for this fight
-    spellChoice: 0, // 0 = fire, 1 = ice (on the pick screen)
+    spellChoice: 0, // 0 = fire, 1 = ice, 2 = spike if you own it (on the pick screen)
     zoneMarks: [] as { score: number; zone: number }[], // score when you entered each zone (for the progress line)
     bossCol: 0, // first column of the arena
     bossRefill: 0,
@@ -1133,7 +1682,31 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const playPowerDown = () => beep(700, 200, 0.35, 0.07, "square");
   const playEmpty = () => beep(140, 110, 0.05, 0.05, "square");
   const playIce = () => beep(1600, 2400, 0.08, 0.03, "triangle");
+  const playSpike = () => [1300, 1000, 760].forEach((f, i) => beep(f, f * 0.45, 0.06, 0.035, "sawtooth", i * 0.025));
   const playDoubleJump = () => beep(500, 1100, 0.1, 0.045, "triangle");
+
+  // ---------- Your own (PINKMANE) music on the page ----------
+  // The game never tells the page "pause" / "resume" directly, it goes through these two.
+  // holdPageMusic("x") = pause your music because of x. releasePageMusic("x") = x is done.
+  // Your music only resumes when nothing is holding it any more.
+  const holdPageMusic = (why: string) => {
+    const holds = pageMusicHoldsRef.current;
+    const first = holds.size === 0;
+    holds.add(why);
+    if (first) window.dispatchEvent(new CustomEvent("pinkmane-music", { detail: "pause" }));
+  };
+  const releasePageMusic = (why: string) => {
+    const holds = pageMusicHoldsRef.current;
+    if (!holds.delete(why)) return;
+    if (holds.size === 0) window.dispatchEvent(new CustomEvent("pinkmane-music", { detail: "resume" }));
+  };
+  // Leaving the game: let go of everything at once
+  const releaseAllPageMusic = () => {
+    const holds = pageMusicHoldsRef.current;
+    if (holds.size === 0) return;
+    holds.clear();
+    window.dispatchEvent(new CustomEvent("pinkmane-music", { detail: "resume" }));
+  };
 
   // ---------- The secret Stutters track ----------
 
@@ -1150,11 +1723,139 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       const a = stuttersRef.current;
       a.muted = mutedRef.current;
       a.currentTime = 0;
-      window.dispatchEvent(new CustomEvent("pinkmane-music", { detail: "pause" }));
+      holdPageMusic("stutters");
       a.play().catch(() => {});
       s.stuttersOn = true;
     } catch {}
   };
+
+  // ---------- Level music (Level 3: WARLORD COLOSSUS songs, one after another) ----------
+  // Plays while you're in a level that has `music`. When a song ends the next one starts; a song
+  // whose file is missing is skipped. The handheld's music buttons control it (see levelMusicControl).
+  // Your own music stays OFF the whole time: from the moment the level starts until you're back on
+  // the list of levels (that includes dying, the bong, typing your name and the Top 10).
+  const levelSongList = () => {
+    const s = state.current;
+    return s.levelMode ? LEVELS[s.level - 1]?.music : undefined;
+  };
+  // Are we inside a level that has its own songs right now?
+  const inMusicLevel = () => {
+    const s = state.current;
+    const list = levelSongList();
+    if (!list || list.length === 0) return false;
+    if (s.mode === "home" || s.mode === "levelSelect" || s.mode === "cards") return false; // left the level
+    if (s.mode === "shop" && !s.shopFromPause) return false; // the shop from the start screen
+    if (s.mode === "select" && !s.fromPause) return false; // picking an outfit before a run
+    return true;
+  };
+  // The Esc menu (and picking an outfit from it): the level song waits, like the rest of the game
+  const levelMusicWaiting = () => {
+    const m = state.current.mode;
+    return m === "paused" || m === "select" || m === "shop";
+  };
+  // Makes song number i of this level the current one (skipping songs whose file is missing)
+  const loadLevelSong = (i: number) => {
+    const list = levelSongList();
+    try {
+      levelMusicRef.current?.pause();
+    } catch {}
+    levelMusicRef.current = null;
+    if (!list || list.length === 0) return null;
+    let idx = ((i % list.length) + list.length) % list.length;
+    let tries = 0;
+    while (levelMusicBadRef.current.has(list[idx].file) && tries < list.length) {
+      idx = (idx + 1) % list.length;
+      tries++;
+    }
+    if (tries >= list.length) return null; // none of the songs are there
+    levelMusicIdxRef.current = idx;
+    const a = new Audio(list[idx].file);
+    a.volume = levelMusicVolRef.current;
+    a.muted = mutedRef.current;
+    a.dataset.src = list[idx].file;
+    levelMusicRef.current = a;
+    levelMusicTryRef.current = 0;
+    return a;
+  };
+  // Tells the page which song is on, so the handheld's ticker shows it (only when it changes)
+  const reportLevelSong = (active: boolean) => {
+    const list = levelSongList();
+    const a = levelMusicRef.current;
+    const song = active && list && a ? list.find((m) => m.file === a.dataset.src) : undefined;
+    const paused = !a || a.paused;
+    const key = song ? `${song.file}|${paused}` : "";
+    if (key === levelMusicReportRef.current) return;
+    levelMusicReportRef.current = key;
+    window.dispatchEvent(
+      new CustomEvent("pinkmane-level-song", { detail: song ? { title: song.title, artist: song.artist, paused } : null })
+    );
+  };
+  const syncLevelMusic = () => {
+    const s = state.current;
+    const list = levelSongList();
+    const active = inMusicLevel();
+    const want = active && !levelMusicWaiting() && !levelMusicUserPausedRef.current;
+    try {
+      let a = levelMusicRef.current;
+      if (active && list) {
+        if (a && (a.ended || a.error || !list.some((m) => m.file === a!.dataset.src))) {
+          // this song finished (or its file is missing): on to the next one
+          if (a.error && a.dataset.src) levelMusicBadRef.current.add(a.dataset.src);
+          a = loadLevelSong(levelMusicIdxRef.current + 1);
+        }
+        if (!a) a = loadLevelSong(levelMusicIdxRef.current);
+        if (a) {
+          a.muted = mutedRef.current;
+          const now = performance.now();
+          if (want) {
+            if (a.paused && !a.ended && !a.error && now - levelMusicTryRef.current > 1000) {
+              levelMusicTryRef.current = now; // (browsers only allow sound after a click, so keep trying)
+              a.play().catch(() => {});
+            }
+          } else if (!a.paused) a.pause();
+        }
+        if (!levelMusicOnRef.current) {
+          levelMusicOnRef.current = true;
+          holdPageMusic("level");
+        }
+      } else {
+        if (a && !a.paused) a.pause();
+        if (levelMusicOnRef.current) {
+          levelMusicOnRef.current = false;
+          releasePageMusic("level");
+        }
+      }
+      reportLevelSong(active);
+    } catch {}
+  };
+  // The handheld's music buttons while a level song is on: "toggle", "next", "prev" or { volume }
+  const levelMusicControl = (e: Event) => {
+    const d = (e as CustomEvent<unknown>).detail;
+    if (d && typeof d === "object" && typeof (d as { volume?: unknown }).volume === "number") {
+      levelMusicVolRef.current = Math.max(0, Math.min(1, (d as { volume: number }).volume));
+      if (levelMusicRef.current) levelMusicRef.current.volume = levelMusicVolRef.current;
+      return;
+    }
+    if (!levelMusicOnRef.current) return;
+    const playing = !levelMusicWaiting();
+    let a = levelMusicRef.current;
+    try {
+      if (d === "toggle") {
+        levelMusicUserPausedRef.current = !levelMusicUserPausedRef.current;
+        if (a) {
+          if (levelMusicUserPausedRef.current) a.pause();
+          else if (playing) a.play().catch(() => {});
+        }
+      } else if (d === "next" || d === "prev") {
+        if (d === "prev" && a && a.currentTime > 3) a.currentTime = 0; // like an iPod: back to the start first
+        else a = loadLevelSong(levelMusicIdxRef.current + (d === "next" ? 1 : -1));
+        levelMusicUserPausedRef.current = false;
+        if (a && playing) a.play().catch(() => {});
+      }
+    } catch {}
+    reportLevelSong(true);
+  };
+
 
   // Stops it and lets your music carry on
   const stopStutters = () => {
@@ -1163,8 +1864,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.stuttersOn = false;
     try {
       stuttersRef.current?.pause();
-      window.dispatchEvent(new CustomEvent("pinkmane-music", { detail: "resume" }));
     } catch {}
+    releasePageMusic("stutters");
   };
 
   // Closing the golden leaf screen (with the link button or skip)
@@ -1835,6 +2536,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.signs = [];
     s.lboss = null;
     s.lbossState = "none";
+    s.kboss = null;
+    s.karenas = [];
+    s.kwaves = [];
+    s.kshots = [];
+    s.knockT = 0;
+    s.kfinalCol = 0;
 
     // Test shortcut: start right at the zone from the address bar (?zone=...), localhost only
     const tz = testStartZone();
@@ -1866,9 +2573,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       s.coyote = 0;
       s.airJumped = false;
       playJump();
-    } else if ((s.doubleJumps > 0 || s.bossState === "fight") && !s.airJumped) {
-      // Double jump (turquoise leaf): one extra jump per time in the air. Free during a boss fight.
-      if (s.bossState !== "fight") s.doubleJumps -= 1;
+    } else if ((s.doubleJumps > 0 || (s.bossState === "fight" && !(s.kboss && s.kboss.kind === "horned"))) && !s.airJumped) {
+      // Double jump (turquoise leaf): one extra jump per time in the air. Free during a boss fight
+      // (except the horned warrior in Level 3: there you only get the ones you have).
+      if (s.bossState !== "fight" || (s.kboss && s.kboss.kind === "horned")) s.doubleJumps -= 1;
       s.airJumped = true;
       s.vy = JUMP * 0.92;
       burst(s.x + SPRITE_W / 2, s.y + SPRITE_H, 12, TURQ, 50);
@@ -1898,7 +2606,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const hasFire = () => {
     const s = state.current;
     if (s.power === "fire") return s.ammo > 0 && s.fireTime > 0;
-    if (s.power === "ice") return s.ammo > 0;
+    if (s.power === "ice" || s.power === "spike") return s.ammo > 0;
     return false;
   };
 
@@ -1915,6 +2623,34 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const s = state.current;
     if (s.mode !== "running") return;
     if (!hasFire()) return;
+    if (s.power === "spike") {
+      // SPIKE SHOT: one burst of spikes flying out in every direction
+      if (s.fireballs.some((f) => f.spike)) return; // wait until the last burst is gone
+      s.ammo -= 1;
+      s.spikeVolley += 1;
+      const cx = s.x + SPRITE_W / 2 - 2;
+      const cy = s.y + 22;
+      for (let i = 0; i < SPIKE_COUNT; i++) {
+        const a = (i / SPIKE_COUNT) * Math.PI * 2;
+        s.fireballs.push({
+          x: cx + Math.cos(a) * 6,
+          y: cy + Math.sin(a) * 6,
+          vx: Math.cos(a) * SPIKE_SPEED,
+          vy: Math.sin(a) * SPIKE_SPEED,
+          life: SPIKE_LIFE,
+          ice: false,
+          spike: true,
+          volley: s.spikeVolley,
+        });
+      }
+      burst(cx + 2, cy + 2, 10, SPIKE, 50);
+      playSpike();
+      if (s.ammo <= 0) {
+        s.power = "none";
+        s.fireTime = 0;
+      }
+      return;
+    }
     if (s.fireballs.length >= 2) return;
     const ice = s.power === "ice";
     s.ammo -= 1;
@@ -2065,7 +2801,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     touchRef.current = 0;
     s.vx = 0;
     s.spellChoice = 0;
-    s.mode = "choose";
+    bossIntro(kind, "choose"); // his card first, then you pick your spell
   };
 
   // How fast this troll is (each next one is faster)
@@ -2095,6 +2831,18 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.bong = null;
     s.lboss = null;
     s.lbossState = "none";
+    s.kboss = null;
+    s.karenas = [];
+    s.kwaves = [];
+    s.kshots = [];
+    s.knockT = 0;
+    s.kfinalCol = 0;
+    try {
+      levelMusicRef.current?.pause(); // every try starts from the first song again
+    } catch {}
+    levelMusicRef.current = null;
+    levelMusicIdxRef.current = 0;
+    levelMusicUserPausedRef.current = false;
     s.zoneMarks = [{ score: 0, zone: 0 }];
     s.zoneShown = 999; // no zone names in levels
     const map = def.map;
@@ -2120,7 +2868,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         else if (ch === "L") s.leaves.push({ x: x + 1, y: r * T + 1, taken: false });
         else if (ch === "C") s.leaves.push({ x: x + 1, y: r * T + 1, taken: false, coin: true });
         else if (ch === "H") s.hearts.push({ x: x + 1, y: r * T + 2, taken: false });
-        else if (ch === "w") addWalker(c, r + 1, 0);
+        else if (ch === "w") {
+          addWalker(c, r + 1, 0);
+          s.enemies[s.enemies.length - 1].phase = c % 2; // Level 3: 0 = skeleton, 1 = oni
+        }
         else if (ch === "f") {
           addFlyer(c, r + 3, 0);
           s.enemies[s.enemies.length - 1].baseY = r * T;
@@ -2130,6 +2881,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           s.bossCol = c - 1;
           s.lbossState = "waiting";
         } else if (ch === "B") s.bong = { x: x - 2, y: (r + 1) * T - BONG_H };
+        else if (ch === "M" || ch === "K" || ch === "W") {
+          const kind: KnightKind = ch === "M" ? "horned" : ch === "K" ? "skeleton" : "warlord";
+          s.karenas.push({ col: c - 1, kind });
+          if (kind === "warlord") s.kfinalCol = c - 1;
+          if (s.karenas.length === 1) s.bossCol = c - 1; // first red mark on the progress line
+        }
       }
       s.cols.push(col);
     }
@@ -2139,6 +2896,108 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.farthest = s.x;
     s.mode = "ready";
     loadBoard(levelGameId(n));
+  };
+
+  // ---------- LEVEL 3: the knights (horned warrior, skeleton knight, WARLORD COLOSSUS) ----------
+
+  // His body box (where you can hit him / land on him)
+  const knightBox = (kn: Knight) => {
+    const d = KN_DIM[kn.kind];
+    const a = kn.facing < 0 ? d.hb[0] : d.w - d.hb[1];
+    const b = kn.facing < 0 ? d.hb[1] : d.w - d.hb[0];
+    return { x1: kn.x + a, x2: kn.x + b, y1: kn.y + d.top, y2: kn.y + d.foot };
+  };
+  // The horned warrior's spiked ball, swinging round his hand on its chain
+  const hornedHand = (kn: Knight) => ({ x: kn.x + (kn.facing < 0 ? 5 : KN_DIM.horned.w - 5), y: kn.y + 44 });
+  const maceBall = (kn: Knight) => {
+    const h = hornedHand(kn);
+    const up = Math.min(kn.reach * 0.8, HORNED_BALL_UP);
+    return { x: h.x + Math.cos(kn.ang) * kn.reach, y: Math.min(8 * T - 8, h.y + Math.sin(kn.ang) * up) };
+  };
+  // The skeleton knight's sword swing (the area in front of him)
+  const skeletonSwordBox = (kn: Knight) => {
+    const b = knightBox(kn);
+    return kn.facing < 0
+      ? { x1: b.x1 - SKELETON_REACH, x2: b.x1 + 6, y1: kn.y + 16, y2: kn.y + 54 }
+      : { x1: b.x2 - 6, x2: b.x2 + SKELETON_REACH, y1: kn.y + 16, y2: kn.y + 54 };
+  };
+  // WARLORD's giant sword: k = 0 at his hand, 1 at the tip
+  const warlordPivot = (kn: Knight) => ({ x: kn.x + (kn.facing < 0 ? WL_PIVOT.x : KN_DIM.warlord.w - WL_PIVOT.x), y: kn.y + WL_PIVOT.y });
+  const swordAngle = (kn: Knight, a = kn.ang) => (kn.facing < 0 ? a : Math.PI - a);
+  const knightSwordPoint = (kn: Knight, k: number) => {
+    const p = warlordPivot(kn);
+    const a = swordAngle(kn);
+    const len = SW_GRIP * 2 * k;
+    return { x: p.x + Math.cos(a) * len, y: p.y + Math.sin(a) * len };
+  };
+
+  // WARLORD's eyes, and one sound wave aimed right at you
+  const warlordEye = (kn: Knight) => ({ x: kn.x + (kn.facing < 0 ? WL_EYES.x : KN_DIM.warlord.w - WL_EYES.x), y: kn.y + WL_EYES.y });
+  const fireEyeWaves = (kn: Knight) => {
+    const s = state.current;
+    const e = warlordEye(kn);
+    const tx = s.x + HB_X + HB_W / 2;
+    const ty = s.y + HB_Y + HB_H / 2;
+    const aim = Math.atan2(ty - e.y, tx - e.x);
+    s.kshots.push({ x: e.x, y: e.y, vx: Math.cos(aim) * EYE_WAVE_SPEED, vy: Math.sin(aim) * EYE_WAVE_SPEED, life: 4 });
+    beep(300, 1200, 0.35, 0.06, "sawtooth");
+  };
+
+  // The camera reached a knight's arena: lock the screen and bring him in
+  const startKnight = () => {
+    const s = state.current;
+    const a = s.karenas.shift();
+    if (!a) return;
+    s.bossCol = a.col;
+    s.bossState = "fight"; // locked screen + free double jumps, same as the other boss fights
+    s.cam = s.bossCol * T;
+    s.bossRefill = 0;
+    for (const e of s.enemies) {
+      // clear out the monsters on this screen only (the rest of the level keeps its monsters)
+      if (e.x > s.cam - 2 * T && e.x < s.cam + W + 2 * T) {
+        e.alive = false;
+        e.squash = 0;
+      }
+    }
+    const d = KN_DIM[a.kind];
+    const hp = a.kind === "horned" ? HORNED_HP : a.kind === "skeleton" ? SKELETON_HP : WARLORD_HP;
+    s.kboss = {
+      kind: a.kind,
+      x: s.cam + W - d.w - 16,
+      y: 8 * T - d.foot,
+      vx: 0,
+      vy: 0,
+      hp,
+      maxHp: hp,
+      hit: 0,
+      inv: 0,
+      dead: 0,
+      facing: -1,
+      act: "walk",
+      timer: 0,
+      cool: 1.6,
+      ang: a.kind === "warlord" ? SW_IDLE : 0,
+      reach: 20,
+      waves: 0,
+    };
+    s.kwaves = [];
+    s.kshots = [];
+    heldRef.current = { left: false, right: false, up: false };
+    touchRef.current = 0;
+    s.vx = 0;
+    if (a.kind === "horned") {
+      // pick fire or ice first, like the other shooting bosses
+      s.spellChoice = 0;
+      bossIntro(a.kind, "choose"); // his card first, then you pick your spell
+    } else {
+      bossIntro(a.kind, "running"); // his card first, then the fight
+      s.flash = 2.4;
+      s.flashText = a.kind === "skeleton" ? "JUMP ON THE SKELETON KNIGHT!" : "WARLORD COLOSSUS! JUMP ON HIS HEAD!";
+      s.hinted = s.hinted.filter((h) => h !== "bossjump");
+      showHint("bossjump", "FREE DOUBLE JUMPS HERE!");
+      s.hintTime = 4;
+      playPowerUp();
+    }
   };
 
   // Reads your best level times from this browser
@@ -2183,10 +3042,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     touchRef.current = 0;
     s.vx = 0;
     s.spellChoice = 0;
-    s.mode = "choose";
+    bossIntro(kind, "choose"); // his card first, then you pick your spell
   };
 
-  const hitLevelBoss = (ice: boolean) => {
+  const hitLevelBoss = (sparks: string[]) => {
     const s = state.current;
     const b = s.lboss;
     if (!b || b.dead > 0) return;
@@ -2194,7 +3053,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const cy = b.y + (b.kind === "snowman" ? SN_H : EL_H) / 2;
     b.hp -= 1; // every shot that touches it counts (ammo is tight)
     b.hit = 0.35;
-    burst(cx, cy, 16, ice ? ICE : FIRE, 70);
+    burst(cx, cy, 16, sparks, 70);
     s.shake = 0.1;
     playStomp();
     if (b.hp <= 0 && b.kind === "snowman") {
@@ -2242,16 +3101,19 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
   const pickSpell = (choice: number) => {
     const s = state.current;
-    if (s.mode !== "choose" || (!s.boss && !s.lboss)) return;
-    const kind: PowerKind = choice === 1 ? "ice" : "fire";
+    if (s.mode !== "choose" || (!s.boss && !s.lboss && !s.kboss)) return;
+    const kind: "fire" | "ice" | "spike" = choice === 2 && s.spells.includes("spike") ? "spike" : choice === 1 ? "ice" : "fire";
     s.bossSpell = kind;
     s.power = kind;
-    s.ammo = (s.boss ? s.boss.maxHp : s.lboss ? s.lboss.maxHp : 10) + BOSS_SPARE_SHOTS;
+    s.ammo = s.kboss ? HORNED_AMMO : (s.boss ? s.boss.maxHp : s.lboss ? s.lboss.maxHp : 10) + BOSS_SPARE_SHOTS;
+    if (s.kboss) s.doubleJumps = 1; // the horned warrior fight: just one double jump (the ? boxes give more)
     s.fireTime = kind === "fire" ? 999 : 0; // no timer in a boss fight
     s.mode = "running";
     s.flash = 1.6;
     const bossLabel = s.boss?.kind === "giant" ? "GIANT" : "TROLL";
-    s.flashText = s.lboss
+    s.flashText = s.kboss
+      ? "SHOOT THE HORNED WARRIOR!"
+      : s.lboss
       ? s.lboss.kind === "snowman"
         ? "SHOOT THE EVIL SNOWMAN!"
         : "SHOOT THE EVIL LEAF!"
@@ -2259,7 +3121,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         ? `FIGHT THE ${bossLabel}!`
         : `${bossLabel} #${s.bossCount + 1}!`;
     s.hinted = s.hinted.filter((h) => h !== "bossjump");
-    showHint("bossjump", "FREE DOUBLE JUMPS HERE!");
+    showHint("bossjump", s.kboss ? "1 DOUBLE JUMP! MORE IN THE ? BOXES" : "FREE DOUBLE JUMPS HERE!");
     s.hintTime = 4;
     playPowerUp();
   };
@@ -2281,9 +3143,13 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     s.mode = "running";
     if (s.stuttersOn) stuttersRef.current?.play().catch(() => {});
   };
-  // Leaves the game the same way the handheld's own Back button does
+  // Leaves the game the same way the handheld's own Back button does.
+  // (It waits one tiny moment first: when you pick HOME with Enter / OK, the page isn't listening
+  // for keys at that exact instant, so the "leave" used to get lost and nothing happened.)
   const goHome = () => {
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace" }));
+    window.setTimeout(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace" }));
+    }, 0);
   };
 
   // ---------- Outfits ----------
@@ -2307,21 +3173,42 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     } catch {}
   };
 
+  // Freezes the game on the boss's card. OK carries on to `next`: the spell pick, or straight into the fight.
+  const bossIntro = (id: BossId, next: "choose" | "running") => {
+    const s = state.current;
+    s.intro = { id, next, at: s.t };
+    s.mode = "bossIntro";
+    [196, 185, 175, 131].forEach((f, i) => beep(f, f * 0.97, 0.16, 0.06, "sawtooth", i * 0.14));
+  };
+  // You beat a boss: his card is yours now (kept in this browser)
+  const awardBossCard = () => {
+    const s = state.current;
+    const id: BossId | null = s.kboss ? s.kboss.kind : s.lboss ? s.lboss.kind : s.boss ? s.boss.kind : null;
+    if (!id || s.cards.includes(id)) return;
+    s.cards = [...s.cards, id];
+    try {
+      localStorage.setItem(CARDS_KEY, JSON.stringify(s.cards));
+    } catch {}
+    popup(s.x + SPRITE_W / 2, s.y - 14, "NEW BOSS CARD!");
+  };
+  const cardMove = (dir: number) => {
+    const s = state.current;
+    s.cardIndex = (s.cardIndex + dir + BOSS_CARDS.length) % BOSS_CARDS.length;
+  };
+
   const playTrollDeath = () => {
+    awardBossCard(); // every boss plays this sound when he goes down, so this is where you win his card
     try {
       const a = new Audio(TROLL_DEATH_SOUND);
       a.volume = sfxVolRef.current;
       a.muted = mutedRef.current;
-      const resume = () => window.dispatchEvent(new CustomEvent("pinkmane-music", { detail: "resume" }));
-      a.addEventListener("ended", resume);
-      a.addEventListener("error", resume);
-      window.dispatchEvent(new CustomEvent("pinkmane-music", { detail: "pause" }));
-      a.play().catch(resume);
+      // it just plays on top of whatever song is on: no death sound ever stops the music
+      a.play().catch(() => {});
     } catch {}
   };
 
   // A fireball or ice shot hits the troll
-  const hitBoss = (ice: boolean) => {
+  const hitBoss = (sparks: string[]) => {
     const s = state.current;
     const b = s.boss;
     if (!b || b.dead > 0 || b.dazed > 0) return;
@@ -2329,13 +3216,13 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const cx = b.x + (isGiant ? GIANT_W : TR_W) / 2;
     const cy = b.y + (isGiant ? GIANT_H : TR_H) / 2;
     if (b.hit > 0.3) {
-      burst(cx, cy, 5, ice ? ICE : FIRE, 30);
+      burst(cx, cy, 5, sparks, 30);
       return;
     }
     b.hp -= 1;
     b.hit = 0.5;
     b.vx = -b.facing * 60;
-    burst(cx, cy, 18, ice ? ICE : FIRE, 70);
+    burst(cx, cy, 18, sparks, 70);
     s.shake = 0.12;
     playStomp();
     if (b.hp <= 0) {
@@ -2360,7 +3247,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const inFight = s.bossState === "fight";
     if (hasFire() && !pit && !inFight) {
       // Getting hit while you have fire or ice only takes the power away
-      burst(s.x + SPRITE_W / 2, s.y + 8, 16, s.power === "ice" ? ICE : FIRE, 60);
+      burst(s.x + SPRITE_W / 2, s.y + 8, 16, powerSparks(s.power), 60);
       s.power = "none";
       s.ammo = 0;
       s.fireTime = 0;
@@ -2414,11 +3301,126 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
   };
 
+  // ---------- PINK SHOP: buying things ----------
+  const shopSay = (text: string) => {
+    const s = state.current;
+    s.shopMsg = text;
+    s.shopMsgAt = s.t;
+  };
+  // First line on screen (the list scrolls once it's longer than the screen)
+  const shopFirstRow = () =>
+    Math.max(0, Math.min(state.current.shopIndex - Math.floor(SHOP_VISIBLE / 2), SHOP_ROWS.length - SHOP_VISIBLE));
+  // Up / down in the list (the SPELLS / SKINS titles are skipped)
+  const shopMove = (dir: number) => {
+    const s = state.current;
+    let i = s.shopIndex;
+    for (let n = 0; n < SHOP_ROWS.length; n++) {
+      i = (i + dir + SHOP_ROWS.length) % SHOP_ROWS.length;
+      if (SHOP_ROWS[i].kind !== "head") break;
+    }
+    s.shopIndex = i;
+    s.shopMsg = "";
+  };
+  // Takes the coins if you have enough (and says how many you're short if you don't)
+  const shopPay = (cost: number) => {
+    const s = state.current;
+    if (s.coins < cost) {
+      shopSay(`YOU NEED ${cost - s.coins} MORE COINS`);
+      playBump();
+      return false;
+    }
+    s.coins -= cost;
+    try {
+      localStorage.setItem(COINS_KEY, String(s.coins));
+    } catch {}
+    return true;
+  };
+  // OK on the highlighted line: buy it, wear it, or go back
+  const shopPick = () => {
+    const s = state.current;
+    const row = SHOP_ROWS[s.shopIndex];
+    if (!row || row.kind === "head") return;
+    if (row.kind === "back") {
+      // back to where you came from: the Esc menu (your run is waiting) or the start screen
+      s.mode = s.shopFromPause ? "paused" : "home";
+      s.shopFromPause = false;
+      return;
+    }
+    if (row.kind === "soon") {
+      shopSay("COMING SOON!");
+      playBump();
+      return;
+    }
+    if (row.kind === "spell") {
+      const sp = row.spell;
+      if (s.spells.includes(sp.id)) {
+        shopSay("YOU ALREADY HAVE IT");
+        playBump();
+        return;
+      }
+      if (!shopPay(sp.cost)) return;
+      s.spells = [...s.spells, sp.id];
+      try {
+        localStorage.setItem(SPELLS_KEY, JSON.stringify(s.spells));
+      } catch {}
+      shopSay(`${sp.name} UNLOCKED!`);
+      playHeart();
+      return;
+    }
+    // a skin: buy it if you don't have it yet, then put it on
+    const o = row.outfit;
+    const isNew = !s.unlocked.includes(o.id);
+    if (isNew) {
+      if (!shopPay(o.cost ?? 0)) return;
+      unlockOutfit(o.id);
+      playHeart();
+    } else if (s.outfit === o.id) {
+      shopSay("YOU'RE WEARING IT");
+      return;
+    }
+    s.outfit = o.id;
+    s.selectIndex = Math.max(0, OUTFITS.findIndex((x) => x.id === o.id));
+    try {
+      localStorage.setItem(OUTFIT_KEY, o.id);
+    } catch {}
+    shopSay(isNew ? `${o.name} IS YOURS!` : "WEARING IT NOW");
+  };
+
   // Called on OK / Enter / Space / tapping the middle of the screen
   const press = () => {
     const s = state.current;
     getAudio(); // browsers only allow sound after a click, so wake it up here
+    if (s.mode === "shop") {
+      shopPick();
+      return;
+    }
+    if (s.mode === "bossIntro") {
+      // the boss card: OK starts the fight (not in the first moment, so you can't skip it by accident)
+      if (s.intro && s.t - s.intro.at < 0.7) return;
+      const next = s.intro ? s.intro.next : "running";
+      s.intro = null;
+      s.mode = next;
+      if (next === "running") s.flash = 2.4;
+      return;
+    }
+    if (s.mode === "cards") {
+      s.mode = "home";
+      return;
+    }
     if (s.mode === "home") {
+      if (s.homeChoice === 3) {
+        // the CARDS button
+        s.mode = "cards";
+        return;
+      }
+      if (s.homeChoice === 2) {
+        // the SHOP button
+        s.shopFromPause = false;
+        s.mode = "shop";
+        s.shopMsg = "";
+        if (!SHOP_ROWS[s.shopIndex] || SHOP_ROWS[s.shopIndex].kind === "head") s.shopIndex = 1;
+        return;
+      }
       // The pink start screen: pick INFINITE or LEVELS, then your outfit
       s.gameMode = s.homeChoice === 1 ? "levels" : "infinite";
       if (s.gameMode === "infinite") {
@@ -2433,7 +3435,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (LEVELS[s.levelPick]) startLevel(s.levelPick + 1);
       else {
         s.flash = 1.5;
-        s.flashText = "COMING SOON";
+        s.flashText = s.levelPick === WARLORD_STOP && !WARLORD_SHOWN ? WARLORD_SOON_TEXT : "COMING SOON";
       }
       return;
     }
@@ -2451,9 +3453,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
     if (s.mode === "select") {
       const o = OUTFITS[s.selectIndex];
-      if (!s.unlocked.includes(o.id) && o.id === "icy" && s.coins >= ICY_COST) {
+      if (!s.unlocked.includes(o.id) && !!o.cost && s.coins >= o.cost) {
         // buy it with gold coins
-        s.coins -= ICY_COST;
+        s.coins -= o.cost;
         try {
           localStorage.setItem(COINS_KEY, String(s.coins));
         } catch {}
@@ -2475,7 +3477,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         }
       } else {
         s.flash = 1.2;
-        s.flashText = `LOCKED \u2014 ${o.how}`;
+        s.flashText = `LOCKED \u2014 ${howToGet(o)}`;
       }
     } else if (s.mode === "golden") {
       closeGolden(false);
@@ -2493,6 +3495,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         const now = OUTFITS.findIndex((o) => o.id === s.outfit);
         if (now >= 0) s.selectIndex = now;
         s.mode = "select";
+      } else if (picked === "SHOP") {
+        // the run stays paused while you shop; BACK / Esc brings you back to this menu
+        s.shopFromPause = true;
+        s.shopMsg = "";
+        if (!SHOP_ROWS[s.shopIndex] || SHOP_ROWS[s.shopIndex].kind === "head") s.shopIndex = 1;
+        s.mode = "shop";
       } else if (picked === "GAME TYPE") {
         // back to the pink start screen: PINK RUN INFINITE or PINK LEVELS
         s.fromPause = false;
@@ -2529,10 +3537,15 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       return;
     }
     c.used = true;
-    // Fire is the most common, ice is rarer, double jump is the rarest
+    // Fire is the most common, ice is rarer, double jump is the rarest.
+    // Once you've bought SPIKE SHOT in the shop, its purple leaf is in there too.
     const r = Math.random();
     const kind: PowerKind =
-      s.bossState === "fight" ? s.bossSpell : r < 0.6 ? "fire" : r < 0.85 ? "ice" : "double";
+      s.bossState === "fight"
+        ? s.bossSpell
+        : s.spells.includes("spike")
+          ? r < 0.5 ? "fire" : r < 0.7 ? "ice" : r < 0.87 ? "spike" : "double"
+          : r < 0.6 ? "fire" : r < 0.85 ? "ice" : "double";
     s.powerups.push({
       x: col * T + 1,
       y: (c.bonus - 1) * T + 2,
@@ -2653,6 +3666,20 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           s.lboss.y = s.lboss.kind === "snowman" ? 8 * T - SN_H : 30;
           s.lboss.dive = 0;
         }
+        if (s.kboss) {
+          // the knight backs off so you get a fair restart
+          const kd = KN_DIM[s.kboss.kind];
+          s.kboss.x = s.cam + W - kd.w - 16;
+          s.kboss.y = 8 * T - kd.foot;
+          s.kboss.vx = 0;
+          s.kboss.vy = 0;
+          s.kboss.act = "walk";
+          s.kboss.cool = 1.5;
+          s.kboss.reach = 20;
+          if (s.kboss.kind === "warlord") s.kboss.ang = SW_IDLE;
+        }
+        s.kwaves = [];
+        s.kshots = [];
         s.invuln = 1.5;
         s.mode = "running";
       }
@@ -2696,8 +3723,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (want !== 0) s.facing = want;
 
     const target = want * RUN;
-    if (s.vx < target) s.vx = Math.min(target, s.vx + ACCEL * dt);
-    if (s.vx > target) s.vx = Math.max(target, s.vx - ACCEL * dt);
+    if (s.knockT > 0) {
+      s.knockT -= dt; // thrown off by WARLORD: no steering for a moment
+    } else {
+      if (s.vx < target) s.vx = Math.min(target, s.vx + ACCEL * dt);
+      if (s.vx > target) s.vx = Math.max(target, s.vx - ACCEL * dt);
+    }
     s.vy = Math.min(420, s.vy + GRAVITY * dt);
 
     // Jetpack: hold jump to fly, but only while there's fuel. Land to refuel.
@@ -2813,6 +3844,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         s.cam = Math.min(s.cam, s.cols.length * T - W);
         if (s.x + HB_X + HB_W > s.cols.length * T) s.x = s.cols.length * T - HB_X - HB_W;
         if (s.lbossState === "waiting" && s.cam >= s.bossCol * T) startLevelBoss();
+        if (s.karenas.length > 0 && s.bossState === "none" && s.cam >= s.karenas[0].col * T) startKnight();
       }
     }
 
@@ -2925,7 +3957,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           s.power = pu.kind;
           s.ammo += 3;
           if (pu.kind === "fire") s.fireTime = 999;
-          popup(pu.x + 7, pu.y - 4, "+3 SHOTS");
+          if (s.kboss && s.kboss.kind === "horned") {
+            s.doubleJumps = Math.max(s.doubleJumps, 1);
+            popup(pu.x + 7, pu.y - 4, "+3 SHOTS +1 JUMP");
+          } else popup(pu.x + 7, pu.y - 4, "+3 SHOTS");
         } else if (pu.kind === "fire") {
           s.power = "fire";
           s.ammo = FIRE_AMMO;
@@ -2938,13 +3973,19 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           s.fireTime = 0;
           popup(pu.x + 7, pu.y - 4, "ICE!");
           showHint("shoot", "PRESS S TO SHOOT");
+        } else if (pu.kind === "spike") {
+          s.power = "spike";
+          s.ammo = SPIKE_AMMO;
+          s.fireTime = 0;
+          popup(pu.x + 7, pu.y - 4, "SPIKES!");
+          showHint("shoot", "PRESS S TO SHOOT");
         } else {
           s.doubleJumps = DOUBLE_JUMPS;
           popup(pu.x + 7, pu.y - 4, "DOUBLE JUMP!");
           showHint("double", "JUMP AGAIN IN THE AIR!");
         }
         s.bonus += 100;
-        burst(pu.x + 7, pu.y + 7, 20, pu.kind === "fire" ? FIRE : pu.kind === "ice" ? ICE : TURQ, 70);
+        burst(pu.x + 7, pu.y + 7, 20, powerSparks(pu.kind), 70);
         playPowerUp();
         pu.y = 999;
       }
@@ -2961,7 +4002,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           y: s.y + rand(0, 10),
           vx: rand(-10, 10),
           vy: rand(-60, -30),
-          color: (s.power === "ice" ? ICE : FIRE)[Math.floor(Math.random() * 3)],
+          color: powerSparks(s.power)[Math.floor(Math.random() * 3)],
           life: rand(0.2, 0.4),
         });
       }
@@ -2970,14 +4011,21 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     // Fireballs bounce along the ground and burn monsters
     for (const f of s.fireballs) {
       f.life -= dt;
-      if (!f.ice) f.vy = Math.min(300, f.vy + 900 * dt);
+      if (!f.ice && !f.spike) f.vy = Math.min(300, f.vy + 900 * dt);
       f.x += f.vx * dt;
+      if (f.spike) f.y += f.vy * dt; // spikes fly dead straight, whichever way they were thrown
       if (solidAt(f.x + (f.vx > 0 ? 4 : 0), f.y + 2)) {
         f.life = 0;
-        burst(f.x, f.y, 6, f.ice ? ICE : FIRE, 40);
+        burst(f.x, f.y, f.spike ? 3 : 6, shotSparks(f), 40);
         continue;
       }
-      if (f.ice) {
+      if (f.spike) {
+        // little purple trail
+        if (Math.random() < 0.4) {
+          s.particles.push({ x: f.x + 1, y: f.y + 1, vx: 0, vy: 0, color: SPIKE[Math.floor(Math.random() * 3)], life: 0.15 });
+        }
+        if (f.y < -40) f.life = 0;
+      } else if (f.ice) {
         // little frost trail
         if (Math.random() < 0.5) {
           s.particles.push({ x: f.x, y: f.y + rand(0, 4), vx: 0, vy: rand(-10, 10), color: ICE[Math.floor(Math.random() * 4)], life: 0.25 });
@@ -2999,6 +4047,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           break;
         }
       }
+      // SPIKE SHOT: only the first spike of a burst hurts a boss, the others just pop on him
+      const spent = !!f.spike && f.volley === s.spikeHitVolley;
       const tb = s.boss;
       if (f.life > 0 && tb && tb.dead <= 0 && tb.dazed <= 0) {
         const tbGiant = tb.kind === "giant";
@@ -3008,7 +4058,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         const bh1 = tbGiant ? GIANT_HH : TR_HH;
         if (f.x + 4 > bx1 && f.x < bx1 + bw1 && f.y + 4 > by1 && f.y < by1 + bh1) {
           f.life = 0;
-          hitBoss(f.ice);
+          if (!spent) {
+            if (f.spike) s.spikeHitVolley = f.volley ?? -1;
+            hitBoss(shotSparks(f));
+          }
         }
       }
       const lb = s.lboss;
@@ -3017,7 +4070,53 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         const bh = lb.kind === "snowman" ? SN_H : EL_H;
         if (lb.dazed <= 0 && f.x + 4 > lb.x + 6 && f.x < lb.x + bw - 6 && f.y + 4 > lb.y + 4 && f.y < lb.y + bh - 4) {
           f.life = 0;
-          hitLevelBoss(f.ice);
+          if (!spent) {
+            if (f.spike) s.spikeHitVolley = f.volley ?? -1;
+            hitLevelBoss(shotSparks(f));
+          }
+        }
+      }
+      // LEVEL 3 knights: the horned warrior takes shots, the skeleton's armour shrugs them off,
+      // and WARLORD's shield knocks them straight back
+      const kf = s.kboss;
+      if (f.life > 0 && kf && kf.dead <= 0) {
+        const kbx = knightBox(kf);
+        if (f.x + 4 > kbx.x1 && f.x < kbx.x2 && f.y + 4 > kbx.y1 && f.y < kbx.y2) {
+          if (spent) {
+            f.life = 0;
+          } else if (kf.kind === "horned") {
+            f.life = 0;
+            if (f.spike) s.spikeHitVolley = f.volley ?? -1;
+            kf.hp -= 1;
+            kf.hit = 0.35;
+            burst((kbx.x1 + kbx.x2) / 2, kf.y + 24, 16, shotSparks(f), 70);
+            s.shake = 0.1;
+            playStomp();
+            if (kf.hp <= 0) {
+              kf.dead = 1.6;
+              kf.vx = 0;
+              popup((kbx.x1 + kbx.x2) / 2, kbx.y1 - 10, "BYE HORNS!");
+              playTrollDeath();
+            } else {
+              popup((kbx.x1 + kbx.x2) / 2, kbx.y1 - 10, `${kf.hp} LEFT`);
+              if (kf.hp === kf.maxHp - HORNED_AMMO) {
+                s.flash = 2.5;
+                s.flashText = "HE'S RAGING! JUMP HIM, HIT THE BOX";
+              }
+            }
+          } else if (kf.kind === "warlord") {
+            f.vx = -f.vx;
+            f.x = f.vx < 0 ? kbx.x1 - 8 : kbx.x2 + 4;
+            f.life = Math.min(f.life, 0.5);
+            burst(f.x, f.y, 6, ["#f0c030", "#ffffff"], 60);
+            popup(f.x, f.y - 10, "BLOCKED!");
+            playBump();
+          } else {
+            f.life = 0;
+            burst(f.x, f.y, 6, KNIGHT_DUST, 50);
+            popup(f.x, f.y - 10, "CLANG!");
+            playBump();
+          }
         }
       }
     }
@@ -3237,6 +4336,327 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         }
       }
     }
+
+    // ---------- LEVEL 3 knights ----------
+    const kn = s.kboss;
+    if (s.levelMode && kn) {
+      const d = KN_DIM[kn.kind];
+      const floorY = 8 * T - d.foot;
+      if (kn.hit > 0) kn.hit -= dt;
+      if (kn.inv > 0) kn.inv -= dt;
+      const pc = s.x + HB_X + HB_W / 2;
+      const bc = kn.x + d.w / 2;
+      const towards = pc < bc ? -1 : 1;
+      if (kn.dead > 0) {
+        // falling apart
+        kn.dead -= dt;
+        kn.y += 26 * dt;
+        if (Math.random() < 0.7) burst(kn.x + rand(10, d.w - 10), kn.y + rand(10, d.foot), 2, KNIGHT_DUST, 50);
+        if (kn.dead <= 0) {
+          s.kboss = null;
+          s.bossState = "none"; // the screen scrolls again
+          s.kwaves = [];
+          s.kshots = [];
+          s.flash = 2.5;
+          s.flashText =
+            kn.kind === "warlord" ? "WARLORD IS DOWN! GO HIT THE BONG" : kn.kind === "horned" ? "HORNED WARRIOR DOWN! KEEP GOING" : "SKELETON KNIGHT DOWN! KEEP GOING";
+          if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
+          s.ammo = Math.min(s.ammo, 5);
+        }
+      } else {
+        const angry = kn.kind === "warlord" && kn.hp <= Math.ceil(kn.maxHp / 2);
+        const onFloor = kn.y >= floorY - 0.5;
+        if (kn.act === "stagger") {
+          // just got stomped: slides back a bit
+          kn.timer -= dt;
+          kn.vx *= Math.max(0, 1 - dt * 5);
+          if (kn.timer <= 0) {
+            if (kn.kind === "warlord") {
+              // he gets straight back up and blasts you with his eyes
+              kn.act = "beam";
+              kn.timer = 0.45;
+              kn.waves = EYE_WAVES;
+            } else {
+              kn.act = "walk";
+              kn.cool = Math.max(kn.cool, 0.6);
+            }
+          }
+        } else if (kn.kind === "horned") {
+          // THE HORNED WARRIOR: runs at you (fast!) swinging his chain mace round and round.
+          // Every few seconds he lets the chain out wide. Only shots hurt him.
+          kn.facing = towards;
+          const rage = kn.hp <= kn.maxHp - HORNED_AMMO;
+          kn.ang += dt * (kn.act === "swing" ? 11 : rage ? 10 : 7) * (kn.facing < 0 ? -1 : 1);
+          if (rage && Math.random() < 0.3) burst(kn.x + rand(10, 38), kn.y + rand(0, 12), 1, ["#ff2a2a", "#ff8f40"], 30);
+          if (kn.act === "swing") {
+            kn.vx = 0;
+            kn.timer -= dt;
+            const k = 1 - Math.abs((kn.timer / 1.3) * 2 - 1);
+            kn.reach = 20 + HORNED_SWING_REACH * Math.max(0, k);
+            if (kn.timer <= 0) {
+              kn.act = "walk";
+              kn.cool = rand(1.0, 1.8);
+              kn.reach = 20;
+            }
+          } else {
+            kn.vx = kn.facing * (rage ? HORNED_RAGE_SPEED : HORNED_SPEED);
+            kn.cool -= dt;
+            if (kn.cool <= 0 && Math.abs(pc - bc) < 150 && s.onGround) {
+              kn.act = "swing";
+              kn.timer = 1.3;
+              playBump();
+            }
+          }
+        } else if (kn.kind === "skeleton") {
+          // THE SKELETON KNIGHT: walks up to you, shakes for a split second, then slashes far in front of him.
+          // Jump over the slash and land on his head.
+          if (kn.act === "walk") {
+            kn.facing = towards;
+            kn.vx = kn.facing * 46;
+            kn.cool -= dt;
+            if (kn.cool <= 0 && Math.abs(pc - bc) < 95) {
+              kn.act = "wind";
+              kn.timer = 0.28;
+              kn.vx = 0;
+            }
+          } else if (kn.act === "wind") {
+            kn.vx = 0;
+            kn.timer -= dt;
+            if (kn.timer <= 0) {
+              kn.act = "swing";
+              kn.timer = 0.25;
+              beep(900, 200, 0.12, 0.05, "sawtooth");
+            }
+          } else if (kn.act === "swing") {
+            kn.vx = kn.facing * 70;
+            kn.timer -= dt;
+            if (kn.timer <= 0) {
+              kn.act = "rest";
+              kn.timer = 0.45;
+            }
+          } else {
+            kn.vx = 0;
+            kn.timer -= dt;
+            if (kn.timer <= 0) {
+              kn.act = "walk";
+              kn.cool = rand(0.25, 0.7);
+            }
+          }
+        } else {
+          // WARLORD COLOSSUS: shield up, giant sword. Pulls the sword back, then SLAMS it down in
+          // front of him and a shockwave runs along the floor (jump it). After a slam he needs a
+          // moment to lift the sword again: that's your chance to land on his head.
+          // At half health he gets angry: faster, shockwaves both ways, and he jumps at you.
+          const sp = angry ? 1.45 : 1;
+          if (kn.act === "walk") {
+            kn.facing = towards;
+            kn.vx = kn.facing * 24 * sp;
+            kn.ang += (SW_IDLE - kn.ang) * Math.min(1, dt * 4);
+            kn.cool -= dt;
+            if (kn.cool <= 0) {
+              if (Math.abs(pc - bc) < 130 && Math.random() < 0.7) {
+                kn.act = "wind";
+                kn.timer = angry ? 0.5 : 0.75;
+                kn.vx = 0;
+                playBump();
+              } else if (angry && Math.random() < 0.4) {
+                kn.act = "hop";
+                kn.vy = -360;
+                kn.vx = kn.facing * 110;
+                playBump();
+              } else {
+                // eyes start glowing... sound waves incoming
+                kn.act = "beam";
+                kn.timer = 0.6;
+                kn.waves = EYE_WAVES;
+                kn.vx = 0;
+              }
+            }
+          } else if (kn.act === "wind") {
+            kn.vx = 0;
+            kn.timer -= dt;
+            kn.ang += (SW_BACK - kn.ang) * Math.min(1, dt * 8);
+            if (kn.timer <= 0) {
+              kn.act = "swing";
+              kn.timer = 0.26;
+              beep(500, 90, 0.25, 0.08, "sawtooth");
+            }
+          } else if (kn.act === "swing") {
+            kn.vx = 0;
+            kn.timer -= dt;
+            const k = 1 - Math.max(0, kn.timer) / 0.26;
+            kn.ang = SW_BACK + (SW_SLAM - SW_BACK) * k * k;
+            if (kn.timer <= 0) {
+              kn.ang = SW_SLAM;
+              const tip = knightSwordPoint(kn, 1);
+              s.kwaves.push({ x: tip.x, dir: kn.facing, life: 1.1 });
+              if (angry) s.kwaves.push({ x: tip.x, dir: -kn.facing, life: 1.1 });
+              s.shake = 0.25;
+              burst(tip.x, 8 * T - 2, 14, KNIGHT_DUST, 80);
+              playBump();
+              kn.act = "rest";
+              kn.timer = angry ? 0.9 : 1.3;
+            }
+          } else if (kn.act === "beam") {
+            kn.vx = 0;
+            kn.timer -= dt;
+            if (kn.timer <= 0) {
+              fireEyeWaves(kn);
+              kn.waves -= 1;
+              if (kn.waves > 0) kn.timer = 0.4; // the next wave, aimed at where you are now
+              else {
+                kn.act = "rest";
+                kn.timer = 0.6;
+              }
+            }
+          } else if (kn.act === "hop") {
+            if (onFloor && kn.vy >= 0) {
+              // lands: shockwaves both ways
+              const b = knightBox(kn);
+              s.kwaves.push({ x: b.x1, dir: -1, life: 1 }, { x: b.x2, dir: 1, life: 1 });
+              s.shake = 0.3;
+              playBump();
+              kn.vx = 0;
+              kn.act = "rest";
+              kn.timer = 0.8;
+            }
+          } else {
+            kn.vx = 0;
+            kn.timer -= dt;
+            if (kn.timer <= 0) {
+              kn.act = "walk";
+              kn.cool = rand(1.1, 1.9) / sp;
+            }
+          }
+        }
+        kn.vy = Math.min(420, kn.vy + GRAVITY * dt);
+        kn.x += kn.vx * dt;
+        kn.y += kn.vy * dt;
+        if (kn.y > floorY) {
+          kn.y = floorY;
+          kn.vy = 0;
+        }
+        kn.x = Math.max(s.cam - d.hb[0] + 4, Math.min(s.cam + W - d.hb[1] - 4, kn.x));
+
+        // his weapons hurt you
+        if (s.invuln <= 0) {
+          const px1 = hx();
+          const px2 = hx() + HB_W;
+          const py1 = hy();
+          const py2 = hy() + HB_H;
+          let hitMe = false;
+          if (kn.kind === "horned") {
+            const m = maceBall(kn);
+            if (m.x + 8 > px1 && m.x - 8 < px2 && m.y + 8 > py1 && m.y - 8 < py2) hitMe = true;
+          } else if (kn.kind === "skeleton" && kn.act === "swing") {
+            const r = skeletonSwordBox(kn);
+            if (r.x2 > px1 && r.x1 < px2 && r.y2 > py1 && r.y1 < py2) hitMe = true;
+          } else if (kn.kind === "warlord" && kn.act === "swing") {
+            for (let k = 0.3; k <= 1.001; k += 0.08) {
+              const p = knightSwordPoint(kn, k);
+              if (p.x > px1 - 2 && p.x < px2 + 2 && p.y > py1 - 2 && p.y < py2 + 2) hitMe = true;
+            }
+          }
+          if (hitMe) {
+            hurt();
+            return;
+          }
+        }
+
+        // touching his body hurts, landing on his head hurts HIM (except the horned warrior)
+        const bx = knightBox(kn);
+        if (hx() + HB_W > bx.x1 && hx() < bx.x2 && hy() + HB_H > bx.y1 && hy() < bx.y2) {
+          const onTop = s.vy > 0 && hy() + HB_H - bx.y1 < 16;
+          if (onTop) {
+            s.y = bx.y1 - HB_Y - HB_H - 1;
+            if (kn.kind === "horned") {
+              s.vy = STOMP_BOUNCE;
+              popup(bc, bx.y1 - 10, "NOPE! SHOOT HIM");
+              playBump();
+            } else if (kn.inv > 0) {
+              s.vy = STOMP_BOUNCE;
+              playBump();
+            } else {
+              kn.hp -= 1;
+              kn.hit = 0.4;
+              kn.inv = kn.kind === "warlord" ? 1.2 : 0.7;
+              s.vy = -300;
+              s.airJumped = false;
+              if (kn.kind === "warlord") {
+                // he shakes you off: you get thrown away from him and can't steer for a moment
+                s.vx = (pc < bc ? -1 : 1) * 260;
+                s.vy = -340;
+                s.knockT = 0.45;
+              }
+              burst(bc, bx.y1, 18, KNIGHT_DUST, 90);
+              s.shake = 0.15;
+              playStomp();
+              if (kn.hp <= 0) {
+                kn.dead = 1.8;
+                kn.vx = 0;
+                s.kwaves = [];
+                s.kshots = [];
+                popup(bc, bx.y1 - 10, kn.kind === "warlord" ? "THE WARLORD FALLS!" : "CRUMBLED!");
+                playTrollDeath();
+              } else {
+                popup(bc, bx.y1 - 10, `${kn.hp} LEFT`);
+                kn.act = "stagger";
+                kn.timer = 0.5;
+                kn.vx = (bc > pc ? 1 : -1) * 110;
+                if (kn.kind === "warlord") {
+                  kn.ang = SW_IDLE;
+                  if (kn.hp === Math.ceil(kn.maxHp / 2)) {
+                    s.flash = 2;
+                    s.flashText = "THE WARLORD IS ANGRY NOW!";
+                  }
+                }
+              }
+            }
+          } else if (s.invuln <= 0) {
+            hurt();
+            return;
+          }
+        }
+      }
+      // the arena's bonus blocks refill every few seconds
+      s.bossRefill += dt;
+      if (s.bossRefill > 10) {
+        s.bossRefill = 0;
+        for (let k = 0; k < 22; k++) {
+          const c = colAt(s.bossCol + k);
+          if (c.bonus >= 0 && c.used) {
+            c.used = false;
+            c.bump = 0.15;
+          }
+        }
+      }
+    }
+    // WARLORD's shockwaves running along the floor: jump over them
+    for (const w of s.kwaves) {
+      w.x += w.dir * 150 * dt;
+      w.life -= dt;
+      if (w.life > 0 && s.invuln <= 0) {
+        const pcx = s.x + HB_X + HB_W / 2;
+        if (Math.abs(pcx - w.x) < 8 && hy() + HB_H > 8 * T - 10) {
+          w.life = 0;
+          hurt();
+          return;
+        }
+      }
+    }
+    s.kwaves = s.kwaves.filter((w) => w.life > 0 && w.x > s.cam - 20 && w.x < s.cam + W + 20);
+    // WARLORD's sound waves from his eyes: dodge them
+    for (const w of s.kshots) {
+      w.x += w.vx * dt;
+      w.y += w.vy * dt;
+      w.life -= dt;
+      if (w.life > 0 && s.invuln <= 0 && w.x + 4 > hx() && w.x - 4 < hx() + HB_W && w.y + 4 > hy() && w.y - 4 < hy() + HB_H) {
+        w.life = 0;
+        hurt();
+        return;
+      }
+    }
+    s.kshots = s.kshots.filter((w) => w.life > 0 && w.x > s.cam - 20 && w.x < s.cam + W + 20 && w.y > -80 && w.y < H + 20);
 
     // The bong: touch it to finish the level
     const bg = s.bong;
@@ -3764,6 +5184,40 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
   };
 
+  // LEVEL 3 backdrop: your cathedral, with the vines, grey squiggles, red title and its echoes wiggling.
+  // It scrolls at half speed and lines up exactly when the WARLORD arena locks.
+  const drawKeep = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    ctx.fillStyle = "#1c0a18";
+    ctx.fillRect(-4, -1200, W + 8, H + 1400);
+    const im = keepImgsRef.current;
+    const ok = (k: string) => !!im[k] && im[k].complete && im[k].naturalWidth > 0;
+    const t = s.t * Math.PI;
+    // draws a picture one row at a time, each row nudged sideways by a wave = the wiggle
+    const wig = (k: string, dx: number, w: number, y0: number, y1: number, amp: number, freq: number, speed: number, ph: number) => {
+      if (!ok(k)) return;
+      for (let y = y0; y <= y1; y++) {
+        const shift = Math.round(amp * Math.sin(y * freq + t * speed + ph));
+        ctx.drawImage(im[k], 0, y, w, 1, Math.round(dx) + shift, y, w, 1);
+      }
+    };
+    const rel = (s.cam - s.kfinalCol * T) * 0.5;
+    const off = -(((rel % KEEP_TILE) + KEEP_TILE) % KEEP_TILE);
+    for (let i = 0; i < 2; i++) {
+      const dx = Math.round(off + i * KEEP_TILE);
+      if (ok("back")) ctx.drawImage(im.back, 0, 0, KEEP_TILE, 128, dx, 0, KEEP_TILE, 128);
+      wig("vines", dx, KEEP_TILE, 28, 122, 1.4, 0.18, 1.0, 0);
+      wig("grey", dx, KEEP_TILE, 6, 88, 1.6, 0.45, 1.7, 0);
+      if (ok("candles")) ctx.drawImage(im.candles, 0, 0, KEEP_TILE, 128, dx, 0, KEEP_TILE, 128);
+    }
+    // the big WARLORD COLOSSUS title only hangs in his arena
+    const ax = -rel;
+    if (s.kfinalCol > 0 && ax > -W && ax < W) {
+      wig("echo", ax, W, 5, 57, 2.6, 0.3, 1.4, 2);
+      wig("title", ax, W, 17, 71, 1.0, 0.35, 1.2, 0);
+    }
+  };
+
   const drawBackground = (ctx: CanvasRenderingContext2D, zone: number) => {
     const s = state.current;
     const cam = s.cam;
@@ -3773,6 +5227,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
     if (zone === LEVEL_SNOW) {
       drawSnowland(ctx);
+      return;
+    }
+    if (zone === LEVEL_KEEP) {
+      drawKeep(ctx);
       return;
     }
 
@@ -4022,6 +5480,18 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     const s = state.current;
     const gy = c.ground * T;
     if (c.pipe) return;
+    if (c.zone === LEVEL_KEEP) {
+      // stone floor tiles, like the arena floor in your drawing
+      ctx.fillStyle = "#28242e";
+      ctx.fillRect(x, gy, T, H - gy);
+      for (let yy = gy; yy < H; yy += T) {
+        ctx.fillStyle = "#48424e";
+        ctx.fillRect(x + 1, yy + 1, T - 2, T - 2);
+      }
+      ctx.fillStyle = "#5a5462";
+      ctx.fillRect(x + 1, gy + 1, T - 2, 2);
+      return;
+    }
     if (c.zone === VOID_ZONE) {
       ctx.fillStyle = INK;
       ctx.fillRect(x, gy, T, H - gy);
@@ -4273,6 +5743,19 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
   const drawBrick = (ctx: CanvasRenderingContext2D, x: number, by: number, zone: number) => {
     // Cover-art fields: each has its own thing to jump on
     if (zone === F_GAF || zone === LEVEL_ZONE) return drawPixels(ctx, NUG, x, by, NUG_COLORS);
+    if (zone === LEVEL_KEEP) {
+      // a cracked stone block
+      ctx.fillStyle = "#28242e";
+      ctx.fillRect(x, by, T, T);
+      ctx.fillStyle = "#5a5462";
+      ctx.fillRect(x + 1, by + 1, T - 2, T - 2);
+      ctx.fillStyle = "#48424e";
+      ctx.fillRect(x + 1, by + 8, T - 2, 7);
+      ctx.fillStyle = "#28242e";
+      ctx.fillRect(x + 7, by + 1, 1, 7);
+      ctx.fillRect(x + 4, by + 8, 1, 7);
+      return;
+    }
     if (zone === LEVEL_SNOW) {
       // an ice block
       ctx.fillStyle = "#3a7fa8";
@@ -4376,7 +5859,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       {
         title: ["PINK", "LEVELS"],
         text: ["BEAT THE LEVELS,", "HIT THE BONG,", "SET THE", "FASTEST TIME!"],
-        foot: `${Object.keys(s.levelBest).length}/${LEVELS.length} DONE`,
+        foot: `${Object.keys(s.levelBest).filter((k) => Number(k) <= LEVELS.length).length}/${LEVELS.length} DONE`,
       },
     ];
     blocks.forEach((b, i) => {
@@ -4410,12 +5893,282 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     });
     if (Math.floor(s.t * 2) % 2 === 0) {
       ctx.fillStyle = "#ffffff";
-      ctx.fillText("< > TO PICK, OK TO GO", W / 2, H - 12);
+      ctx.fillText(
+        s.homeChoice === 2 ? "OK TO OPEN THE SHOP, DOWN TO GO BACK" : s.homeChoice === 3 ? "OK TO SEE YOUR BOSS CARDS, DOWN = BACK" : "< > PICK, UP: CARDS + SHOP, OK TO GO",
+        W / 2,
+        H - 12
+      );
+    }
+    // The SHOP button (top right): UP to get on it, OK to go in. Shows your gold coins.
+    const shopOn = s.homeChoice === 2;
+    const sx = W - 98;
+    const sy = 2;
+    const sw = 90;
+    const sh = 12;
+    ctx.fillStyle = INK;
+    ctx.fillRect(sx - 2, sy - 2, sw + 4, sh + 4);
+    ctx.fillStyle = shopOn ? (Math.floor(s.t * 3) % 2 === 0 ? "#ffffff" : "#ffd6f4") : "#8a1f86";
+    ctx.fillRect(sx - 1, sy - 1, sw + 2, sh + 2);
+    ctx.fillStyle = shopOn ? "#ffd700" : "#b43aa4";
+    ctx.fillRect(sx + 1, sy + 1, sw - 2, sh - 2);
+    ctx.fillStyle = shopOn ? INK : "#f8d8f0";
+    ctx.textAlign = "left";
+    ctx.fillText("SHOP", sx + 5, sy + 2);
+    ctx.textAlign = "right";
+    ctx.fillText(`${Math.min(s.coins, 9999)}`, sx + sw - 4, sy + 2);
+    drawCoin(ctx, sx + 41, sy + 2);
+    // The CARDS button (top left): your boss cards, and how many you have
+    const cardsOn = s.homeChoice === 3;
+    const cbx = 8;
+    ctx.fillStyle = INK;
+    ctx.fillRect(cbx - 2, sy - 2, sw + 4, sh + 4);
+    ctx.fillStyle = cardsOn ? (Math.floor(s.t * 3) % 2 === 0 ? "#ffffff" : "#ffd6f4") : "#8a1f86";
+    ctx.fillRect(cbx - 1, sy - 1, sw + 2, sh + 2);
+    ctx.fillStyle = cardsOn ? "#ffd700" : "#b43aa4";
+    ctx.fillRect(cbx + 1, sy + 1, sw - 2, sh - 2);
+    ctx.fillStyle = cardsOn ? INK : "#f8d8f0";
+    ctx.textAlign = "left";
+    ctx.fillText("CARDS", cbx + 5, sy + 2);
+    ctx.textAlign = "right";
+    ctx.fillText(`${s.cards.length}/${BOSS_CARDS.length}`, cbx + sw - 4, sy + 2);
+    ctx.textAlign = "center";
+  };
+
+  // ---------- BOSS CARDS: the card before a fight, and your collection ----------
+  const drawBossIntro = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    const it = s.intro;
+    const card = it ? BOSS_CARDS.find((c) => c.id === it.id) : undefined;
+    if (!it || !card) return;
+    ctx.fillStyle = "rgba(22, 12, 29, 0.92)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.font = `8px ${fontFamily}`;
+    // the card drops in from the top
+    const k = Math.min(1, (s.t - it.at) / 0.35);
+    const cy = Math.round(-CARD_H + (6 + CARD_H) * (1 - (1 - k) * (1 - k)));
+    drawBossCard(ctx, card, (W - CARD_W) / 2, cy, true, s.t);
+    const left = (W - CARD_W) / 4; // middle of the space left of the card
+    const right = W - left;
+    ctx.fillStyle = Math.floor(s.t * 6) % 2 === 0 ? "#ff5fe0" : "#ffffff";
+    // the main bosses get their own shout
+    ctx.fillText(card.main ? "MAIN" : "BOSS", left, 34);
+    ctx.fillText(card.main ? "BOSS!" : "FIGHT!", left, 46);
+    ctx.fillStyle = "#ffd700";
+    if (s.cards.includes(card.id)) {
+      ctx.fillText("YOU HAVE", left, 100);
+      ctx.fillText("HIS CARD", left, 110);
+    } else {
+      ctx.fillText("BEAT HIM", left, 100);
+      ctx.fillText("TO KEEP", left, 110);
+      ctx.fillText("THE CARD", left, 120);
+    }
+    if (k >= 1 && Math.floor(s.t * 2) % 2 === 0) {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText("OK TO", right, 70);
+      ctx.fillText("FIGHT", right, 82);
+    }
+  };
+  const drawCards = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    ctx.fillStyle = "#1a1030";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#22163c";
+    for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
+    ctx.font = `8px ${fontFamily}`;
+    const n = BOSS_CARDS.length;
+    const card = BOSS_CARDS[s.cardIndex] ?? BOSS_CARDS[0];
+    drawBossCard(ctx, card, (W - CARD_W) / 2, 6, s.cards.includes(card.id), s.t);
+    const left = (W - CARD_W) / 4;
+    const right = W - left;
+    ctx.fillStyle = "#ffd700";
+    ctx.fillText("BOSS", left, 8);
+    ctx.fillText("CARDS", left, 18);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(`${s.cardIndex + 1}/${n}`, right, 13);
+    // one little card per boss: gold = you have it, grey = locked, white frame = the one you're looking at
+    BOSS_CARDS.forEach((c, i) => {
+      const dx = Math.round(left - (n * 10) / 2 + i * 10);
+      if (i === s.cardIndex) {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(dx - 1, 37, 9, 12);
+      }
+      ctx.fillStyle = s.cards.includes(c.id) ? "#f0c030" : "#5a5a5a";
+      ctx.fillRect(dx, 38, 7, 10);
+    });
+    if (Math.floor(s.t * 2) % 2 === 0) {
+      ctx.fillStyle = "#ff5fe0";
+      ctx.fillText("<", (W - CARD_W) / 2 - 10, 76);
+      ctx.fillText(">", (W + CARD_W) / 2 + 10, 76);
+    }
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText("YOU HAVE", left, 112);
+    ctx.fillText(`${s.cards.length} OF ${n}`, left, 122);
+    ctx.fillStyle = "#d8b8e8";
+    ctx.fillText("OK / ESC", right, 112);
+    ctx.fillText("BACK", right, 122);
+  };
+
+  // ---------- PINK SHOP: the screen ----------
+  const drawCoin = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+    ctx.fillStyle = "#6b4a00";
+    ctx.fillRect(x, y, 8, 8);
+    ctx.fillStyle = "#ffd700";
+    ctx.fillRect(x + 1, y + 1, 6, 6);
+    ctx.fillStyle = "#fff3a0";
+    ctx.fillRect(x + 2, y + 2, 2, 2);
+  };
+  const drawShop = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    const on = Math.floor(s.t * 3) % 2 === 0;
+    ctx.fillStyle = "#2a1040";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#33164d";
+    for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
+    ctx.font = `8px ${fontFamily}`;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "center";
+    ctx.fillStyle = INK;
+    ctx.fillText("PINK SHOP", W / 2 + 1, 6);
+    ctx.fillStyle = "#ffd700";
+    ctx.fillText("PINK SHOP", W / 2, 5);
+    // your gold coins (top right)
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(`${s.coins}`, W - 8, 5);
+    drawCoin(ctx, W - 20 - String(s.coins).length * 8, 4);
+
+    // The list on the left
+    const first = shopFirstRow();
+    for (let i = first; i < Math.min(SHOP_ROWS.length, first + SHOP_VISIBLE); i++) {
+      const row = SHOP_ROWS[i];
+      const y = SHOP_TOP + (i - first) * SHOP_ROW_H;
+      ctx.textAlign = "left";
+      if (row.kind === "head") {
+        ctx.fillStyle = "#ffd700";
+        ctx.fillText(row.label, 8, y);
+        const lx = 8 + row.label.length * 8 + 4;
+        ctx.fillStyle = "#6a3a8a";
+        ctx.fillRect(lx, y + 3, 214 - lx, 1);
+        continue;
+      }
+      const picked = i === s.shopIndex;
+      if (picked) {
+        ctx.fillStyle = on ? PINK : "#ff5fe0";
+        ctx.fillRect(6, y - 1, 208, SHOP_ROW_H);
+      }
+      let label = "BACK";
+      let tag = ""; // OWNED / WORN / SOON
+      let price = 0;
+      if (row.kind === "spell") {
+        label = row.spell.name;
+        if (s.spells.includes(row.spell.id)) tag = "OWNED";
+        else price = row.spell.cost;
+      } else if (row.kind === "soon") {
+        label = row.label;
+        tag = "SOON";
+      } else if (row.kind === "skin") {
+        label = row.outfit.name;
+        if (s.outfit === row.outfit.id) tag = "WORN";
+        else if (s.unlocked.includes(row.outfit.id)) tag = "OWNED";
+        else price = row.outfit.cost ?? 0;
+      }
+      const dim = row.kind === "soon";
+      ctx.fillStyle = picked ? "#ffffff" : dim ? "#8f7fa6" : "#e8d0f0";
+      ctx.fillText(label, 12, y);
+      ctx.textAlign = "right";
+      if (price > 0) {
+        // gold = you can afford it, pale red = not yet (white on the highlighted line)
+        ctx.fillStyle = picked ? "#ffffff" : s.coins >= price ? "#ffd700" : "#c08a9a";
+        ctx.fillText(`${price}`, 210, y);
+        drawCoin(ctx, 210 - String(price).length * 8 - 10, y - 1);
+      } else if (tag) {
+        ctx.fillStyle = picked ? "#ffffff" : dim ? "#8f7fa6" : "#6fdc5a";
+        ctx.fillText(tag, 210, y);
+      }
+    }
+
+    // The picture on the right: the skin, or the spell doing its thing
+    const px = 222;
+    const py = 17;
+    const pw = 106;
+    const ph = 99;
+    ctx.fillStyle = INK;
+    ctx.fillRect(px - 2, py - 2, pw + 4, ph + 4);
+    ctx.fillStyle = "#8a1f86";
+    ctx.fillRect(px - 1, py - 1, pw + 2, ph + 2);
+    ctx.fillStyle = "#170a24";
+    ctx.fillRect(px, py, pw, ph);
+    const row = SHOP_ROWS[s.shopIndex];
+    const drawDude = (id: OutfitId, x: number, y: number, scale: number) => {
+      const sprite = spritesRef.current[id];
+      if (sprite && sprite.complete && sprite.naturalWidth > 0) {
+        const frame = sprite.naturalWidth >= SPRITE_W * 3 ? 2 : 0;
+        ctx.drawImage(sprite, frame * SPRITE_W, 0, SPRITE_W, SPRITE_H, x, y, SPRITE_W * scale, SPRITE_H * scale);
+      } else {
+        ctx.fillStyle = OUTFIT_FALLBACK[id];
+        ctx.fillRect(x + HB_X * scale, y + HB_Y * scale, HB_W * scale, HB_H * scale);
+      }
+    };
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(px, py, pw, ph);
+    ctx.clip();
+    const mx = px + pw / 2;
+    const my = py + ph / 2;
+    if (row && row.kind === "spell") {
+      drawDude(s.outfit, Math.round(mx - SPRITE_W / 2), Math.round(my - SPRITE_H / 2), 1);
+      const t = (s.t * 1.3) % 1;
+      for (let k = 0; k < SPIKE_COUNT; k++) {
+        const a = (k / SPIKE_COUNT) * Math.PI * 2;
+        const d = 16 + t * 34;
+        const spx = Math.round(mx + Math.cos(a) * d - 2);
+        const spy = Math.round(my + 4 + Math.sin(a) * d - 2);
+        ctx.fillStyle = "#b050f0";
+        ctx.fillRect(spx, spy, 4, 4);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(spx + 1, spy + 1, 2, 2);
+      }
+    } else if (row && row.kind === "soon") {
+      ctx.textAlign = "center";
+      ctx.fillStyle = on ? "#ff5fe0" : "#8a1f86";
+      ctx.fillText("? ? ?", mx, my - 4);
+    } else {
+      drawDude(row && row.kind === "skin" ? row.outfit.id : s.outfit, Math.round(mx - SPRITE_W), Math.round(my - SPRITE_H), 2);
+    }
+    ctx.restore();
+
+    // Two lines about the highlighted thing
+    let line1 = s.shopFromPause ? "BACK TO YOUR GAME" : "BACK TO THE START SCREEN";
+    let line2 = "";
+    if (row && row.kind === "spell") {
+      line1 = row.spell.info[0];
+      line2 = row.spell.info[1];
+    } else if (row && row.kind === "soon") {
+      line1 = "NEW SPELLS ARE ON THE WAY";
+    } else if (row && row.kind === "skin") {
+      const cost = row.outfit.cost ?? 0;
+      if (s.outfit === row.outfit.id) line1 = "YOU'RE WEARING THIS ONE";
+      else if (s.unlocked.includes(row.outfit.id)) line1 = "PRESS OK TO WEAR IT";
+      else if (s.coins >= cost) line1 = `PRESS OK TO BUY (${cost} COINS)`;
+      else {
+        line1 = `YOU NEED ${cost - s.coins} MORE COINS`;
+        line2 = "GOLD COINS HIDE AMONG THE LEAVES";
+      }
+    }
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(line1, W / 2, 121);
+    ctx.fillStyle = "#d8b8e8";
+    ctx.fillText(line2, W / 2, 132);
+    if (s.shopMsg && s.t - s.shopMsgAt < 2) flashBox(ctx, s.shopMsg, 146, s.t);
+    else if (Math.floor(s.t * 2) % 2 === 0) {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText("\u2191\u2193 BROWSE \u00b7 OK BUY \u00b7 ESC BACK", W / 2, 146);
     }
   };
 
   // ---------- The level map ----------
-  const mapUnlocked = (i: number) => i === 0 || !!state.current.levelBest[String(i)];
+  const mapUnlocked = (i: number) => i === 0 || !!state.current.levelBest[String(i)] || localTesting();
 
   // The points walked from stop `from` to the next/previous stop `to`
   const mapPath = (from: number, to: number): [number, number][] => {
@@ -4511,7 +6264,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       ctx.arc(x, y - 3, 2, 0, Math.PI * 2);
       ctx.arc(x, y + 3, 3, 0, Math.PI * 2);
       ctx.fill();
-    } else if (icon === "roof") {
+    } else if (icon === "skull") drawPixels(ctx, MAP_SKULL, x - 7, y - 7, { W: "#ece6d6", K: INK }, 2);
+    else if (icon === "roof") {
       ctx.beginPath();
       ctx.moveTo(x - 8, y);
       ctx.lineTo(x, y - 8);
@@ -4662,7 +6416,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       const last = i === MAP_NODES.length - 1;
       textBox(ctx, lv ? `LVL ${i + 1}: ${lv.name}` : last ? `LVL ${i + 1}: THE FINAL BOSS` : `LVL ${i + 1}`, 6);
       const best = s.levelBest[String(i + 1)];
-      textBox(ctx, lv ? (best ? `BEST ${fmtTime(best)}  -  OK TO PLAY` : "OK TO PLAY") : "COMING SOON", 18);
+      textBox(ctx, lv ? (best ? `BEST ${fmtTime(best)}  -  OK TO PLAY` : "OK TO PLAY") : i === WARLORD_STOP && !WARLORD_SHOWN ? WARLORD_SOON_TEXT : "COMING SOON", 18);
     }
     if (s.flash > 0) textBox(ctx, s.flashText, 34);
     if (Math.floor(s.t * 2) % 2 === 0) {
@@ -4713,6 +6467,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       const ax = x0 + Math.round((x1 - x0) * Math.min(1, (s.bossCol * T) / end));
       ctx.fillStyle = "#ff283c";
       ctx.fillRect(ax, y - 2, 2, 6);
+      for (const ka of s.karenas) {
+        ctx.fillRect(x0 + Math.round((x1 - x0) * Math.min(1, (ka.col * T) / end)), y - 2, 2, 6);
+      }
       // you
       const me = x0 + Math.round((x1 - x0) * part);
       ctx.fillStyle = INK;
@@ -4792,11 +6549,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     ctx.fillStyle = "#ffffff";
     ctx.fillText("PICK YOUR SPELL", W / 2, 14);
     ctx.fillStyle = "#ffc800";
-    const need = b ? b.maxHp : s.lboss ? s.lboss.maxHp : 0;
-    const shots = need + BOSS_SPARE_SHOTS;
-    ctx.fillText(`${shots} SHOTS, IT TAKES ${need}`, W / 2, 26);
-    for (let i = 0; i < 2; i++) {
-      const bx = i === 0 ? W / 2 - 78 : W / 2 + 14;
+    const need = b ? b.maxHp : s.lboss ? s.lboss.maxHp : s.kboss ? s.kboss.maxHp : 0;
+    const shots = s.kboss ? HORNED_AMMO : need + BOSS_SPARE_SHOTS;
+    ctx.fillText(s.kboss ? `${shots} SHOTS, IT TAKES ${need}. USE THE ? BOXES` : `${shots} SHOTS, IT TAKES ${need}`, W / 2, 26);
+    const options = s.spells.includes("spike") ? 3 : 2;
+    for (let i = 0; i < options; i++) {
+      const bx = options === 3 ? 56 + i * 80 : i === 0 ? W / 2 - 78 : W / 2 + 14;
       const by = 42;
       const bw = 64;
       const bh = 58;
@@ -4823,7 +6581,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
         ctx.fillRect(fx + 1, fy + 1, 3, 3);
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(fx + 2, fy + 2, 1, 1);
-      } else {
+      } else if (i === 1) {
         // the real ice ray, flying straight
         const t = (s.t * 1.3) % 1;
         const ix = Math.round(bx - 6 + t * (bw + 12));
@@ -4838,11 +6596,28 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           ctx.fillStyle = ICE[k % 4];
           ctx.fillRect(ix - 3 - k * 4, iy + ((k * 3) % 4), 2, 1);
         }
+      } else {
+        // the spike shot: spikes flying out in every direction
+        const t = (s.t * 1.4) % 1;
+        const mx = bx + bw / 2;
+        const my = by + (bh - 8) / 2;
+        ctx.fillStyle = "#5a1a8a";
+        ctx.fillRect(mx - 2, my - 2, 4, 4);
+        for (let k = 0; k < SPIKE_COUNT; k++) {
+          const a = (k / SPIKE_COUNT) * Math.PI * 2;
+          const d = 5 + t * 24;
+          const sx = Math.round(mx + Math.cos(a) * d - 2);
+          const sy = Math.round(my + Math.sin(a) * d - 2);
+          ctx.fillStyle = "#b050f0";
+          ctx.fillRect(sx, sy, 4, 4);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(sx + 1, sy + 1, 2, 2);
+        }
       }
       ctx.restore();
       ctx.fillStyle = picked ? "#ffffff" : "#9b8fa6";
-      ctx.fillText(i === 0 ? "FIRE" : "ICE", bx + bw / 2, by + bh + 6);
-      ctx.fillText(i === 0 ? "BOUNCES" : "STRAIGHT", bx + bw / 2, by + bh + 16);
+      ctx.fillText(["FIRE", "ICE", "SPIKE"][i], bx + bw / 2, by + bh + 6);
+      ctx.fillText(["BOUNCES", "STRAIGHT", "ALL WAYS"][i], bx + bw / 2, by + bh + 16);
     }
     if (Math.floor(s.t * 2) % 2 === 0) {
       ctx.fillStyle = "#ffffff";
@@ -4859,6 +6634,14 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
     if (s.mode === "home") {
       drawHome(ctx);
+      return;
+    }
+    if (s.mode === "shop") {
+      drawShop(ctx);
+      return;
+    }
+    if (s.mode === "cards") {
+      drawCards(ctx);
       return;
     }
     if (s.mode === "levelSelect") {
@@ -4903,6 +6686,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           [F_CORAL]: "#ff6f91",
           [LEVEL_ZONE]: "#4caa3c",
           [LEVEL_SNOW]: "#9fdcff",
+          [LEVEL_KEEP]: "#b23a48",
         };
         ctx.fillStyle = blinking
           ? "#ffffff"
@@ -5070,7 +6854,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     for (const pu of s.powerups) {
       const x = pu.x - cam;
       const [main, dark] = POWER_COLORS[pu.kind];
-      const sparks = pu.kind === "fire" ? FIRE : pu.kind === "ice" ? ICE : TURQ;
+      const sparks = powerSparks(pu.kind);
       drawPixels(ctx, LEAF, x, pu.y, { G: main, D: dark }, 2);
       for (let k = 0; k < 3; k++) {
         ctx.fillStyle = sparks[(Math.floor(s.t * 12) + k) % 3];
@@ -5082,6 +6866,16 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     for (const f of s.fireballs) {
       const x = Math.round(f.x - cam);
       const y = Math.round(f.y);
+      if (f.spike) {
+        // a purple spike with a short tail pointing back to where it came from
+        ctx.fillStyle = "#5a1a8a";
+        ctx.fillRect(x + 1 - Math.sign(Math.round(f.vx)) * 3, y + 1 - Math.sign(Math.round(f.vy)) * 3, 2, 2);
+        ctx.fillStyle = "#b050f0";
+        ctx.fillRect(x, y, 4, 4);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(x + 1, y + 1, 2, 2);
+        continue;
+      }
       if (f.ice) {
         // a straight icy streak
         ctx.fillStyle = "#1d4fa8";
@@ -5104,6 +6898,32 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     for (const e of s.enemies) {
       const x = e.x - cam;
       const ez = colAt(Math.floor(e.x / T)).zone;
+      if (ez === LEVEL_KEEP) {
+        // Level 3: crows (with the smoke wisp), skeletons with knives, and oni
+        if (e.kind === "flyer") {
+          if (e.alive) {
+            const fr = KN_CROW[Math.floor(s.t * 10 + e.phase) % KN_CROW.length];
+            const right = e.vx > 0;
+            drawPixels(ctx, right ? fr : flipRows(fr), x - (right ? 8 : 12), e.y - 8, KN_CROW_COLORS, 2);
+          } else {
+            ctx.fillStyle = "#1e1e28";
+            ctx.fillRect(x + 2, e.y + 10, 14, 3);
+          }
+        } else if (e.alive) {
+          const bob = Math.floor(s.t * 6 + e.x) % 2;
+          if (e.phase === 1) {
+            const fr = KN_ONI[Math.floor(s.t * 10 + e.x * 0.1) % KN_ONI.length];
+            drawPixels(ctx, fr, x - 12, e.y - 16 - bob, KN_ONI_COLORS, 2);
+          } else {
+            const fr = KN_SKEL_WALK[Math.floor(s.t * 6) % 2];
+            drawPixels(ctx, e.vx < 0 ? flipRows(fr) : fr, x, e.y - bob, KN_SKEL_WALK_COLORS, 2);
+          }
+        } else {
+          ctx.fillStyle = e.phase === 1 ? "#c4282e" : "#ece6d6";
+          ctx.fillRect(x, e.y + 10, 14, 4);
+        }
+        continue;
+      }
       if (ez === LEVEL_SNOW) {
         if (e.kind === "flyer") {
           if (e.alive) {
@@ -5378,6 +7198,140 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
     }
 
+    // LEVEL 3 knights
+    const kd = s.kboss;
+    if (kd) {
+      const d = KN_DIM[kd.kind];
+      const flash = (kd.hit > 0 && Math.floor(s.t * 20) % 2 === 0) || (kd.dead > 0 && Math.floor(s.t * 14) % 2 === 0);
+      const walking = Math.abs(kd.vx) > 5 && kd.vy === 0 && kd.act !== "stagger";
+      const bob = walking && Math.floor(s.t * 6) % 2 === 0 ? 1 : 0;
+      const jitter = kd.act === "stagger" || (kd.kind === "skeleton" && kd.act === "wind") ? Math.round(Math.sin(s.t * 60)) : 0;
+      const kx = Math.round(kd.x - cam) + jitter;
+      const ky = Math.round(kd.y) - bob;
+      const left = kd.facing < 0;
+      if (kd.kind === "horned") {
+        if (kd.dead <= 0 && kd.hp <= kd.maxHp - HORNED_AMMO) {
+          // raging: a red glow around him
+          ctx.fillStyle = `rgba(255, 40, 40, ${0.25 + Math.sin(s.t * 12) * 0.1})`;
+          ctx.beginPath();
+          ctx.ellipse(kx + d.w / 2, ky + d.h / 2 + 2, d.w / 2 + 6, d.h / 2 + 4, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        const rows = left ? KN_HORNED : flipRows(KN_HORNED);
+        drawPixels(ctx, rows, kx, ky, flash ? whiteOf(KN_HORNED_COLORS) : KN_HORNED_COLORS, 2);
+        if (kd.dead <= 0) {
+          // chain + the spiked ball with its wiggling tendrils
+          const h = hornedHand(kd);
+          const m = maceBall(kd);
+          for (let k = 1; k < 6; k++) {
+            const cx = Math.round(h.x + ((m.x - h.x) * k) / 6 - cam);
+            const cy = Math.round(h.y + ((m.y - h.y) * k) / 6);
+            ctx.fillStyle = "#0c0c10";
+            ctx.fillRect(cx - 2, cy - 2, 4, 4);
+            ctx.fillStyle = "#a8b0bd";
+            ctx.fillRect(cx - 1, cy - 1, 2, 2);
+          }
+          const fr = KN_MACE[Math.floor(s.t * 10) % KN_MACE.length];
+          drawPixels(ctx, fr, Math.round(m.x - cam) - 27, Math.round(m.y) - 29, KN_MACE_COLORS, 2);
+        }
+      } else if (kd.kind === "skeleton") {
+        const fr = KN_SKEL[Math.floor(s.t * 10) % KN_SKEL.length];
+        drawPixels(ctx, left ? fr : flipRows(fr), kx, ky, flash ? whiteOf(KN_SKEL_COLORS) : KN_SKEL_COLORS, 2);
+        if (kd.dead <= 0 && kd.act === "wind") {
+          // a red "!" over his head: he's about to swing
+          ctx.fillStyle = "#ff2a2a";
+          ctx.fillRect(kx + d.w / 2 - 1, ky - 6, 3, 7);
+          ctx.fillRect(kx + d.w / 2 - 1, ky + 3, 3, 3);
+        }
+        if (kd.dead <= 0 && kd.act === "swing") {
+          // the slash
+          const r = skeletonSwordBox(kd);
+          const cx = (left ? r.x2 : r.x1) - cam;
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          if (left) ctx.arc(cx, ky + 34, SKELETON_REACH - 6, Math.PI * 0.68, Math.PI * 1.32);
+          else ctx.arc(cx, ky + 34, SKELETON_REACH - 6, -Math.PI * 0.32, Math.PI * 0.32);
+          ctx.stroke();
+        }
+      } else {
+        const angry = kd.hp <= Math.ceil(kd.maxHp / 2);
+        const rows = WARLORD_ROWS[angry ? 1 : 0];
+        drawPixels(ctx, left ? rows : flipRows(rows), kx, ky, flash ? whiteOf(WARLORD_ROW_COLORS) : WARLORD_ROW_COLORS, 3);
+        // shield on his front arm
+        const shx = left ? kx + 12 : kx + d.w - 12 - 30;
+        drawPixels(ctx, left ? WL_SHIELD : flipRows(WL_SHIELD), shx, ky + 50, flash ? whiteOf(WL_SHIELD_COLORS) : WL_SHIELD_COLORS, 3);
+        if (kd.dead <= 0) {
+          // swoosh behind the blade while it comes down
+          const p = warlordPivot(kd);
+          const px = Math.round(p.x - cam) + jitter;
+          const py = Math.round(p.y) - bob;
+          if (kd.act === "swing") {
+            const a0 = swordAngle(kd, SW_BACK);
+            const a1 = swordAngle(kd);
+            ctx.strokeStyle = "rgba(255, 220, 220, 0.4)";
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            if (left) ctx.arc(px, py, SW_GRIP * 2 - 10, a1, a0);
+            else ctx.arc(px, py, SW_GRIP * 2 - 10, a0, a1);
+            ctx.stroke();
+          }
+          // the giant sword
+          ctx.save();
+          ctx.translate(px, py);
+          ctx.rotate(swordAngle(kd) + Math.PI / 2);
+          drawPixels(ctx, WL_SWORD, -7, -SW_GRIP * 2, flash ? whiteOf(WL_SWORD_COLORS) : WL_SWORD_COLORS, 2);
+          ctx.restore();
+          // eyes charging up before the sound-wave blast
+          if (kd.act === "beam") {
+            const e = warlordEye(kd);
+            const ex = Math.round(e.x - cam) + jitter;
+            const ey = Math.round(e.y) - bob;
+            const r = 2 + Math.round(Math.max(0, 0.6 - kd.timer) * 10);
+            ctx.fillStyle = Math.floor(s.t * 20) % 2 === 0 ? "#ff2a2a" : "#ffffff";
+            ctx.fillRect(ex - 8 - r, ey - Math.ceil(r / 2), 16 + r * 2, r);
+          }
+        }
+      }
+      // small health bar over the horned warrior and the skeleton knight
+      if (kd.dead <= 0 && kd.kind !== "warlord") {
+        const b = knightBox(kd);
+        const bw = 30;
+        const hbx = Math.round((b.x1 + b.x2) / 2 - cam - bw / 2) + jitter;
+        const hby = ky + (kd.kind === "horned" ? -6 : 2);
+        ctx.fillStyle = INK;
+        ctx.fillRect(hbx - 1, hby - 1, bw + 2, 4);
+        ctx.fillStyle = "#9b8fa6";
+        ctx.fillRect(hbx, hby, bw, 2);
+        ctx.fillStyle = "#ff283c";
+        ctx.fillRect(hbx, hby, Math.round((bw * Math.max(0, kd.hp)) / kd.maxHp), 2);
+      }
+    }
+    // WARLORD's sound waves (wiggly red frequencies)
+    for (const w of s.kshots) {
+      const a = Math.atan2(w.vy, w.vx);
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      for (let i = -7; i <= 7; i++) {
+        const off = Math.sin(i * 0.9 + s.t * 25) * 3;
+        ctx.fillStyle = Math.abs(i) < 5 ? "#ff2a2a" : "#ff8fa0";
+        ctx.fillRect(Math.round(w.x - cam + ca * i - sa * off) - 1, Math.round(w.y + sa * i + ca * off) - 1, 2, 2);
+      }
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(Math.round(w.x - cam) - 1, Math.round(w.y) - 1, 2, 2);
+    }
+    // shockwaves
+    for (const w of s.kwaves) {
+      const wx = Math.round(w.x - cam);
+      const red = Math.floor(s.t * 20) % 2 === 0;
+      ctx.fillStyle = red ? "#ff2a2a" : "#ffffff";
+      ctx.fillRect(wx - 4, 8 * T - 9, 8, 9);
+      ctx.fillStyle = red ? "#ffffff" : "#ff2a2a";
+      ctx.fillRect(wx - 2, 8 * T - 13, 4, 4);
+      ctx.fillStyle = "rgba(255, 42, 42, 0.5)";
+      ctx.fillRect(wx - 4 - w.dir * 8, 8 * T - 5, 8, 5);
+    }
+
     // You
     const blinking = s.invuln > 0 && Math.floor(s.t * 12) % 2 === 0;
     const showYou = ["select", "ready", "running", "pipe", "golden", "choose", "paused"].includes(s.mode);
@@ -5483,7 +7437,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
 
     // HUD (score, lives, powers) — none of it means anything yet on the outfit-select
     // screen, so it stays hidden there and the screen is just the character picker
-    const hudInk = viewZone === VOID_ZONE ? (VOID_PALETTES[s.voidPal] || VOID_PALETTES[0]).ink : INK;
+    const hudInk = viewZone === VOID_ZONE ? (VOID_PALETTES[s.voidPal] || VOID_PALETTES[0]).ink : viewZone === LEVEL_KEEP ? "#f0e6ea" : INK;
     if (s.mode !== "select") {
     drawSfxIcon(ctx, hudInk);
     drawSfxSlider(ctx, hudInk);
@@ -5513,26 +7467,45 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       drawPixels(ctx, HEART, x + 1, 5, { P: INK }, 1);
       drawPixels(ctx, HEART, x, 4, { P: i < s.lives ? PINK : "#9b8fa6" }, 1);
     }
+    // LEVEL 3: WARLORD's huge health bar across the top
+    if (s.kboss && s.kboss.kind === "warlord" && s.kboss.dead <= 0) {
+      const kn = s.kboss;
+      const bw = 280;
+      const bx = Math.round(W / 2 - bw / 2);
+      ctx.fillStyle = INK;
+      ctx.fillRect(bx - 2, 25, bw + 4, 12);
+      ctx.fillStyle = "#3a2a3a";
+      ctx.fillRect(bx, 27, bw, 8);
+      ctx.fillStyle = kn.hp <= Math.ceil(kn.maxHp / 2) && Math.floor(s.t * 4) % 2 === 0 ? "#ff6070" : "#ff283c";
+      ctx.fillRect(bx, 27, Math.round((bw * Math.max(0, kn.hp)) / kn.maxHp), 8);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+      ctx.fillRect(bx, 27, Math.round((bw * Math.max(0, kn.hp)) / kn.maxHp), 2);
+      ctx.textAlign = "center";
+      ctx.fillStyle = INK;
+      ctx.fillText(KN_NAMES[kn.kind], W / 2 + 1, 40);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(KN_NAMES[kn.kind], W / 2, 39);
+    }
 
     // Fire power: 5 fireball icons + a blinking orange timer bar along the bottom
     if (hasFire() && s.ammo > 5) {
       // lots of shots (boss fight): one icon and the number
-      const ice = s.power === "ice";
-      ctx.fillStyle = ice ? "#4aa3ff" : "#ff7a00";
+      const [shotMain, shotShine] = hudShot(s.power);
+      ctx.fillStyle = shotMain;
       ctx.fillRect(W / 2 - 36, 14, 4, 4);
-      ctx.fillStyle = ice ? "#ffffff" : "#ffc800";
+      ctx.fillStyle = shotShine;
       ctx.fillRect(W / 2 - 35, 15, 2, 2);
       ctx.fillStyle = hudInk;
       ctx.textAlign = "left";
       ctx.fillText(`x${s.ammo}`, W / 2 - 30, 13);
     } else if (hasFire()) {
-      const ice = s.power === "ice";
+      const [shotMain, shotShine] = hudShot(s.power);
       for (let i = 0; i < 5; i++) {
         const x = W / 2 - 36 + i * 6;
-        ctx.fillStyle = i < s.ammo ? (ice ? "#4aa3ff" : "#ff7a00") : "#9b8fa6";
+        ctx.fillStyle = i < s.ammo ? shotMain : "#9b8fa6";
         ctx.fillRect(x, 14, 4, 4);
         if (i < s.ammo) {
-          ctx.fillStyle = ice ? "#ffffff" : "#ffc800";
+          ctx.fillStyle = shotShine;
           ctx.fillRect(x + 1, 15, 2, 2);
         }
       }
@@ -5607,8 +7580,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       textBox(ctx, "CHOOSE YOUR PINKMANE", 8);
       textBox(ctx, o.name, 20);
       // The big portrait itself is drawn further down, right in the middle of the screen
-      const canBuy = !owned && o.id === "icy" && s.coins >= ICY_COST;
-      textBox(ctx, owned ? "PRESS OK TO WEAR IT" : canBuy ? `PRESS OK TO BUY (${ICY_COST} COINS)` : `LOCKED \u2014 ${o.how}`, 118);
+      const canBuy = !owned && !!o.cost && s.coins >= o.cost;
+      textBox(ctx, owned ? "PRESS OK TO WEAR IT" : canBuy ? `PRESS OK TO BUY (${o.cost} COINS)` : `LOCKED \u2014 ${howToGet(o)}`, 118);
       textBox(ctx, `GOLD COINS: ${s.coins}`, 130);
       if (!s.storageOk) textBox(ctx, "BROWSER STORAGE BLOCKED \u2014 WON'T SAVE", 141);
       if (blink) textBox(ctx, "\u2190 \u2192 BROWSE OUTFITS", 152);
@@ -5639,6 +7612,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     }
 
     if (s.mode === "choose") drawSpellPick(ctx);
+    if (s.mode === "bossIntro") drawBossIntro(ctx);
     // Lore sign you're standing next to
     if (s.levelMode && s.mode === "running" && s.flash <= 0) {
       const near = s.signs.find((sg) => Math.abs(sg.x + 8 - (s.x + SPRITE_W / 2)) < 36);
@@ -5656,18 +7630,18 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (s.mode === "paused") {
       ctx.fillStyle = "rgba(22, 12, 29, 0.7)";
       ctx.fillRect(0, 0, W, H);
-      textBox(ctx, "PAUSED", 34);
+      textBox(ctx, "PAUSED", 26);
       PAUSE_OPTIONS.forEach((label, i) => {
         const picked = s.pauseChoice === i;
         const text = (picked ? "> " : "") + label;
-        const y = 52 + i * 14;
+        const y = 42 + i * 14;
         const w = ctx.measureText(text).width + 10;
         ctx.fillStyle = picked ? PINK : SCREEN;
         ctx.fillRect(Math.round(W / 2 - w / 2), y - 2, Math.round(w), 12);
         ctx.fillStyle = picked ? "#ffffff" : INK;
         ctx.fillText(text, W / 2, y);
       });
-      if (blink) textBox(ctx, "\u2191\u2193 CHOOSE \u00b7 OK CONFIRM", 128);
+      if (blink) textBox(ctx, "\u2191\u2193 CHOOSE \u00b7 OK CONFIRM", 132);
     }
   };
 
@@ -5679,8 +7653,34 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
     if (!ctx) return;
     ctx.imageSmoothingEnabled = false;
 
+    // Outfits with `recolor`: if their own PNG isn't there, repaint the classic picture instead
+    const repaint = new Set<OutfitId>();
+    const makeRepaints = () => {
+      const base = spritesRef.current.classic;
+      if (!base || !base.complete || base.naturalWidth === 0) return;
+      repaint.forEach((id) => {
+        const o = OUTFITS.find((x) => x.id === id);
+        const made = o && o.recolor ? recolorSprite(base, o.recolor) : null;
+        if (made) spritesRef.current[id] = made;
+        repaint.delete(id);
+      });
+    };
     OUTFITS.forEach((o) => {
       const img = new Image();
+      if (o.id === "classic") img.onload = makeRepaints;
+      if (o.recolor) {
+        img.onerror = () => {
+          repaint.add(o.id);
+          makeRepaints();
+        };
+      }
+      if (o.id === "warlord") {
+        // no PNG of your own: build him from the boss's pixel art
+        img.onerror = () => {
+          const made = makeWarlordSprite();
+          if (made) spritesRef.current[o.id] = made;
+        };
+      }
       img.src = o.file;
       spritesRef.current[o.id] = img;
     });
@@ -5699,6 +7699,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       return im;
     });
     deathSoundRef.current = new Audio(DEATH_SOUND);
+    window.addEventListener("pinkmane-level-control", levelMusicControl);
+    Object.entries(KEEP_IMAGES).forEach(([k, src]) => {
+      const im = new Image();
+      im.src = src;
+      keepImgsRef.current[k] = im;
+    });
 
     // Owner code: open the site once with ?owner=YOURCODE on each of your devices
     try {
@@ -5731,8 +7737,22 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       if (Array.isArray(savedUnlocked) && savedUnlocked.length) {
         state.current.unlocked = Array.from(new Set(["classic", ...savedUnlocked])) as OutfitId[];
       }
+      const savedSpells = JSON.parse(localStorage.getItem(SPELLS_KEY) || "[]");
+      if (Array.isArray(savedSpells)) {
+        state.current.spells = SHOP_SPELLS.map((sp) => sp.id).filter((id) => savedSpells.includes(id));
+      }
+      const savedCards = JSON.parse(localStorage.getItem(CARDS_KEY) || "[]");
+      if (Array.isArray(savedCards)) {
+        state.current.cards = BOSS_CARDS.map((c) => c.id).filter((id) => savedCards.includes(id));
+      }
+      // Test shortcut (only on your own computer, never on the real site):
+      // open  http://localhost:3000/?coins=1000  and you have 1000 gold coins to try the shop with
+      if (localTesting()) {
+        const testCoins = Number(new URLSearchParams(window.location.search).get("coins"));
+        if (testCoins > 0) state.current.coins = Math.floor(testCoins);
+      }
       const savedOutfit = localStorage.getItem(OUTFIT_KEY) as OutfitId | null;
-      if (savedOutfit && state.current.unlocked.includes(savedOutfit)) {
+      if (savedOutfit && state.current.unlocked.includes(savedOutfit) && OUTFITS.some((o) => o.id === savedOutfit)) {
         state.current.outfit = savedOutfit;
         state.current.selectIndex = OUTFITS.findIndex((o) => o.id === savedOutfit);
       }
@@ -5758,14 +7778,35 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           // picking an outfit from the pause menu: Esc goes back to the pause menu
           st.fromPause = false;
           st.mode = "paused";
-        } else if (k === "Escape" && (mode === "select" || mode === "levelSelect")) st.mode = "home";
+        } else if (k === "Escape" && mode === "shop" && st.shopFromPause) {
+          // the shop opened from the pause menu: Esc goes back to the pause menu
+          st.shopFromPause = false;
+          st.mode = "paused";
+        } else if (k === "Escape" && (mode === "select" || mode === "levelSelect" || mode === "shop" || mode === "cards")) st.mode = "home";
         else if (k === "Escape" && mode === "ready") st.mode = st.levelMode ? "levelSelect" : "home";
         return;
       }
       // The pink start screen
       if (mode === "home") {
-        if (k === "ArrowLeft" || k === "a" || k === "A") state.current.homeChoice = 0;
-        if (k === "ArrowRight" || k === "d" || k === "D") state.current.homeChoice = 1;
+        // 0 / 1 = the two game types. UP goes to the buttons on top: 3 = CARDS (left), 2 = SHOP (right).
+        const hc = state.current.homeChoice;
+        const top = hc >= 2;
+        if (k === "ArrowLeft" || k === "a" || k === "A") state.current.homeChoice = top ? 3 : 0;
+        if (k === "ArrowRight" || k === "d" || k === "D") state.current.homeChoice = top ? 2 : 1;
+        if ((k === "ArrowUp" || k === "w" || k === "W") && !top) state.current.homeChoice = hc === 0 ? 3 : 2;
+        if ((k === "ArrowDown" || k === "s" || k === "S") && top) state.current.homeChoice = hc === 3 ? 0 : 1;
+        return;
+      }
+      // Your boss cards: left / right to flip through them (OK or Esc goes back)
+      if (mode === "cards") {
+        if (k === "ArrowLeft" || k === "a" || k === "A") cardMove(-1);
+        if (k === "ArrowRight" || k === "d" || k === "D") cardMove(1);
+        return;
+      }
+      // The shop: up / down to browse (OK buys, Esc goes back)
+      if (mode === "shop") {
+        if (k === "ArrowUp" || k === "w" || k === "W") shopMove(-1);
+        if (k === "ArrowDown" || k === "s" || k === "S") shopMove(1);
         return;
       }
       // The level map: walk with arrows / WASD
@@ -5785,8 +7826,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       }
       // Picking a spell before a boss fight
       if (mode === "choose") {
-        if (k === "ArrowLeft" || k === "a" || k === "A") state.current.spellChoice = 0;
-        if (k === "ArrowRight" || k === "d" || k === "D") state.current.spellChoice = 1;
+        const options = state.current.spells.includes("spike") ? 3 : 2;
+        if (k === "ArrowLeft" || k === "a" || k === "A") state.current.spellChoice = Math.max(0, state.current.spellChoice - 1);
+        if (k === "ArrowRight" || k === "d" || k === "D") state.current.spellChoice = Math.min(options - 1, state.current.spellChoice + 1);
         return;
       }
       // Choosing an option on the pause menu
@@ -5830,6 +7872,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       last = now;
       update(dt);
       draw(ctx);
+      syncLevelMusic();
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -5840,6 +7883,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
       window.removeEventListener("blur", releaseAll);
       audioCtxRef.current?.close().catch(() => {});
       stopStutters();
+      levelMusicRef.current?.pause();
+      levelMusicOnRef.current = false;
+      levelMusicReportRef.current = "";
+      releaseAllPageMusic(); // leaving the game: your music carries on
+      window.dispatchEvent(new CustomEvent("pinkmane-level-song", { detail: null }));
+      window.removeEventListener("pinkmane-level-control", levelMusicControl);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -5884,8 +7933,25 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           const mode = state.current.mode;
           if (mode === "entry") return;
           if (mode === "home") {
-            state.current.homeChoice = cx < W / 2 ? 0 : 1;
+            state.current.homeChoice = cy < 17 && cx > W - 104 ? 2 : cy < 17 && cx < 104 ? 3 : cx < W / 2 ? 0 : 1;
             press();
+            return;
+          }
+          if (mode === "cards") {
+            // tap left / right of the card to flip, tap the card to go back
+            if (cx < (W - CARD_W) / 2) cardMove(-1);
+            else if (cx > (W + CARD_W) / 2) cardMove(1);
+            else press();
+            return;
+          }
+          if (mode === "shop") {
+            // tap a line to highlight it, tap it again (or anywhere else) to buy / wear it
+            const first = shopFirstRow();
+            const i = first + Math.floor((cy - (SHOP_TOP - 1)) / SHOP_ROW_H);
+            const onList = cx < 216 && cy >= SHOP_TOP - 1 && i < first + SHOP_VISIBLE && i < SHOP_ROWS.length;
+            if (onList && SHOP_ROWS[i].kind === "head") return;
+            if (onList && i !== state.current.shopIndex) state.current.shopIndex = i;
+            else shopPick();
             return;
           }
           if (mode === "levelSelect") {
@@ -5901,7 +7967,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
           }
           if (mode === "paused") {
             // tap an option on the pause menu to pick it
-            const row = Math.floor((cy - 50) / 14);
+            const row = Math.floor((cy - 40) / 14);
             if (row >= 0 && row < PAUSE_OPTIONS.length) {
               state.current.pauseChoice = row;
               press();
@@ -5909,7 +7975,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted }: 
             return;
           }
           if (mode === "choose") {
-            state.current.spellChoice = cx < W / 2 ? 0 : 1;
+            state.current.spellChoice = state.current.spells.includes("spike")
+              ? Math.max(0, Math.min(2, Math.floor((cx - 48) / 80)))
+              : cx < W / 2 ? 0 : 1;
             pickSpell(state.current.spellChoice);
             return;
           }

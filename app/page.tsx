@@ -399,11 +399,14 @@ const BG_MODES = [
 // MODE 1 is the one you had before (handheld-bg.png, or .jpg, or the normal one, whichever exists first).
 // MODE 2-4 are the same 3 pictures as the iPod modes (/public/bg/mode1.png, mode2.png, mode3.png).
 // focus works the same as the iPod ones: 0 = keep the top, 0.5 = keep the middle.
+// glow: the colour of the glow around the handheld (and its beat light) in that mode, as "red, green, blue".
+//   MODE 1 keeps the pink it always had. MODE 2-4 use the same colours as the iPod screen in that
+//   background (light pink, light green, light red).
 const HH_BG_MODES = [
-  { label: "MODE 1", sources: ["/handheld-bg.png", "/handheld-bg.jpg", "/topshelf.png"], focus: 0.5 },
-  { label: "MODE 2", sources: ["/bg/mode1.png", "/topshelf.png"], focus: 0.15 },
-  { label: "MODE 3", sources: ["/bg/mode2.png", "/topshelf.png"], focus: 0.15 },
-  { label: "MODE 4", sources: ["/bg/mode3.png", "/topshelf.png"], focus: 0.15 },
+  { label: "MODE 1", sources: ["/handheld-bg.png", "/handheld-bg.jpg", "/topshelf.png"], focus: 0.5, glow: "214, 60, 200" },
+  { label: "MODE 2", sources: ["/bg/mode1.png", "/topshelf.png"], focus: 0.15, glow: "246, 211, 238" },
+  { label: "MODE 3", sources: ["/bg/mode2.png", "/topshelf.png"], focus: 0.15, glow: "215, 239, 188" },
+  { label: "MODE 4", sources: ["/bg/mode3.png", "/topshelf.png"], focus: 0.15, glow: "248, 208, 202" },
 ];
 
 type BeatState = { kick: number; sway: number; bass: number; quake: number };
@@ -673,6 +676,11 @@ export default function Home() {
   const [volume, setVolume] = useState(0.5);
   const [trackIndex, setTrackIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(true);
+  // A song from a game level (Super Pinkmane Level 3) is playing: the music buttons control that instead
+  type GameSong = { title: string; artist: string; paused: boolean };
+  const [gameSong, setGameSong] = useState<GameSong | null>(null);
+  const gameSongRef = useRef<GameSong | null>(null);
+  const gameSongShownRef = useRef<string | null>(null); // last level song shown in the purple box
   const trackRef = useRef(0);
   const errorCountRef = useRef(0);
 
@@ -756,9 +764,20 @@ export default function Home() {
       .catch(() => {});
   };
 
-  const nextTrack = () => loadAndPlay(trackRef.current + 1);
+  // Sends a music button press to the game (when a level song is playing)
+  const gameMusic = (cmd: "next" | "prev" | "toggle") => {
+    if (!gameSongRef.current) return false;
+    window.dispatchEvent(new CustomEvent("pinkmane-level-control", { detail: cmd }));
+    return true;
+  };
+
+  const nextTrack = () => {
+    if (gameMusic("next")) return;
+    loadAndPlay(trackRef.current + 1);
+  };
 
   const prevTrack = () => {
+    if (gameMusic("prev")) return;
     const audio = songRef.current;
     // Like a real iPod: restart the song if it's been playing a few seconds
     if (audio && audio.currentTime > 3) {
@@ -769,6 +788,7 @@ export default function Home() {
   };
 
   const togglePlay = () => {
+    if (gameMusic("toggle")) return;
     const audio = songRef.current;
     if (!audio) return;
     if (audio.paused) {
@@ -785,22 +805,56 @@ export default function Home() {
 
   // Super Pinkmane asks the page to pause your music while the secret Stutters track plays, then resume it
   const pausedForGameRef = useRef(false);
+  // true from the game's "pause" until its "resume" (a level with its own songs, the secret track...):
+  // your music must not start by itself during that time
+  const gameHoldRef = useRef(false);
   useEffect(() => {
     const onGameMusic = (e: Event) => {
       const audio = songRef.current;
       const what = (e as CustomEvent<string>).detail;
       if (what === "pause") {
+        gameHoldRef.current = true;
         if (audio && !audio.paused) {
           audio.pause();
           pausedForGameRef.current = true;
         }
       } else if (what === "resume") {
-        if (audio && pausedForGameRef.current) audio.play().catch(() => {});
+        gameHoldRef.current = false;
+        if (audio && pausedForGameRef.current) {
+          audio
+            .play()
+            .then(() => {
+              hasStartedSong.current = true;
+            })
+            .catch(() => {});
+        }
         pausedForGameRef.current = false;
       }
     };
     window.addEventListener("pinkmane-music", onGameMusic);
     return () => window.removeEventListener("pinkmane-music", onGameMusic);
+  }, []);
+
+  // The game tells us which level song is on (or null when none): shown on the ticker + handheld
+  useEffect(() => {
+    const onLevelSong = (e: Event) => {
+      const song = (e as CustomEvent<GameSong | null>).detail;
+      const wasOff = !gameSongRef.current;
+      gameSongRef.current = song;
+      setGameSong(song);
+      // a new level song started (or the level just began): show its name in the purple box for 3.5s
+      if (!song) gameSongShownRef.current = null;
+      else if (!song.paused && song.title !== gameSongShownRef.current) {
+        gameSongShownRef.current = song.title;
+        showOsd({ kind: "text", value: 0, text: `♪ ${song.title}` }, 3500);
+      }
+      // first time a level song shows up: give it your volume
+      if (song && wasOff) {
+        window.dispatchEvent(new CustomEvent("pinkmane-level-control", { detail: { volume: songRef.current?.volume ?? 0.5 } }));
+      }
+    };
+    window.addEventListener("pinkmane-level-song", onLevelSong);
+    return () => window.removeEventListener("pinkmane-level-song", onLevelSong);
   }, []);
 
   const playScrollSound = () => {
@@ -1325,7 +1379,8 @@ export default function Home() {
     selectSoundRef.current = new Audio("/sounds/select.mp3");
 
     const tryStartSong = () => {
-      if (hasStartedSong.current || !songRef.current) return;
+      // (not while the game is holding your music off, e.g. in a level with its own songs)
+      if (hasStartedSong.current || gameHoldRef.current || !songRef.current) return;
       songRef.current
         .play()
         .then(() => {
@@ -1435,6 +1490,7 @@ export default function Home() {
   const changeVolume = (value: number) => {
     setVolume(value);
     if (songRef.current) songRef.current.volume = value;
+    window.dispatchEvent(new CustomEvent("pinkmane-level-control", { detail: { volume: value } }));
     try {
       localStorage.setItem("pinkmane-volume", String(value));
     } catch {}
@@ -1574,10 +1630,10 @@ activeGame === "maze" ? (
   // Popup on the handheld screen when you change volume, mute or skip
   const [osd, setOsd] = useState<{ kind: "vol" | "text"; value: number; text: string } | null>(null);
   const osdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showOsd = (next: { kind: "vol" | "text"; value: number; text: string }) => {
+  const showOsd = (next: { kind: "vol" | "text"; value: number; text: string }, ms = 1300) => {
     setOsd(next);
     if (osdTimer.current) clearTimeout(osdTimer.current);
-    osdTimer.current = setTimeout(() => setOsd(null), 1300);
+    osdTimer.current = setTimeout(() => setOsd(null), ms);
   };
   const hhVolume = (delta: number) => {
     const v = Math.round(Math.max(0, Math.min(1, volume + delta)) * 20) / 20;
@@ -1589,13 +1645,19 @@ activeGame === "maze" ? (
     toggleMute();
   };
   const hhSong = (dir: 1 | -1) => {
+    if (gameSongRef.current) {
+      // a level song is on: skip that one (the new song's name pops up in the purple box by itself)
+      gameMusic(dir > 0 ? "next" : "prev");
+      return;
+    }
     const idx = (((trackRef.current + dir) % TRACKS.length) + TRACKS.length) % TRACKS.length;
     if (dir > 0) nextTrack();
     else prevTrack();
     showOsd({ kind: "text", value: 0, text: `♪ ${TRACKS[dir > 0 ? idx : trackRef.current].title.toUpperCase()}` });
   };
   const hhPlay = () => {
-    showOsd({ kind: "text", value: 0, text: isPaused ? "PLAY" : "PAUSE" });
+    const paused = gameSongRef.current ? gameSongRef.current.paused : isPaused;
+    showOsd({ kind: "text", value: 0, text: paused ? "PLAY" : "PAUSE" });
     togglePlay();
   };
 
@@ -1620,7 +1682,10 @@ activeGame === "maze" ? (
     stickKey.current = null;
   };
 
-  const tickerText = `${isPaused ? "PAUSED" : "NOW PLAYING"}: ${TRACKS[trackIndex].title.toUpperCase()} ✦   `;
+  // While a game level plays its own song, the ticker and the play/pause buttons show that song
+  const musicPaused = gameSong ? gameSong.paused : isPaused;
+  const tickerSong = gameSong ? `${gameSong.artist} - ${gameSong.title}` : TRACKS[trackIndex].title.toUpperCase();
+  const tickerText = `${musicPaused ? "PAUSED" : "NOW PLAYING"}: ${tickerSong} ✦   `;
 
   return (
     <main
@@ -1639,6 +1704,8 @@ activeGame === "maze" ? (
         // iPod screen colour for the picked background mode (used by the screen, loading bar and lights)
         "--screen": BG_MODES[bgMode].screen,
         "--screen-rgb": BG_MODES[bgMode].screenRgb,
+        // glow colour of the handheld (PSP) for its picked background mode
+        "--hh-glow": HH_BG_MODES[hhBgMode].glow,
       } as React.CSSProperties}
     >
       {/* The background picture, on its own layer so it can wiggle and shake */}
@@ -1762,7 +1829,7 @@ activeGame === "maze" ? (
       </div>
 
       <div
-        className={`ipod-shell ${!playing && !isPaused && !isMuted ? "beat-thump" : ""}`}
+        className={`ipod-shell ${!playing && !musicPaused && !isMuted ? "beat-thump" : ""}`}
         style={{
           background: "#cfcfcf",
           width: "min(540px, 100%)",
@@ -1775,7 +1842,7 @@ activeGame === "maze" ? (
       >
         <div className="top-controls">
           <BatteryIcon />
-          <VuBars active={!isMuted && !isPaused} />
+          <VuBars active={!isMuted && !musicPaused} />
           <input
             type="range"
             min={0}
@@ -2033,7 +2100,7 @@ activeGame === "maze" ? (
         >
           <div
             ref={wheelRef}
-            className={`click-wheel ${!isMuted && !isPaused ? "wheel-led-pulse" : ""}`}
+            className={`click-wheel ${!isMuted && !musicPaused ? "wheel-led-pulse" : ""}`}
             onPointerDown={handleWheelPointerDown}
             onPointerMove={handleWheelPointerMove}
             onPointerUp={handleWheelPointerUp}
@@ -2112,7 +2179,7 @@ activeGame === "maze" ? (
               onClick={togglePlay}
               onPointerDown={stopWheelDrag}
               onMouseDown={noFocus}
-              aria-label={isPaused ? "Play music" : "Pause music"}
+              aria-label={musicPaused ? "Play music" : "Pause music"}
               style={{
                 position: "absolute",
                 bottom: "15px",
@@ -2126,7 +2193,7 @@ activeGame === "maze" ? (
                 alignItems: "center",
               }}
             >
-              {isPaused ? <PlayIcon /> : <PauseIcon />}
+              {musicPaused ? <PlayIcon /> : <PauseIcon />}
             </button>
 
             <button
@@ -2346,7 +2413,7 @@ activeGame === "maze" ? (
             </div>
 
             {/* Light that pulses to the beat while music plays */}
-            <div className={`hh-led2 ${!isPaused && !isMuted ? "hh-led-on" : ""}`} style={hhBox(2, 24, 2, 24)} />
+            <div className={`hh-led2 ${!musicPaused && !isMuted ? "hh-led-on" : ""}`} style={hhBox(2, 24, 2, 24)} />
 
             {/* Invisible buttons on top of the drawn ones */}
             <button className="hh-hit" style={hhBox(5, 9, 10, 13)} aria-label="Up" {...padProps("ArrowUp")} />
@@ -2398,7 +2465,7 @@ activeGame === "maze" ? (
               <PixelIcon name="prev" />
             </button>
             <button className="hh-hit hh-bar" style={hhBox(64, 34, 67, 38)} onClick={hhPlay} onMouseDown={noFocus} aria-label="Play or pause music">
-              <PixelIcon name={isPaused ? "play" : "pause"} />
+              <PixelIcon name={musicPaused ? "play" : "pause"} />
             </button>
             <button className="hh-hit hh-bar" style={hhBox(68, 34, 72, 38)} onClick={() => hhSong(1)} onMouseDown={noFocus} aria-label="Next song">
               <PixelIcon name="next" />
@@ -3062,7 +3129,7 @@ activeGame === "maze" ? (
           z-index: 1;
           width: min(96vw, 1300px, calc((100dvh - 170px) * 2.41));
           aspect-ratio: 94 / 39;
-          filter: drop-shadow(0 12px 0 rgba(0, 0, 0, 0.3)) drop-shadow(0 0 24px rgba(214, 60, 200, 0.45));
+          filter: drop-shadow(0 12px 0 rgba(0, 0, 0, 0.3)) drop-shadow(0 0 24px rgba(var(--hh-glow, 214, 60, 200), 0.55));
         }
         .hh-art {
           position: absolute;
@@ -3101,7 +3168,7 @@ activeGame === "maze" ? (
         }
         .hh-led2.hh-led-on {
           background: #d63cc8;
-          box-shadow: 0 0 calc(var(--kick, 0) * 14px) calc(var(--kick, 0) * 4px) rgba(215, 239, 188, calc(var(--kick, 0) * 0.55));
+          box-shadow: 0 0 calc(var(--kick, 0) * 14px) calc(var(--kick, 0) * 4px) rgba(var(--hh-glow, 215, 239, 188), calc(var(--kick, 0) * 0.55));
         }
         /* Invisible buttons over the drawn ones; they flash pink when pressed */
         .hh-hit {
@@ -3388,7 +3455,7 @@ activeGame === "maze" ? (
         }
         .hh-led-on {
           background: #d63cc8;
-          box-shadow: 0 0 calc(var(--kick, 0) * 14px) calc(var(--kick, 0) * 4px) rgba(215, 239, 188, calc(var(--kick, 0) * 0.55));
+          box-shadow: 0 0 calc(var(--kick, 0) * 14px) calc(var(--kick, 0) * 4px) rgba(var(--hh-glow, 215, 239, 188), calc(var(--kick, 0) * 0.55));
         }
 
         .hh-grill {

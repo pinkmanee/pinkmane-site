@@ -13,7 +13,7 @@ export const KEY = "pinkrun:scores";
 export type GameCfg = { key: string; rate: number; base: number; max: number; timed?: { minMs: number } };
 export const LEVEL_TIME_BASE = 10000000;
 const LEVEL_COUNT = 30; // boards exist for super-l1 ... super-l30 (add more levels without touching this file)
-const LEVEL_MIN_MS: Record<number, number> = { 1: 25000 }; // anything else: 15 seconds
+const LEVEL_MIN_MS: Record<number, number> = { 1: 25000, 3: 60000 }; // anything else: 15 seconds (Level 3 is a long one)
 
 export const GAMES: Record<string, GameCfg> = {
   pinkrun: { key: KEY, rate: 60, base: 100, max: 100000 },
