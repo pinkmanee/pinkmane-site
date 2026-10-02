@@ -701,8 +701,9 @@ export default function Home() {
   const spinRef = useRef(0);
   // Pink Maze and Pinkmane Void play on a wide handheld instead of the iPod
   const handheld = playing && (activeGame === "maze" || activeGame === "super");
-  // PHONES + TABLETS: on a touch screen, Pink Maze and Pinkmane Void get their own full-screen
+  // PHONES + TABLETS: on a phone or tablet, Pink Maze and Pinkmane Void get their own full-screen
   // layout with big thumb buttons instead of the drawn handheld.
+  // Computers never get it, even laptops with a touch screen (they keep the drawn handheld + keyboard).
   // To look at it on your computer, open the site with ?touch=1 at the end: http://localhost:3000/?touch=1
   const [isTouch, setIsTouch] = useState(false);
   const [padDir, setPadDir] = useState<string | null>(null); // which way the round pad is pushed (lights up its arrow)
@@ -711,7 +712,11 @@ export default function Home() {
   useEffect(() => {
     const forced = new URLSearchParams(window.location.search).get("touch") !== null;
     const mq = window.matchMedia("(pointer: coarse)");
-    const update = () => setIsTouch(forced || mq.matches);
+    // Is this really a phone or tablet? (iPads call themselves a Mac, but a Mac with a touch screen is an iPad)
+    const ua = navigator.userAgent;
+    const phoneOrTablet =
+      /Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+    const update = () => setIsTouch(forced || (mq.matches && phoneOrTablet));
     update();
     mq.addEventListener?.("change", update);
     return () => mq.removeEventListener?.("change", update);
