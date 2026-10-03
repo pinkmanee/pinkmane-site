@@ -57,7 +57,6 @@ type Column = {
   fragile: number; // thin line that vanishes after you touch it: seconds it lasts (0 = normal line)
   crumble: number; // counting down once touched (-1 = not touched)
   zone: number; // which zone look this column has (99 = SoundCloud Void)
-  spring: boolean; // a trampoline pad on top of this column (Void rooms): landing on it throws you up
 };
 
 type Enemy = {
@@ -78,13 +77,11 @@ type Enemy = {
   idle?: number; // bong: seconds it has been sitting still (it fades away after BONG_IDLE_LIFE)
   // Level 4 animals
   hp?: number; // bear: hits it still takes
-  act?: "walk" | "crouch" | "leap" | "wind" | "slash"; // cat: sneaking, crouching (about to pounce), pouncing. Skeleton: wind = the red "!", slash = the knife
+  act?: "walk" | "crouch" | "leap"; // cat: sneaking, crouching (about to pounce), pouncing
   timer?: number; // cat: seconds left crouching / until it can pounce again. bear: just got hit
   dir?: number; // cat: which way it looks (-1 = left)
   home?: number; // dove: the height it flies at when it isn't swooping
   swooper?: boolean; // dove: this one dives at your head
-  summoned?: boolean; // called in by a boss: it goes away when the fight ends (or you start over)
-  sv?: number; // Level 3 skeleton: its walking speed (it stops to telegraph, then walks again)
 };
 type Leaf = { x: number; y: number; taken: boolean; small?: boolean; coin?: boolean }; // small = half size (words), coin = gold coin
 type Heart = { x: number; y: number; taken: boolean };
@@ -192,7 +189,6 @@ const ZONE_COLORS = [
 const Z_TREES = 4;
 const Z_SMOKE = 5;
 const VOID_ZONE = 99;
-const SPRING_VY = -510; // a trampoline throws you up this fast (about 7 tiles high; a normal jump is about 3.7)
 
 // Fire power: 5 fireballs, and a timer bar at the bottom. Picking up another one refills, it doesn't stack.
 const FIRE_AMMO = 5;
@@ -221,7 +217,6 @@ const JET_REFUEL_TIME = 2; // seconds on the ground to go from empty to full
 const JET_REFUEL_RATE = JET_FUEL_MAX / JET_REFUEL_TIME;
 // ---------- Golden leaf (secret Stutters track) ----------
 // From this score on, the next SoundCloud Void has a spinning golden leaf (once per game).
-const GOLD_LEAF_LIVE = false; // false = the golden Stutters leaf never shows up (all the code is still here: set to true to bring it back)
 const GOLD_AT = 8000;
 const PTS_GOLD = 500;
 // Put the mp3 in public/sounds/ with this name. It plays while you're in the Void after finding the leaf.
@@ -232,85 +227,28 @@ const GOLD_KEY = "pinksuper-golden"; // remembers you've found it before
 
 // ---------- Boss: the troll ----------
 const BOSS_EVERY = 5000; // a boss every 5,000 grams: 5k, 10k, 15k, 20k ...
-// ... and they take turns: the green troll (5k), the EVIL SNOWMAN (10k), the purple giant (15k), the RED SKELETON KNIGHT (20k),
-// TOMBFELL (25k), then the troll again (30k) ... (To change the order, just reorder the names in RUN_BOSSES_ALL.)
-type RunBoss = "troll" | "snowman" | "giant" | "skeleton" | "tombfell";
-const RUN_SKELETON_LIVE = true; // false = leave the skeleton knight out of the infinite run (he's from the hidden WARLORD level)
-const RUN_BOSSES_ALL: RunBoss[] = ["troll", "snowman", "giant", "skeleton", "tombfell"];
-const RUN_BOSSES: RunBoss[] = RUN_BOSSES_ALL.filter((b) => RUN_SKELETON_LIVE || b !== "skeleton");
-const bossKindAt = (count: number): RunBoss => RUN_BOSSES[count % RUN_BOSSES.length];
-// A sign stands just before every boss arena in the infinite run, like in the pink levels: it says who's waiting and how to beat him.
-// (max ~40 characters a line, \n = new line)
-const RUN_BOSS_SIGNS: Record<RunBoss, string> = {
-  troll: "THE TROLL CHASES AND JUMPS AT YOU.\nSHOOT HIM! RELOAD AT THE ? BOXES",
-  snowman: "THE EVIL SNOWMAN BRINGS A BLIZZARD.\nDODGE THE ICE. SHOOT HIM, THEN STOMP",
-  giant: "THE GIANT IS TOUGH. SHOOT HIM DOWN,\nTHEN STOMP HIS HEAD BEFORE HE RISES",
-  skeleton: "THE RED SKELETON KNIGHT: SHOTS BOUNCE.\nJUMP THE SLASH AND STOMP HIS HEAD",
-  tombfell: "TOMBFELL'S SHIELD EATS YOUR SHOTS.\nSTOMP A CAT, THEN KICK IT AT HIM",
-};
-const BOSS_SIGN_RANGE = 95; // you can read a boss sign from this far away (a normal lore sign: 36)
-// The EVIL SNOWMAN and the SKELETON KNIGHT in the infinite run: the same fights as Level 2 and Level 3, a bit shorter.
-const RUN_SNOWMAN_HP = 7; // shots he takes (+3 every lap round the bosses, plus the prize bonus like the troll)
-const RUN_SKELETON_HP = 4; // stomps he takes
-const RUN_SKELETON_REACH = 44; // how far his sword reaches in the infinite run (Level 3: SKELETON_REACH = 58)
-const RUN_SKELETON_TRIGGER = 76; // he starts his swing when you're this close in the infinite run (Level 3: 95)
-const RUN_SKELETON_LAP_CAP = 2; // +1 stomp every lap round the bosses, up to this many extra
-const RUN_SKELETON_PERK_CAP = 2; // prizes make him take extra stomps too, but never more than this (a stomp fight is risky enough)
-const PTS_SNOWMAN = 1500;
-const PTS_SKELETON = 1500;
-// ---------- The snowman's blizzard (the infinite run AND Level 2) ----------
-// While the evil snowman is up it snows all over the screen, and ice spikes form up on the ceiling, hang there glittering for a moment,
-// then drop. One that hits you costs a heart. Your shots (and bricks over your head) break them.
-const BLIZZARD_FLAKES = 150; // snowflakes on screen at full blizzard
-const ICICLE_FIRST = 1.8; // seconds after the fight starts until the first spike begins to form
-const ICICLE_EVERY: [number, number] = [3.6, 2.2]; // seconds between volleys: at the start of the fight .. when he's nearly beaten (he gets angrier)
-const ICICLE_GROW = 0.9; // seconds a spike takes to form (it glitters and shakes) before it drops: your time to get out from under it
-const ICICLE_LEN = 24;
-const ICICLE_MAX = 5; // never more than this many at once (a volley is 2 spikes, 3 once he's hurt)
+// ... and they take turns: the green troll (5k), the purple giant (10k), TOMBFELL (15k), then the troll again (20k) ...
+const RUN_BOSSES = ["troll", "giant", "tombfell"] as const;
+const bossKindAt = (count: number) => RUN_BOSSES[count % RUN_BOSSES.length];
 // TOMBFELL in the infinite run is the quick version of his Level 4 fight: only the cats part.
 // Cats drop in, you jump on one so it curls up, then kick the ball into him.
 const RUN_TOMB_HP = 3; // kicked cats it takes
 const PTS_TOMB = 1500;
 // ---------- The wax moment ----------
-// Right after the boss at 20,000 grams falls, the game stops for a big wax rip (once per run). It's only a moment:
-// text, a torch, a bubbling pull and a huge smoke exhale. It does NOT change the score or anything else in the run.
+// Right after the boss at 20,000 grams falls, the game stops for a wax bong hit. From then on it's WAX MODE:
+// every gram counts double and the colours slowly breathe brighter and darker.
 const WAX_AT = 20000;
 const WAX_DELAY = 1.4; // seconds after the boss falls before the wax moment starts (so you can read TROLL DOWN)
 const WAX_LINE_1 = "YOU SMOKED 20K GRAMS.";
 const WAX_LINE_2 = "U NEED SOME WAX AT THIS POINT";
-const WAX_LINE_3 = "THAT WAS A BIG ONE.";
-// when things happen in the wax moment (seconds). It starts with a freeze-frame that zooms in on you:
-const WAX_T_ZOOM = 1.1; // the frozen screen zooms in on you for this long
-const WAX_ZOOM = 3; // how far it zooms in (3 = three times bigger. Whole numbers keep him sharp)
-const WAX_T_INTRO = 1.7; // ... and the world dims down to the dark stage (the words start here)
-const WAX_T_OUT = 0.6; // at the very end it zooms back out into the game
-const WAX_T_LINE2 = WAX_T_INTRO + 1.3;
-const WAX_T_HEAT = WAX_T_INTRO + 2.6; // the torch
-const WAX_T_HIT = WAX_T_INTRO + 3.4; // he leans in and the bubbling starts (the screen stays frozen until he takes it)
-const WAX_T_EXHALE = WAX_T_INTRO + 5.2; // the smoke (from here on jump / OK skips the rest)
-const WAX_T_END = WAX_T_INTRO + 8.6;
-// Where things are on the dark stage (screen pixels). He stands left of the middle so the bong fits beside him.
-const WAX_STAGE_X = W / 2 - 34; // the middle of his picture
-const WAX_STAGE_Y = 80;
-const WAX_BONG_SC = 3; // how big the bong is
-const WAX_LEAN = 14; // how far he leans in to the bong (screen pixels)
-// Where his mouth is on his 24 x 35 picture, facing right (the smoke comes out of here). If it comes out of the wrong spot, change these.
-const WAX_MOUTH_X = 17;
-const WAX_MOUTH_Y = 10;
-// After the rip the whole screen wobbles and slides through crazy colours, in three parts. The clock only runs while you're
-// really playing (the prize machine, pauses and boss cards don't use it up):
-//   1) WAX_TRIP_FULL seconds at full strength
-//   2) WAX_TRIP_MID seconds a bit calmer (the wobble eases down to WAX_TRIP_MID_WIGGLE of full, the colours to WAX_TRIP_MID_COLOUR)
-//   3) the rest of WAX_TRIP_SECONDS: it all comes down, slowly and smoothly, to nothing
-const WAX_TRIP_SECONDS = 20;
-const WAX_TRIP_FULL = 5;
-const WAX_TRIP_MID = 5;
-const WAX_TRIP_MID_WIGGLE = 0.6;
-const WAX_TRIP_MID_COLOUR = 0.85;
-const WAX_TRIP_WIGGLE = 7; // how far (pixels) the picture sways at its wildest
-const WAX_TRIP_HUE_SPEED = 220; // how fast the colours turn (degrees a second: 220 = a full turn every 1.6 seconds, smooth, never a flash)
-const WAX_AFTERGLOW = false; // true = after the rip the colours keep slowly breathing brighter and darker (looks only, no gameplay)
-const WAX_PULSE_SECONDS = 6; // the afterglow: one slow breath of the colours takes this long
+const WAX_LINE_3 = "WAX MODE: GRAMS COUNT DOUBLE";
+// when things happen in the wax moment (seconds)
+const WAX_T_LINE2 = 1.3;
+const WAX_T_HEAT = 2.6; // the torch
+const WAX_T_HIT = 3.4; // the bubbling
+const WAX_T_EXHALE = 5.2; // the smoke (from here on jump / OK skips the rest)
+const WAX_T_END = 8.6;
+const WAX_PULSE_SECONDS = 6; // WAX MODE: one slow breath of the colours (brighter, then darker) takes this long
 const WAX_PULSE_BRIGHT = 0.16; // how strong the bright half is (0 = off)
 const WAX_PULSE_DARK = 0.3; // how strong the dark half is (0 = off)
 const BOSS_HP_START = 8; // hits the first troll takes
@@ -362,9 +300,7 @@ type PerkId =
   | "swarm" | "greed"; // the curses: a downside with an upside
 type ReelId = PerkId | "snack"; // snack = the brownie, only shown when there are fewer than 3 prizes left to offer
 const PERK_MAX = 3; // how many times one prize can stack (a few rare ones say max: 1 in the list below)
-const SPIN_AT_START = true; // one free spin a few seconds into every run, so new players meet the machine early
-const SPIN_START_DELAY = 3; // seconds of running before that first spin opens
-const SPIN_EVERY_ZONES = 3; // a spin every this many zones (on top of the opening spin and the boss spins). 2 was too much; 4 = a bit fewer. 0 = none
+const SPIN_EVERY_ZONES = 2; // a spin after every this many zones
 const SPIN_JACKPOT = 0.06; // chance that all three reels match (0.06 = 6%)
 const SPIN_JACKPOT_BOSS = 0.18; // the same chance on a BOSS SPIN
 const SPIN_REEL_STOPS = [1.0, 1.6, 2.2]; // seconds until the 1st, 2nd and 3rd reel stop
@@ -396,7 +332,7 @@ const REVIVE_LIVES = 2; // SECOND WIND: hearts you get back up with
 const SWARM_MONSTERS = 1.4; // SWARM: 40% more monsters ...
 const SWARM_PAY = 2; // ... but every monster pays double grams
 const GREED_COINS = 2; // GREED: no new hearts appear in the run, but every gold coin counts as 2
-// ---------- The pet: BOBO, a small fluffy white dog (the BOBO prize) ----------
+// ---------- The pet: a small fluffy white bichon (the BICHON prize) ----------
 // Level 1: follows you and fires a little shot whenever you shoot. Level 2: also shoots by itself.
 // Level 3: also fetches leaves. Its shots only hurt normal monsters, never a troll or giant.
 const PET_W = 16;
@@ -409,7 +345,7 @@ const PET_AUTO_RANGE = 130; // ... at a monster this close (pixels)
 const PET_FETCH_RANGE = 80; // level 3: how far away it spots a leaf
 const PET_FETCH_SPEED = 230;
 // two frames (the legs move). W = white fur, g = grey shading, P = tongue
-const BOBO = [
+const BICHON = [
   [
     ".........KKKKK..",
     "........KWWWWWK.",
@@ -441,16 +377,15 @@ const BOBO = [
     "...KKKK.KKKK....",
   ],
 ];
-const BOBO_LEFT = BOBO.map((frame) => frame.map((row) => row.split("").reverse().join("")));
-const BOBO_LEVELS = [1]; // the levels where BOBO is with you from the start (1 = PINKMANE LIKES WEED)
-const BOBO_COLORS = { K: "#111111", W: "#ffffff", g: "#d9d9e6", P: "#ff5fc8" };
+const BICHON_LEFT = BICHON.map((frame) => frame.map((row) => row.split("").reverse().join("")));
+const BICHON_COLORS = { K: "#111111", W: "#ffffff", g: "#d9d9e6", P: "#ff5fc8" };
 const PET_SPARKS = ["#ffffff", "#ffd6f0", "#ff5fc8", "#ffffff"];
 
 // art = the 9 x 9 pixel icon. weight = how often it shows up on a normal spin, bossWeight = on a BOSS SPIN
 // (a bigger number = more often). To make a prize rarer, lower its weight.
 // max = how many times it stacks (left out = 3). curse = a prize with a downside (shown in red, never a jackpot).
 // bossFrom = see below (the SHIELD uses it).
-// infoAt = a different description for each level (BOBO learns something new each time).
+// infoAt = a different description for each level (the bichon learns something new each time).
 type PerkDef = {
   id: ReelId;
   name: string;
@@ -571,15 +506,15 @@ const PERKS: PerkDef[] = [
   },
   {
     id: "pet",
-    name: "BOBO",
-    info: ["BOBO THE DOG FOLLOWS YOU", "AND SHOOTS WHEN YOU SHOOT"],
+    name: "BICHON",
+    info: ["A FLUFFY DOG FOLLOWS YOU", "AND SHOOTS WHEN YOU SHOOT"],
     infoAt: [
-      ["BOBO THE DOG FOLLOWS YOU", "AND SHOOTS WHEN YOU SHOOT"],
-      ["BOBO NOW ALSO SHOOTS", "BY HIMSELF"],
-      ["BOBO NOW ALSO", "FETCHES LEAVES"],
+      ["A FLUFFY DOG FOLLOWS YOU", "AND SHOOTS WHEN YOU SHOOT"],
+      ["YOUR DOG NOW ALSO SHOOTS", "BY ITSELF"],
+      ["YOUR DOG NOW ALSO", "FETCHES LEAVES"],
     ],
-    weight: 10, // (was 4: BOBO shows up on about 1 in 3 normal spins now)
-    bossWeight: 20, // (was 10: and on about 1 in 2 BOSS SPINS)
+    weight: 4,
+    bossWeight: 10,
     art: [".KK.K.KK.", "KWWKWKWWK", "KWWWWWWWK", "KWKWWWKWK", "KWWWKWWWK", "KgWWPWWgK", "KgWWWWWgK", ".KgWWWgK.", "..KKKKK.."],
     colors: { K: "#111111", W: "#ffffff", g: "#d9d9e6", P: "#ff5fc8" },
   },
@@ -715,7 +650,7 @@ const ALL_LEVELS: LevelDef[] = [
     // Max ~40 characters per line; use \n to split a sign into two lines.
     signs: [
       "WELCOME TO WEEDLAND, PINKMANE'S HOME",
-      "HIS BEST FRIEND IS HIS DOG BOBO.\nHE LOVES HIM MORE THAN ANYTHING",
+      "PINKMANE IS AN ARTIST AND PRODUCER",
       "HE MOSTLY MAKES CLOUD RAP/TRAP MUSIC\nWITH A LOT OF ARCADE INSPIRED SOUNDS",
       "HIS FAVOURITE ARTISTS:\nLIL PEEP, YUNG LEAN, GHOSTEMANE",
       "FIND PINKMANE ON SOUNDCLOUD",
@@ -791,7 +726,7 @@ const ALL_LEVELS: LevelDef[] = [
       "...................C..............................L..L................f...............................H...f...................................................L..L....................C...................................................---.................f............H.........................................................f.............LLL................f.........................L..L...........H........f...............................................................................",
       "..................=?==............................----....................LLL......=?=...............---.................................?......?.............=?==..................----...........LLL............=?=.................---.................................==?=.....................................................................###............=?=...........................----..........=?==......................................................................................",
       "........LLL...........................LLLLLL..............................###.....................................LLL..........................................................w...................###............................---.....................LLL.................................................................LLL...............######......w...................................................................LLL.....................................................................",
-      "...S..........S.........w.............######..w..........S........w.......######........w...w.................S.........w......H...M................................w.......######t.........S......###.....w...w....t...................t.....w........P...t......w...w.........S...w........t.....K......................S.......w..........#########...######...................w..w..w.................S....X....w...............w...X.......S........W........................S.......B.............",
+      "...S..........S.........w.............######..w..........S........w.......######........w...w.................S.........w......H...M................................w.......######..........S......###.....w...w..............................w...................w...w.........S...w..............K......................S.......w..........#########...######...................w..w..w.................S.........w...............w...........S........W........................S.......B.............",
       "############################..###############################...################################..##########################..##########################################...#####################..####..######################...################..#####################################..##############################################...###########...###################################..#######...####################..##########################################################################",
       "############################..###############################...################################..##########################..##########################################...#####################..####..######################...################..#####################################..##############################################...###########...###################################..#######...####################..##########################################################################",
     ],
@@ -856,51 +791,6 @@ const SKELETON_HP = 5; // stomps to beat the skeleton knight
 const SKELETON_REACH = 58; // how far his sword reaches in front of him
 const WARLORD_HP = 6; // stomps to beat WARLORD COLOSSUS (he gets faster + angrier at half)
 const KEEP_TILE = 318; // the cathedral backdrop repeats every 318px (pillar to pillar)
-// ---------- Level 3 upgrades ----------
-// ONE checkpoint, in the middle of the level (the P on the map). Run out of hearts after you've touched it and you come back there
-// (with this many hearts) instead of at the very start. The level clock keeps running, so a death costs you the time you lose.
-const KEEP_CHECKPOINT_HEARTS = 2;
-// The three wings of the Keep. Each has its own colour wash over the backdrop and shows its name when you walk in.
-// from = the first tile of the wing (the gates are the three knights).
-type Wing = { name: string; from: number; tint: [number, number, number, number] };
-const KEEP_WINGS: Wing[] = [
-  { name: "THE ARMORY", from: 0, tint: [255, 120, 40, 0.14] },
-  { name: "THE CRYPT", from: 151, tint: [70, 150, 220, 0.2] },
-  { name: "THE THRONE ROOM", from: 312, tint: [235, 190, 60, 0.14] },
-];
-const wingAt = (col: number) => {
-  let w = 0;
-  KEEP_WINGS.forEach((x, i) => {
-    if (col >= x.from) w = i;
-  });
-  return w;
-};
-// The Warlord fights to a beat. His slams LAND on a beat and his eye waves fire on a beat, with a little ring pulsing on his health bar so
-// you can feel it. PLACEHOLDER tempo: set WARLORD_BPM to the real tempo of the song playing in the Keep and the fight will sit in time with it.
-const WARLORD_BPM = 110;
-const WARLORD_BEAT_OFFSET = 0; // seconds: nudge it if the beat feels a little early or late
-// The stone statues that wake up before the Warlord (the lesson for his floor shockwaves)
-const STATUE_COLORS: Record<string, string> = { A: "#2a2c33", B: "#2a2c33", C: "#2a2c33", D: "#aab0ba", E: "#5d626d", F: "#7d838f", G: "#c5cad3", H: "#9097a3", I: "#767c88", J: "#aab0ba", K: "#5d626d", L: "#3a3d46", M: "#6b707c" };
-// The CRYPT is dark: you only see a circle around you and around the torches you've lit (shoot a torch with a fire shot to light it:
-// it also drops a gold coin). DARK_MAX = how dark it gets (1 = pitch black); the lights are radii in pixels.
-const DARK_MAX = 0.66;
-const PLAYER_LIGHT = 62;
-const TORCH_LIGHT = 76;
-const TORCH_EMBER = 14; // an unlit torch still glows a tiny bit, so you can find it
-// ---------- Medals ----------
-// Par times in seconds for each level: [gold, silver, bronze]. These are first guesses: change them once you know how fast people really are.
-const LEVEL_PAR: Record<number, [number, number, number]> = { 1: [60, 80, 110], 2: [60, 80, 110], 3: [150, 200, 280], 4: [80, 110, 150] };
-const LEVEL_MEDALS_KEY = "pinksuper-medals"; // JSON { "3": { time: "gold" | "silver" | "bronze" | null, nohit: boolean } }
-type MedalTime = "gold" | "silver" | "bronze";
-const MEDAL_RANK: (MedalTime | null)[] = [null, "bronze", "silver", "gold"];
-const medalForTime = (level: number, ms: number): MedalTime | null => {
-  const par = LEVEL_PAR[level];
-  if (!par) return null;
-  const sec = ms / 1000;
-  return sec <= par[0] ? "gold" : sec <= par[1] ? "silver" : sec <= par[2] ? "bronze" : null;
-};
-// How Level 3's WARLORD skin can be EARNED (you can still buy it in the shop): a gold medal or a no-hit run in Level 3
-const WARLORD_SKIN_LEVEL = 3;
 type KnightKind = "horned" | "skeleton" | "warlord";
 type Knight = {
   kind: KnightKind;
@@ -920,7 +810,6 @@ type Knight = {
   ang: number; // horned: where the mace is on its circle. warlord: sword angle
   reach: number; // horned: chain length
   waves: number; // warlord: sound waves still to fire in this blast
-  p2?: boolean; // warlord: phase 2 has started (pillars + skeletons)
 };
 // w/h = size on screen, scale = pixel size, foot = how far down his feet are, hb = his body (left..right),
 // top = top of his head (where you land on him)
@@ -944,8 +833,6 @@ const EYE_WAVES = 2; // sound waves per blast (fired one after the other, each a
 
 // Mirrors a picture left-to-right (kept, so it isn't redone every frame)
 const flipCache = new Map<string[], string[]>();
-// A modulo that never goes negative (a plain % does when the number is negative, which gave an index of -1 and froze the game)
-const pmod = (n: number, m: number) => ((n % m) + m) % m;
 const flipRows = (rows: string[]) => {
   let f = flipCache.get(rows);
   if (!f) {
@@ -968,9 +855,6 @@ const whiteOf = (colors: Record<string, string>) => {
 // ---- Level 3 art (made from your Procreate edits). Frames with 8 pictures = the wiggly drawings moving ----
 const KN_SKEL = [["............................", "............................", "............................", "............................", ".........AAAABBBCCCB........", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", "........AAAAABBBCCCB........", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", "........AAAAABBBBCCCB.......", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", "........AABAAABBBBCCCB......", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", ".........AAAAAABBBCCCB......", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", "..........AAAAABBBCCCB......", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", "..........AAAAABBCCCB.......", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"], ["............................", "............................", "............................", "............................", "..........AAAABBBCCB........", "....DA...AEFEFEFEFEAA.......", "....DGA..AFEFEFEFEFEA.......", "....DGA..AEFEFEFEFEFA.......", "....DGA..AFEHHHHHHFEA.......", "....DGA..AEFAAHHAAEFA.......", "....DGAA.AFEAAHHAAFEA.......", "....DGAA.AEFHIAAIHEFA.......", "....DGAA.AFEHHHHHHFEA.......", "....DGAA.AEFHAHAHAEFA.......", "....DGAA.AFEAHAHAHFEA.......", "....DGAA.AEFHIHHIHEFAAA.....", "....DGAAAAFEFEFEFEFEAAAA....", "....DGAHHFEFEFEFEFEFEHHA....", "....DGAAHEFEFEFEFEFEFHHA....", "....DGAAHFEFEFEFEFEFEHHA....", "....JJAAHEFEFEFEFEFEFHHA....", "....KKHHHFEFELELLLLLLAAA....", "....KKHHHLLLLLMLLLLLLAA.....", "....JJAAAAEFEFEFEFEFEA......", "....AAA.AAFEFEFEFEFEFA......", "........AAEFEFEFEFEFEA......", "........AAAEFAAAAEFAAA......", ".........AAAHAAAAHHAA.......", "..........AAHAA.AHHA........", "............................", "............................", "............................", "............................"]];
 const KN_SKEL_COLORS: Record<string, string> = {"A": "#121216", "B": "#121215", "C": "#111116", "D": "#eef2f6", "E": "#41454e", "F": "#7a808b", "G": "#a9b2bf", "H": "#ece6d6", "I": "#b9b0a0", "J": "#f0c030", "K": "#5a3a22", "L": "#26262a", "M": "#8c8c90"};
-// The skeleton knight of the infinite run: the same picture, repainted. A = outline, E/F = armour, G = blade,
-// D = blade shine, H/I = bone, J = trim, K = handle, L/M = belt and metal. Change any colour here.
-const KN_SKEL_RUN_COLORS: Record<string, string> = { A: "#121216", B: "#121215", C: "#111116", D: "#fff0c8", E: "#5e1824", F: "#b03844", G: "#ff9a3c", H: "#ece6d6", I: "#b9b0a0", J: "#3cf0e0", K: "#5a3a22", L: "#2a1016", M: "#c0707a" };
 const KN_ONI = [["...................", "...................", "...................", "...................", "...................", "...A.A....BBBBC....", "...AADEE...B.BDC...", ".....FG.....G......", "......GHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...................", "...A........BC.....", "...AAAE.....BBBC...", "...ADDG.....G......", "......GHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "....A..............", "...A..E.....B......", "...A..E.....BBBC...", "...AADG.....GDB....", "......GHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", ".....A.............", "....A..............", "....A..E....B.B....", "...AA.E.....BBC....", "...AAAG.....GBB....", ".....DGHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", ".....A.............", ".....A..E....C.....", "....AA.E....BB.....", "....AA.E....BB.....", "....DAG.....GB.....", ".....DGHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", ".....A.............", ".....A..E...BC.....", ".....A..E.BBBD.....", ".....A..E...BB.....", ".....DGB....G......", "......GHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "....AA.....BBC.....", ".....AA.E.BBB......", ".....DAB....B......", ".....DG.....G......", "......GHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........B.......", "...AAAAE..BBBCC....", ".....DA.E..BD......", ".....FGB....G......", "......GHHHHHG......", "......HIJHJIH......", "......HHHJHHH......", "......HGGGGGH......", "......HKHHHKH......", ".......LLLLL.......", ".......L...L.......", "...................", "...................", "...................", "..................."]];
 const KN_ONI_COLORS: Record<string, string> = {"A": "#3a0c1a", "B": "#3a0b1a", "C": "#3a0c19", "D": "#3b0c1a", "E": "#3b0b1a", "F": "#3b0c19", "G": "#121216", "H": "#c4282e", "I": "#ffe14a", "J": "#7a1418", "K": "#eef2f6", "L": "#26262a"};
 const KN_CROW = [["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAA......", "....AAAA.AAAB......", ".....AAAAAACCB.....", "......AAAAAA.BB....", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAA......", "....AAAA.AAAB......", ".....AAAAAACCB.....", "......AAAAAA.BB....", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAA......", "....AAAA.AAAB......", ".....AAAAAACCBB....", "......AAAAAA.......", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAA......", "....AAAA.AAABBB....", ".....AAAAAACCB.....", "......AAAAAA.......", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAAB.....", "....AAAA.AAABBB....", ".....AAAAAACC......", "......AAAAAA.......", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAAB.....", "....AAAA.AAABBB....", ".....AAAAAACC......", "......AAAAAA.......", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAAB.....", "....AAAA.AAABB.....", ".....AAAAAACCBB....", "......AAAAAA.......", "......AAAAA........", "...................", "...................", "...................", "..................."], ["...................", "...................", "...................", "...................", "...........AA......", "....A......AA......", "....AA...AAAA......", "....AAAA.AAABB.....", ".....AAAAAACCB.....", "......AAAAAA..B....", "......AAAAA........", "...................", "...................", "...................", "..................."]];
@@ -1443,7 +1327,7 @@ const ALL_OUTFITS: OutfitDef[] = [
 // The outfits the game actually uses (without the WARLORD skin while he's hidden, see THE WARLORD SWITCH)
 const OUTFITS: OutfitDef[] = ALL_OUTFITS.filter((o) => WARLORD_SHOWN || o.id !== "warlord");
 // What the outfit screen says when it's still locked
-const howToGet = (o: OutfitDef) => (o.id === "warlord" ? `${o.cost} COINS OR GOLD IN LVL ${WARLORD_SKIN_LEVEL}` : o.cost ? `BUY FOR ${o.cost} COINS` : o.how);
+const howToGet = (o: OutfitDef) => (o.cost ? `BUY FOR ${o.cost} COINS` : o.how);
 // Gold coins: some of the weed leaves in the level are gold coins instead (about 1 in 14).
 // Leaves are only for your score; coins are what you spend on outfits.
 const COIN_CHANCE = 0.07;
@@ -1459,26 +1343,6 @@ const OUTFIT_FALLBACK: Record<OutfitId, string> = {
   gold: "#ffd700",
   warlord: "#3b404b",
 };
-// ---------- BOBO's skins (the same looks Pinkmane has, just for his dog) ----------
-// Every outfit has a BOBO version. The ones Pinkmane BUYS cost BOBO_SKIN_COST_MULT times as much for BOBO; the ones Pinkmane EARNS
-// (TRIPPY, GHOSTY) unlock for BOBO by themselves once you have them. The colours are BOBO's picture recoloured:
-// W = his main fur, g = his shading, P = his tongue, K = his outline and eyes.
-const BOBO_SKIN_COST_MULT = 0.5;
-const PET_SKIN_KEY = "pinksuper-bobo-skin"; // which skin BOBO is wearing
-const PET_SKINS_KEY = "pinksuper-bobo-skins"; // JSON array of the BOBO skins you bought
-const BOBO_SKIN_COLORS: Partial<Record<OutfitId, Record<string, string>>> = {
-  classic: { K: "#111111", W: "#ffffff", g: "#d9d9e6", P: "#ff5fc8" },
-  og: { K: "#111111", W: "#ffc2ee", g: "#e08fd0", P: "#8a1f86" },
-  ghost: { K: "#111111", W: "#d6fff0", g: "#a9e3cf", P: "#ff9fd8" },
-  icy: { K: "#111111", W: "#dff5ff", g: "#8fd9ff", P: "#ff8fd0" },
-  toxic: { K: "#111111", W: "#b8ff9a", g: "#6fdc5a", P: "#ff5fc8" },
-  bloody: { K: "#111111", W: "#ff6a6a", g: "#b01818", P: "#ffd0d0" },
-  shadow: { K: "#0a0612", W: "#7a5aa8", g: "#3b2456", P: "#ff5fc8" },
-  gold: { K: "#111111", W: "#ffe680", g: "#e0b020", P: "#ff5fc8" },
-  warlord: { K: "#0a0a0e", W: "#5a606e", g: "#3b404b", P: "#c8323a" },
-};
-const boboSkinName = (o: OutfitDef) => (o.id === "warlord" ? "WARLORD BOBO" : o.name.replace("PINKMANE", "BOBO"));
-const boboSkinCost = (o: OutfitDef) => Math.max(1, Math.round((o.cost ?? 0) * BOBO_SKIN_COST_MULT));
 const COINS_KEY = "pinksuper-goldcoins"; // gold coins you have (spent in the shop)
 const UNLOCKED_KEY = "pinksuper-outfits"; // JSON array of unlocked outfit ids
 const OUTFIT_KEY = "pinksuper-outfit"; // currently worn outfit id
@@ -1500,7 +1364,6 @@ type ShopRow =
   | { kind: "spell"; spell: SpellDef }
   | { kind: "soon"; label: string }
   | { kind: "skin"; outfit: OutfitDef }
-  | { kind: "bskin"; outfit: OutfitDef }
   | { kind: "back" };
 const SHOP_ROWS: ShopRow[] = [
   { kind: "head", label: "SPELLS" },
@@ -1508,8 +1371,6 @@ const SHOP_ROWS: ShopRow[] = [
   ...SHOP_SOON.map((label): ShopRow => ({ kind: "soon", label })),
   { kind: "head", label: "SKINS" },
   ...OUTFITS.filter((o) => !!o.cost).map((outfit): ShopRow => ({ kind: "skin", outfit })),
-  { kind: "head", label: "BOBO SKINS" },
-  ...OUTFITS.map((outfit): ShopRow => ({ kind: "bskin", outfit })),
   { kind: "back" },
 ];
 const SHOP_VISIBLE = 11; // rows that fit on the screen (a longer list scrolls)
@@ -1523,16 +1384,15 @@ const SHOP_ROW_H = 9;
 // weak = how you beat him, where = shown on the grey locked card.
 // color / sky / ground = the card's colours.
 // main: true = a MAIN BOSS: his card blinks and a light runs round its gold edge.
-type BossId = "troll" | "giant" | "leaf" | "snowman" | "horned" | "skeleton" | "runknight" | "warlord" | "tombfell"; // runknight = the red skeleton of the infinite run
+type BossId = "troll" | "giant" | "leaf" | "snowman" | "horned" | "skeleton" | "warlord" | "tombfell";
 type BossCard = { id: BossId; main?: boolean; name: string; moves: string[]; weak: string; where: string; color: string; sky: string; ground: string };
 const ALL_BOSS_CARDS: BossCard[] = [
   { id: "troll", name: "TROLL", moves: ["CHASES YOU DOWN", "JUMPS AT YOU"], weak: "WEAK: YOUR SHOTS", where: "INFINITE RUN", color: "#8fce5a", sky: "#d7efbc", ground: "#2e9e3a" },
   { id: "giant", name: "GIANT", moves: ["BIGGER + TOUGHER", "GETS BACK UP"], weak: "WEAK: SHOTS+STOMP", where: "INFINITE RUN", color: "#b06ce0", sky: "#e6d3f7", ground: "#4a2a6a" },
   { id: "leaf", main: true, name: "EVIL LEAF", moves: ["FLIES ABOVE YOU", "DIVES AT YOU"], weak: "WEAK: YOUR SHOTS", where: "LEVEL 1", color: "#5ab85a", sky: "#c8f5b0", ground: "#2d4a22" },
-  { id: "snowman", main: true, name: "EVIL SNOWMAN", moves: ["COLD HORNED BRUTE", "GETS DIZZY"], weak: "WEAK: SHOTS+STOMP", where: "LEVEL 2 + INFINITE RUN", color: "#8fc8ee", sky: "#dff2ff", ground: "#ffffff" },
+  { id: "snowman", main: true, name: "EVIL SNOWMAN", moves: ["COLD HORNED BRUTE", "GETS DIZZY"], weak: "WEAK: SHOTS+STOMP", where: "LEVEL 2", color: "#8fc8ee", sky: "#dff2ff", ground: "#ffffff" },
   { id: "horned", name: "HORNED WARRIOR", moves: ["SWINGS HIS MACE", "RAGES WHEN HURT"], weak: "WEAK: YOUR SHOTS", where: "LEVEL 3", color: "#c8684a", sky: "#3a1418", ground: "#55505a" },
   { id: "skeleton", name: "SKELETON KNIGHT", moves: ["LONG SWORD SLASH", "ARMOUR EATS SHOTS"], weak: "WEAK: HEAD STOMP", where: "LEVEL 3", color: "#b9b2c8", sky: "#2a1a2e", ground: "#55505a" },
-  { id: "runknight", name: "RED SKELETON", moves: ["LONG SWORD SLASH", "ARMOUR EATS SHOTS"], weak: "WEAK: HEAD STOMP", where: "INFINITE RUN", color: "#d0505a", sky: "#2a0d14", ground: "#55303a" },
   { id: "warlord", main: true, name: "WARLORD COLOSSUS", moves: ["GIANT SWORD SLAM", "FLOOR SHOCKWAVES", "EYE SOUND WAVES"], weak: "WEAK: HEAD STOMP", where: "LEVEL 3", color: "#d23a3a", sky: "#200a10", ground: "#55505a" },
   { id: "tombfell", main: true, name: "TOMBFELL", moves: TOMBFELL_LEVEL_SHOWN ? ["WALLS OF DOVES", "POUNCING CATS", "RIDES A GIANT BEAR"] : ["SPELL SHIELD EATS SHOTS", "POUNCING CATS"], weak: "WEAK: HIS OWN PETS", where: TOMBFELL_LEVEL_SHOWN ? "LEVEL 4" : "INFINITE RUN", color: "#b06ce0", sky: "#241446", ground: "#3f6b3a" },
 ];
@@ -1549,7 +1409,6 @@ function bossArt(id: BossId): { rows: string[]; colors: Record<string, string>; 
   if (id === "snowman") return { rows: EVIL_SNOWMAN, colors: EVIL_SNOWMAN_COLORS, scale: 2 };
   if (id === "horned") return { rows: KN_HORNED, colors: KN_HORNED_COLORS, scale: 2 };
   if (id === "skeleton") return { rows: KN_SKEL[0], colors: KN_SKEL_COLORS, scale: 2 };
-  if (id === "runknight") return { rows: KN_SKEL[0], colors: KN_SKEL_RUN_COLORS, scale: 2 };
   if (id === "tombfell") return { rows: TOMB_WIZ, colors: TOMB_WIZ_COLORS, scale: 2 };
   return { rows: WARLORD_ROWS[0], colors: WARLORD_ROW_COLORS, scale: 2 };
 }
@@ -1798,6 +1657,7 @@ const VOID_PALETTES: { bg: string; a: string; b: string; ink: string }[] = [
   { bg: "#1e0c2e", a: "#4a1f6a", b: "#33144d", ink: "#ffffff" }, // dark purple
   { bg: "#0b2414", a: "#1f5a33", b: "#154226", ink: "#ffffff" }, // dark green
   { bg: "#0b1433", a: "#1f3a7a", b: "#152a5c", ink: "#ffffff" }, // dark blue
+  { bg: "#e8c22a", a: "#fff07a", b: "#f5d84a", ink: "#111111" }, // yellow
 ];
 // Twisted Trees
 const TREE_SKY = "#c9a9e8";
@@ -2232,9 +2092,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const noiseBufRef = useRef<AudioBuffer | null>(null); // one shared buffer of white noise for all the "shhh" sounds
-  const tripBufRef = useRef<HTMLCanvasElement | null>(null); // a copy of the screen for the wobble
-  const trollSoundRef = useRef<HTMLAudioElement | null>(null); // the boss-down sound, loaded once (not on the first kill)
   const deathSoundRef = useRef<HTMLAudioElement | null>(null);
   const stuttersRef = useRef<HTMLAudioElement | null>(null); // the secret Stutters remix
   if (stuttersRef.current) stuttersRef.current.muted = muted; // follows the iPod mute button
@@ -2289,7 +2146,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     newBest: false,
     doneAt: 0,
     bong: null as null | { x: number; y: number },
-    signs: [] as { x: number; text: string; r?: number }[],
+    signs: [] as { x: number; text: string }[],
     lboss: null as null | {
       kind: "leaf" | "snowman";
       x: number;
@@ -2412,21 +2269,13 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     freeJumped: false, // AIR JUMP: the free jump was used since you last stood on something
     reviveUsed: false, // SECOND WIND already saved you this run
     testSpin: 0, // test key 8: which prizes the next test spin shows
-    // The wax moment
-    wax: false, // the wax rip already happened in this run (it only happens once)
+    // The wax moment + WAX MODE
+    wax: false, // WAX MODE is on: grams count double
     waxWait: 0, // seconds until the wax moment starts (0 = not waiting)
     waxT: 0, // seconds into the wax moment
-    waxAt: 0, // when the rip ended (only used by the optional afterglow)
-    waxSnap: null as null | HTMLCanvasElement, // a picture of the frozen world (without you) for the zoom
-    waxFx: 0, // where you are on the frozen screen (the middle of your picture)
-    waxFy: 0,
-    waxHide: false, // true only while that picture is being taken: you and your dog are left out of it
-    waxTest: false, // started with the localhost 7 key: doesn't use up the once-per-run rip
-    waxTrip: 0, // seconds left of the wobble + colours after the rip (0 = not on)
-    waxHue: 0, // where the colours have got to in their turn (it slows down as the effect fades)
-    petSkin: "classic" as OutfitId, // the skin BOBO is wearing
-    petSkins: [] as OutfitId[], // the BOBO skins you bought
-    // BOBO (null until you win him)
+    waxAt: 0, // when WAX MODE started (the colour breathing starts from there)
+    bonusSeen: 0, // your bonus grams at the last frame (WAX MODE doubles whatever got added since)
+    // the bichon (null until you win it)
     pet: null as null | {
       x: number;
       y: number;
@@ -2440,23 +2289,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     },
     spinQueue: [] as boolean[], // spins waiting to open (true = a BOSS SPIN)
     spinWait: 0, // seconds until the next waiting spin opens
-    startSpinDone: false, // the opening spin of this run already happened
-    // Level 3 upgrades + medals
-    cp: null as null | { x: number; cam: number; arenas: { col: number; kind: KnightKind }[] }, // the checkpoint you touched
-    cpCol: -1, // the column of the checkpoint flag on this level's map (-1 = none)
-    hitsTaken: 0, // times you got hit in this level (0 at the end = the NO-HIT star)
-    cpDeaths: 0, // times you ran out of hearts and came back at the checkpoint
-    wing: -1, // which wing of the Keep you're in
-    statues: [] as { x: number; timer: number; act: "idle" | "wind" | "slam" }[], // shockwave statues (the X on the map)
-    torches: [] as { x: number; y: number; lit: boolean }[], // the crypt's wall torches (the t on the map)
-    dark: 0, // how dark the screen is right now (0 = normal, 1 = full darkness): it fades in as you enter the crypt
-    blizzard: 0, // 0 -> 1 while the evil snowman is up (it snows all over the screen)
-    flakes: [] as { x: number; y: number; vy: number; ph: number; big: boolean }[], // the snowflakes (screen coordinates)
-    icicles: [] as { x: number; y: number; len: number; vy: number; grow: number; act: "grow" | "fall"; dead?: boolean }[], // the ice spikes (dead = a shot broke it)
-    icicleTimer: 0, // seconds until the next spike starts to form
-    cover: [] as { x: number; rise: number }[], // the pillars that rise in the Warlord's phase 2 (rise 0 -> 1)
-    medals: {} as Record<string, { time: MedalTime | null; nohit: boolean }>, // your best medals, per level
-    medal: null as null | { time: MedalTime | null; nohit: boolean; newTime: boolean; newNoHit: boolean; skin: boolean }, // what you just earned
     spin: null as null | {
       boss: boolean; // the gold BOSS SPIN (rarer prizes)
       reels: ReelId[]; // what each of the three reels lands on
@@ -2897,7 +2729,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     fragile: 0,
     crumble: -1,
     zone,
-    spring: false,
     ...extra,
   });
 
@@ -3061,17 +2892,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (s.bossState === "none" && s.score >= BOSS_EVERY * (s.bossCount + 1) - 300) {
         s.bossState = "placed";
         s.genGround = 8;
-        // a flat run-up to the arena with the boss's sign in it (the camera locks once the arena is on screen)
-        const runUp = s.cols.length;
-        for (let k = 0; k < 9; k++) s.cols.push(makeCol(8, zoneOf(s.cols.length)));
-        s.signs = s.signs.filter((sg) => sg.x > s.cam - 800);
-        s.signs.push({ x: (runUp + 2) * T, text: RUN_BOSS_SIGNS[bossKindAt(s.bossCount)], r: BOSS_SIGN_RANGE });
+        for (let k = 0; k < 3; k++) s.cols.push(makeCol(8, zoneOf(s.cols.length)));
         s.bossCol = s.cols.length;
         for (let k = 0; k < BOSS_ARENA; k++) {
           const c = makeCol(8, zoneOf(s.cols.length));
-          // (TOMBFELL's and the skeleton knight's arenas are a bare floor: their armour eats every shot, so no stash boxes.)
-          const nextKind = bossKindAt(s.bossCount);
-          const bare = nextKind === "tombfell" || nextKind === "skeleton";
+          // (TOMBFELL's arena is a bare floor: his shield eats every shot, so no stash boxes. He hangs his own vines.)
+          const bare = bossKindAt(s.bossCount) === "tombfell";
           if (!bare && (k === 2 || k === 18)) c.bonus = 5;
           if (!bare && (k === 7 || k === 8)) c.block = 4;
           s.cols.push(c);
@@ -3205,7 +3031,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
   // The bonus room: SoundCloud Void. There are several different rooms, you get a random one
   // (never the same one twice in a row). Each has a pipe out at the end.
-  const VOID_MAPS = 7;
+  const VOID_MAPS = 5;
   const buildVoid = (which: number) => {
     const cols: Column[] = [];
     const leaves: Leaf[] = [];
@@ -3292,58 +3118,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       cols[l0 - 3].block = 6;
       hearts.push({ x: (l1 + 2) * T + 1, y: 5 * T + 4, taken: false });
       cols[l1 + 2].block = 6;
-    } else if (which === 5) {
-      // THE LAUNCH: trampolines shoot you up a tower of ledges, right up past the top of the screen.
-      // Leaves all the way up, a heart on the top ledge, and the pipe out is at the very top.
-      // (A jump reaches about 3 tiles, a trampoline about 7: every step below is made to fit that.)
-      const len = 36;
-      for (let i = 0; i < len; i++) cols.push(makeCol(i === 0 ? 0 : 8, VOID_ZONE));
-      cols[8].spring = true; // the first trampoline: it throws you onto the first tower
-      cols[9].spring = true;
-      for (let i = 12; i <= 14; i++) cols[i].ground = 3; // the first tower
-      cols[14].spring = true; // its trampoline: it throws you up to the first ledge
-      cols[15].spring = true; // (a second one down on the floor, so you can always get back up if you fall)
-      cols[16].spring = true;
-      for (let i = 17; i <= 21; i++) {
-        cols[i].line = -3; // the first ledge (above the top of the screen)
-        cols[i].lineTh = 3;
-      }
-      for (let i = 24; i <= 28; i++) {
-        cols[i].line = -6; // the second ledge
-        cols[i].lineTh = 3;
-      }
-      cols[29].ground = -9; // the top: a pillar with the pipe out on it
-      cols[30].ground = -9;
-      cols[30].pipe = 1;
-      cols[30].pipeOut = true;
-      cols[31].ground = -9;
-      cols[31].pipe = 2;
-      cols[31].pipeOut = true;
-      for (let i = 32; i < len; i++) cols[i].ground = -14; // a tall wall at the end, so nobody can walk off the top
-      const leaf = (col: number, row: number) => leaves.push({ x: col * T + 1, y: row * T + 1, taken: false });
-      for (let i = 2; i <= 6; i++) leaf(i, 7); // warm-up leaves on the floor
-      [[9, 5], [10, 3], [11, 2], [12, 1], [13, 1]].forEach(([c, r]) => leaf(c, r)); // the arc over to the tower
-      leaf(12, 2);
-      leaf(13, 2);
-      [[15, 0], [16, -2], [17, -3]].forEach(([c, r]) => leaf(c, r)); // the arc up to the first ledge
-      for (let i = 18; i <= 20; i++) leaf(i, -4); // on the first ledge
-      for (let i = 25; i <= 27; i++) leaf(i, i === 26 ? -9 : -7); // on the second ledge
-      hearts.push({ x: 26 * T + 1, y: -8 * T + 4, taken: false });
-    } else if (which === 6) {
-      // BOUNCE HOUSE: a floor of trampolines. Bounce along, grab the leaves hanging in the air, land on the ledge for the heart.
-      const len = 34;
-      room(len);
-      for (const p of [5, 11, 17, 23]) {
-        cols[p].spring = true;
-        cols[p + 1].spring = true;
-        [[2, 5], [3, 3], [4, 2], [5, 3]].forEach(([dx, r]) => leaves.push({ x: (p + dx) * T + 1, y: r * T + 1, taken: false }));
-      }
-      for (let i = 14; i <= 16; i++) {
-        cols[i].line = 3;
-        cols[i].lineTh = 3;
-      }
-      hearts.push({ x: 15 * T + 1, y: 1 * T + 4, taken: false });
-      for (let i = 2; i < 5; i++) leaves.push({ x: i * T + 1, y: 7 * T + 1, taken: false });
     } else {
       // THE CLASSIC: bricks, a thin line up high and a wave of leaves
       const len = 36;
@@ -3385,17 +3159,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   const solidAt = (px: number, py: number) => {
     const col = Math.floor(px / T);
     const row = Math.floor(py / T);
+    if (row < 0) return false;
     if (row >= ROWS) return false;
-    if (row < 0) {
-      // Above the top of the screen nothing is solid, except the tall pillars of the Void rooms that
-      // climb up there (a column whose ground is -2 or less starts that many rows up).
-      if (!state.current.inBonus) return false;
-      const hc = colAt(col);
-      return hc.ground <= -2 && row >= hc.ground;
-    }
     const c = colAt(col);
     if (c.bonus >= 0 && row === c.bonus) return true;
-    return (c.ground >= 0 || c.ground <= -2) && row >= c.ground; // (-1 = a pit)
+    return c.ground >= 0 && row >= c.ground;
   };
 
   const oneWayTopsAt = (px: number) => {
@@ -3403,7 +3171,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const tops: number[] = [];
     if (c.block >= 0) tops.push(c.block * T);
     if (c.block2 >= 0) tops.push(c.block2 * T);
-    if (c.line !== -1) tops.push(c.line * T); // (-1 = none; a Void ledge can sit above the screen, at a row below -1)
+    if (c.line >= 0) tops.push(c.line * T);
     return tops;
   };
 
@@ -3493,27 +3261,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     s.wax = false;
     s.waxWait = 0;
     s.waxT = 0;
-    s.waxSnap = null;
-    s.waxTest = false;
-    s.waxTrip = 0;
+    s.bonusSeen = 0;
     s.spin = null;
     s.spinQueue = [];
     s.spinWait = 0;
-    s.startSpinDone = false;
-    s.cp = null;
-    s.cpCol = -1;
-    s.hitsTaken = 0;
-    s.cpDeaths = 0;
-    s.wing = -1;
-    s.statues = [];
-    s.torches = [];
-    s.dark = 0;
-    s.blizzard = 0;
-    s.flakes = [];
-    s.icicles = [];
-    s.icicleTimer = 0;
-    s.cover = [];
-    s.medal = null;
     s.zoneMarks = [{ score: 0, zone: 0 }];
     // reset the score first: the level builder looks at it (the old score made the troll appear right away)
     s.score = 0;
@@ -3606,7 +3357,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
   const burst = (x: number, y: number, count: number, colors: string[], power: number) => {
     const s = state.current;
-    if (s.particles.length > 700) return; // (never let them pile up)
     for (let i = 0; i < count; i++) {
       s.particles.push({
         x,
@@ -3620,6 +3370,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   };
 
   const popup = (x: number, y: number, text: string) => {
+    // WAX MODE: grams count double, so "+100" pops up as "+200" (coins, hearts and shots stay as they are)
+    if (state.current.wax && !/ (COIN|COINS|LIFE|SHOTS)/.test(text)) text = text.replace(/^\+(\d+)/, (_m, n) => `+${Number(n) * 2}`);
     state.current.popups.push({ x, y, text, life: 0.9 });
   };
 
@@ -3738,13 +3490,13 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     // Golden leaf time? Then it's one of the rooms without words (0, 1 or 3).
     // Rooms 2 and 4 spell out FOLLOW ME ON SOUNDCLOUD, so once you've seen either one
     // this game, they drop out of the pool (no reason to see the ad twice in one run).
-    const gold = GOLD_LEAF_LIVE && !s.goldDone && s.score >= GOLD_AT;
+    const gold = !s.goldDone && s.score >= GOLD_AT;
     let which: number;
     if (gold) {
       const plain = [0, 1, 3].filter((m) => m !== s.lastVoid);
       which = plain[Math.floor(Math.random() * plain.length)];
     } else {
-      const base = s.followShown ? [0, 1, 3, 5, 6] : [0, 1, 2, 3, 4, 5, 6];
+      const base = s.followShown ? [0, 1, 3] : [0, 1, 2, 3, 4];
       const pool = base.filter((m) => m !== s.lastVoid);
       which = pool[Math.floor(Math.random() * pool.length)];
     }
@@ -3818,14 +3570,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const next = bossKindAt(s.bossCount);
     if (next === "tombfell") {
       startRunTombfell();
-      return;
-    }
-    if (next === "skeleton") {
-      startRunSkeleton();
-      return;
-    }
-    if (next === "snowman") {
-      startRunSnowman();
       return;
     }
     const kind: "troll" | "giant" = next;
@@ -3929,9 +3673,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           s.tfinalCol = c - 1;
           s.bossCol = c - 1; // the red mark on the progress line
         } else if (ch === "S") s.signs.push({ x, text: def.signs[sign++] ?? "" });
-        else if (ch === "P") s.cpCol = c; // the checkpoint flag
-        else if (ch === "X") s.statues.push({ x, timer: 1.6 + (s.statues.length % 2) * 1.2, act: "idle" }); // a shockwave statue
-        else if (ch === "t") s.torches.push({ x, y: r * T, lit: false }); // a wall torch
         else if (ch === "A") {
           s.bossCol = c - 1;
           s.lbossState = "waiting";
@@ -3949,11 +3690,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     s.y = 8 * T - SPRITE_H;
     s.cam = 0;
     s.farthest = s.x;
-    // Level 1: BOBO, Pinkmane's real dog, is with you the whole way (he follows you and shoots when you shoot)
-    if (BOBO_LEVELS.includes(n)) {
-      s.perks.pet = 1;
-      s.pet = newPet();
-    }
     s.mode = "ready";
     loadBoard(levelGameId(n));
   };
@@ -3974,14 +3710,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const up = Math.min(kn.reach * 0.8, HORNED_BALL_UP);
     return { x: h.x + Math.cos(kn.ang) * kn.reach, y: Math.min(8 * T - 8, h.y + Math.sin(kn.ang) * up) };
   };
-  // The skeleton knight's sword swing (the area in front of him). In the infinite run it doesn't reach as far.
-  const skeletonReach = () => (state.current.levelMode ? SKELETON_REACH : RUN_SKELETON_REACH);
+  // The skeleton knight's sword swing (the area in front of him)
   const skeletonSwordBox = (kn: Knight) => {
     const b = knightBox(kn);
-    const reach = skeletonReach();
     return kn.facing < 0
-      ? { x1: b.x1 - reach, x2: b.x1 + 6, y1: kn.y + 16, y2: kn.y + 54 }
-      : { x1: b.x2 - 6, x2: b.x2 + reach, y1: kn.y + 16, y2: kn.y + 54 };
+      ? { x1: b.x1 - SKELETON_REACH, x2: b.x1 + 6, y1: kn.y + 16, y2: kn.y + 54 }
+      : { x1: b.x2 - 6, x2: b.x2 + SKELETON_REACH, y1: kn.y + 16, y2: kn.y + 54 };
   };
   // WARLORD's giant sword: k = 0 at his hand, 1 at the tip
   const warlordPivot = (kn: Knight) => ({ x: kn.x + (kn.facing < 0 ? WL_PIVOT.x : KN_DIM.warlord.w - WL_PIVOT.x), y: kn.y + WL_PIVOT.y });
@@ -4003,30 +3737,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const aim = Math.atan2(ty - e.y, tx - e.x);
     s.kshots.push({ x: e.x, y: e.y, vx: Math.cos(aim) * EYE_WAVE_SPEED, vy: Math.sin(aim) * EYE_WAVE_SPEED, life: 4 });
     beep(300, 1200, 0.35, 0.06, "sawtooth");
-  };
-
-  // How long until the next beat, if you start counting `lead` seconds from now (the Warlord's slams and eye waves land on it)
-  const warlordBeatLen = () => 60 / WARLORD_BPM;
-  const untilBeat = (lead: number) => {
-    const b = warlordBeatLen();
-    const t = state.current.t - WARLORD_BEAT_OFFSET;
-    return Math.ceil((t + lead) / b) * b - t;
-  };
-  // PHASE 2 (at half health): two stone pillars rise out of the floor to hide behind, and he calls two skeletons in from the sides
-  const startWarlordPhase2 = (kn: Knight) => {
-    const s = state.current;
-    kn.p2 = true;
-    s.cover = [
-      { x: s.cam + 78, rise: 0 },
-      { x: s.cam + W - 96, rise: 0 },
-    ];
-    for (const side of [-1, 1]) {
-      s.enemies.push({ kind: "walker", x: side < 0 ? s.cam + 6 : s.cam + W - 22, y: 8 * T - 14, vx: -side * 28, vy: 0, baseY: 0, phase: 0, alive: true, squash: 0, summoned: true, sv: 28 });
-    }
-    s.flash = 2.8;
-    s.flashText = "HE CALLS THE SKELETONS! HIDE BEHIND THE PILLARS";
-    s.shake = 0.3;
-    playBump();
   };
 
   // The camera reached a knight's arena: lock the screen and bring him in
@@ -4180,87 +3890,16 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     playPowerUp();
   };
 
-  // The EVIL SNOWMAN in PINK RUN INFINITE: the Level 2 fight. He stomps after you and hops; shots hurt him, and
-  // once he's out of hits he gets dizzy and you finish him with a stomp. Like the troll you start with a few
-  // shots and reload from the two ? stash boxes at the ends of the arena.
-  const startRunSnowman = () => {
-    const s = state.current;
-    const hp = RUN_SNOWMAN_HP + bossRound() * BOSS_HP_STEP + bossHpBonus();
-    s.lboss = {
-      kind: "snowman",
-      x: s.cam + W - 60,
-      y: 8 * T - SN_H,
-      vx: 0,
-      vy: 0,
-      hp,
-      maxHp: hp,
-      hit: 0,
-      dive: 0,
-      diveTimer: 2.5,
-      dead: 0,
-      facing: -1,
-      dazed: 0,
-      speech: 3.5,
-    };
-    heldRef.current = { left: false, right: false, up: false };
-    touchRef.current = 0;
-    s.vx = 0;
-    s.spellChoice = 0;
-    s.icicles = [];
-    s.icicleTimer = ICICLE_FIRST;
-    bossIntro("snowman", "choose"); // his card first, then you pick your spell
-  };
-
-  // The RED SKELETON KNIGHT in PINK RUN INFINITE: the Level 3 fight in new colours. Shots bounce off his
-  // armour, so you jump over the slash and land on his head. Fewer stomps than in the level.
-  const startRunSkeleton = () => {
-    const s = state.current;
-    const d = KN_DIM.skeleton;
-    const hp = RUN_SKELETON_HP + Math.min(RUN_SKELETON_LAP_CAP, bossRound()) + Math.min(RUN_SKELETON_PERK_CAP, Math.ceil(bossHpBonus() / 4));
-    s.kboss = {
-      kind: "skeleton",
-      x: s.cam + W - d.w - 16,
-      y: 8 * T - d.foot,
-      vx: 0,
-      vy: 0,
-      hp,
-      maxHp: hp,
-      hit: 0,
-      inv: 0,
-      dead: 0,
-      facing: -1,
-      act: "walk",
-      timer: 0,
-      cool: 1.6,
-      ang: 0,
-      reach: 20,
-      waves: 0,
-    };
-    s.kwaves = [];
-    s.kshots = [];
-    heldRef.current = { left: false, right: false, up: false };
-    touchRef.current = 0;
-    s.vx = 0;
-    bossIntro("runknight", "running"); // his card first, then the fight
-    s.flash = 2.4;
-    s.flashText = "JUMP ON THE SKELETON KNIGHT!";
-    s.hinted = s.hinted.filter((h) => h !== "bossjump");
-    showHint("bossjump", "FREE DOUBLE JUMPS HERE!");
-    s.hintTime = 4;
-    playPowerUp();
-  };
-
-  // You beat a boss in PINK RUN INFINITE (troll, snowman, giant, skeleton or TOMBFELL): points, the BOSS SPIN,
-  // and after the one at 20k the wax moment.
-  const runBossBeaten = (kind: RunBoss) => {
+  // You beat a boss in PINK RUN INFINITE (troll, giant or TOMBFELL): points, the BOSS SPIN, and after
+  // the one at 20k the wax moment.
+  const runBossBeaten = (kind: "troll" | "giant" | "tombfell") => {
     const s = state.current;
     s.bossCount += 1; // the next one comes 5k later
     unlockOutfit("ghost");
-    const pts =
-      kind === "giant" ? PTS_GIANT : kind === "tombfell" ? PTS_TOMB : kind === "snowman" ? PTS_SNOWMAN : kind === "skeleton" ? PTS_SKELETON : PTS_BOSS;
+    const pts = kind === "giant" ? PTS_GIANT : kind === "tombfell" ? PTS_TOMB : PTS_BOSS;
     s.bonus += pts;
     s.flash = 2.5;
-    s.flashText = `${kind.toUpperCase()} DOWN! +${pts}`;
+    s.flashText = `${kind.toUpperCase()} DOWN! +${pts * (s.wax ? 2 : 1)}`;
     // leftover shots stay, but back to normal rules
     if (s.power === "fire") s.fireTime = Math.min(s.fireTime, fireTimeMax());
     s.ammo = Math.min(s.ammo, fireAmmo());
@@ -4487,8 +4126,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     touchRef.current = 0;
     s.vx = 0;
     s.spellChoice = 0;
-    s.icicles = [];
-    s.icicleTimer = ICICLE_FIRST;
     bossIntro(kind, "choose"); // his card first, then you pick your spell
   };
 
@@ -4532,24 +4169,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         localStorage.setItem(LEVEL_PROGRESS_KEY, JSON.stringify(s.levelBest));
       } catch {}
     }
-    // medals: a time medal from the par times, and the NO-HIT star if nothing touched you the whole level
-    {
-      const timeMedal = medalForTime(s.level, s.levelMs);
-      const nohit = s.hitsTaken === 0;
-      const old = s.medals[key] ?? { time: null, nohit: false };
-      const newTime = MEDAL_RANK.indexOf(timeMedal) > MEDAL_RANK.indexOf(old.time);
-      const newNoHit = nohit && !old.nohit;
-      s.medals = { ...s.medals, [key]: { time: newTime ? timeMedal : old.time, nohit: old.nohit || nohit } };
-      try {
-        localStorage.setItem(LEVEL_MEDALS_KEY, JSON.stringify(s.medals));
-      } catch {}
-      let skin = false;
-      if (s.level === WARLORD_SKIN_LEVEL && (timeMedal === "gold" || nohit) && !s.unlocked.includes("warlord")) {
-        unlockOutfit("warlord");
-        skin = true;
-      }
-      s.medal = { time: timeMedal, nohit, newTime, newNoHit, skin };
-    }
     s.mode = "levelDone";
     s.doneAt = s.t;
     s.vx = 0;
@@ -4570,7 +4189,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const kind: "fire" | "ice" | "spike" = choice === 2 && s.spells.includes("spike") ? "spike" : choice === 1 ? "ice" : "fire";
     s.bossSpell = kind;
     s.power = kind;
-    s.ammo = s.tboss ? TOMB_AMMO : s.kboss ? HORNED_AMMO : s.boss || (s.lboss && !s.levelMode) ? BOSS_START_SHOTS : (s.lboss ? s.lboss.maxHp : 10) + BOSS_SPARE_SHOTS;
+    s.ammo = s.tboss ? TOMB_AMMO : s.kboss ? HORNED_AMMO : s.boss ? BOSS_START_SHOTS : (s.lboss ? s.lboss.maxHp : 10) + BOSS_SPARE_SHOTS;
     if (s.kboss) s.doubleJumps = 1; // the horned warrior fight: just one double jump (the ? boxes give more)
     s.fireTime = kind === "fire" ? 999 : 0; // no timer in a boss fight
     s.mode = "running";
@@ -4620,14 +4239,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   };
 
   // ---------- Outfits ----------
-  // Does BOBO own this skin? (the free one, one you bought, or the Pinkmane one you earned)
-  const boboOwns = (id: OutfitId) => {
-    const s = state.current;
-    const o = OUTFITS.find((x) => x.id === id);
-    if (!o) return false;
-    if (id === "classic" || s.petSkins.includes(id)) return true;
-    return !o.cost && s.unlocked.includes(id);
-  };
   const unlockOutfit = (id: OutfitId) => {
     const s = state.current;
     if (s.unlocked.includes(id)) return;
@@ -4658,7 +4269,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   // You beat a boss: his card is yours now (kept in this browser)
   const awardBossCard = () => {
     const s = state.current;
-    const id: BossId | null = s.tboss ? "tombfell" : s.kboss ? (s.levelMode ? s.kboss.kind : "runknight") : s.lboss ? s.lboss.kind : s.boss ? s.boss.kind : null;
+    const id: BossId | null = s.tboss ? "tombfell" : s.kboss ? s.kboss.kind : s.lboss ? s.lboss.kind : s.boss ? s.boss.kind : null;
     if (!id || s.cards.includes(id)) return;
     s.cards = [...s.cards, id];
     try {
@@ -4674,18 +4285,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   const playTrollDeath = () => {
     awardBossCard(); // every boss plays this sound when he goes down, so this is where you win his card
     try {
-      // (the same sound element every time, loaded when the game opens: making a new one on the first
-      // kill made the game hitch while the file loaded)
-      let a = trollSoundRef.current;
-      if (!a) {
-        a = new Audio(TROLL_DEATH_SOUND);
-        trollSoundRef.current = a;
-      }
+      const a = new Audio(TROLL_DEATH_SOUND);
       a.volume = sfxVolRef.current;
       a.muted = mutedRef.current;
-      try {
-        a.currentTime = 0;
-      } catch {}
       // it just plays on top of whatever song is on: no death sound ever stops the music
       a.play().catch(() => {});
     } catch {}
@@ -4735,18 +4337,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     if (!ac) return;
     try {
       const now = ac.currentTime + delay;
-      // One 4-second buffer of noise is made once and reused (making a fresh one for every sound filled
-      // hundreds of thousands of numbers in a single frame, right when the wax moment starts).
-      let buffer = noiseBufRef.current;
-      if (!buffer || buffer.sampleRate !== ac.sampleRate) {
-        buffer = ac.createBuffer(1, Math.floor(ac.sampleRate * 4), ac.sampleRate);
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-        noiseBufRef.current = buffer;
-      }
+      const buffer = ac.createBuffer(1, Math.max(1, Math.floor(ac.sampleRate * time)), ac.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
       const noise = ac.createBufferSource();
       noise.buffer = buffer;
-      const startAt = Math.random() * Math.max(0, buffer.duration - time - 0.1); // (a different slice every time)
       const filter = ac.createBiquadFilter();
       filter.type = "lowpass";
       filter.frequency.setValueAtTime(from, now);
@@ -4757,69 +4352,42 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       g.gain.exponentialRampToValueAtTime(volume * sfxVolRef.current, now + time * 0.2);
       g.gain.exponentialRampToValueAtTime(0.0005, now + time);
       noise.connect(filter).connect(g).connect(ac.destination);
-      noise.start(now, startAt);
+      noise.start(now);
       noise.stop(now + time + 0.05);
     } catch {}
   };
 
   // Freezes the run on the wax bong hit
-  const openWax = (test = false) => {
+  const openWax = () => {
     const s = state.current;
     s.mode = "wax";
     s.waxT = 0;
-    s.waxSnap = null; // (the first frame of the wax moment takes the picture)
-    s.waxTest = test;
-    s.waxFx = Math.round(s.x - s.cam) + 12; // the point 12 px across and 18 px down his picture
-    s.waxFy = Math.round(s.y - s.camY) + 18;
-    heldRef.current = { left: false, right: false, up: false };
-    touchRef.current = 0;
-    s.vx = 0;
-    beep(90, 40, 0.5, 0.09, "sine"); // the freeze: a low thump...
-    beep(110, 520, WAX_T_ZOOM, 0.04, "sawtooth"); // ...and a riser while it zooms in
     // the sounds, all lined up now: the torch, the bubbling pull, the exhale, a little jingle
     playNoise(0.8, 0.035, 6000, 3000, WAX_T_HEAT);
-    for (let i = 0; i < 6; i++) playNoise(0.05, 0.03, 5500, 2000, WAX_T_HEAT + 0.15 + i * 0.12 + rand(0, 0.05)); // the dab crackling
     const bubbles = Math.floor((WAX_T_EXHALE - WAX_T_HIT) / 0.075);
     for (let i = 0; i < bubbles; i++) {
       const f = rand(90, 230);
       beep(f, f * 1.7, 0.05, 0.05, "sine", WAX_T_HIT + i * 0.075 + rand(0, 0.03));
     }
     playNoise(WAX_T_EXHALE - WAX_T_HIT, 0.02, 500, 900, WAX_T_HIT);
-    beep(130, 40, 0.4, 0.1, "sine", WAX_T_EXHALE); // the cough: a low thump as it all comes out
     playNoise(2.2, 0.08, 1800, 350, WAX_T_EXHALE);
-    playNoise(3, 0.05, 900, 200, WAX_T_EXHALE + 0.25); // and a long soft whoosh under it
     [392, 494, 587, 784].forEach((f, i) => beep(f, f, 0.14, 0.045, "triangle", WAX_T_EXHALE + 1.4 + i * 0.12));
   };
 
-  // Back to the run (nothing about it has changed)
+  // Back to the run, in WAX MODE
   const closeWax = () => {
     const s = state.current;
-    if (!s.waxTest) s.wax = true; // (a test rip from the 7 key doesn't use up the real one)
-    s.waxTest = false;
-    s.waxSnap = null;
+    s.wax = true;
     s.waxAt = s.t;
-    s.waxTrip = WAX_TRIP_SECONDS; // the wobble and the colours start as the game comes back
-    s.waxHue = 0;
+    s.bonusSeen = s.bonus; // only grams from now on count double
     s.mode = "running";
     s.invuln = Math.max(s.invuln, 1.2);
-    s.flash = 2.4;
-    s.flashText = "NICE RIP! KEEP GOING";
+    s.flash = 3;
+    s.flashText = "WAX MODE! GRAMS COUNT DOUBLE";
     if (s.spinQueue.length > 0) s.spinWait = 1.6; // the boss spin is still waiting
   };
 
   // ---------- STASH SPIN: the prize machine ----------
-
-  // A trade-off: with an EXTRA HEART you can't take the shot-power prizes (BIGGER STASH, PIERCING SHOTS) past level 1,
-  // and once one of those is at level 2 the machine stops offering the extra heart. (Too many hearts + strong shots was too much.)
-  const LIFE_PRIZES: string[] = ["heart"];
-  const POWER_PRIZES: string[] = ["stash", "pierce"];
-  const lifeHeld = () => LIFE_PRIZES.some((k) => state.current.perks[k as PerkId] > 0);
-  const spinBlocked = (id: ReelId) => {
-    const s = state.current;
-    if (POWER_PRIZES.includes(id) && lifeHeld() && s.perks[id as PerkId] >= 1) return true;
-    if (LIFE_PRIZES.includes(id) && POWER_PRIZES.some((k) => s.perks[k as PerkId] >= 2)) return true;
-    return false;
-  };
 
   // Picks what the three reels land on. Prizes you already have 3 times are left out.
   const rollSpin = (boss: boolean): ReelId[] => {
@@ -4839,11 +4407,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       (p) =>
         s.perks[p.id as PerkId] < perkMax(p) &&
         !(p.id === "revive" && s.reviveUsed) &&
-        !(p.bossFrom !== undefined && !boss && s.perks[p.id as PerkId] >= p.bossFrom) &&
-        !spinBlocked(p.id)
+        !(p.bossFrom !== undefined && !boss && s.perks[p.id as PerkId] >= p.bossFrom)
     );
     // JACKPOT: all three the same (only with a prize that still has room for both stacks, never a curse)
-    const room = open.filter((p) => !p.curse && s.perks[p.id as PerkId] <= perkMax(p) - 2 && (p.bossFrom === undefined || boss) && !(POWER_PRIZES.includes(p.id) && lifeHeld())); // (a jackpot would give 2 stacks)
+    const room = open.filter((p) => !p.curse && s.perks[p.id as PerkId] <= perkMax(p) - 2 && (p.bossFrom === undefined || boss));
     if (room.length > 0 && Math.random() < (boss ? SPIN_JACKPOT_BOSS : SPIN_JACKPOT)) {
       const p = pickFrom(room);
       return [p.id, p.id, p.id];
@@ -4916,7 +4483,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       const d = perkDef(id);
       const most = !boss && d.bossFrom !== undefined ? Math.min(d.bossFrom, perkMax(d)) : perkMax(d);
       if (s.perks[id] >= most) break;
-      if (spinBlocked(id)) break;
       s.perks[id] += 1;
       if (id === "heart") s.lives = Math.min(maxLives(), s.lives + 1);
       if (id === "shield") s.shield = s.perks.shield; // the bubble is up straight away
@@ -4985,54 +4551,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     if (sp.took >= 0 && sp.t - sp.tookAt > SPIN_TAKE_TIME) closeSpin();
   };
 
-  // Out of hearts after the checkpoint: back to the flag, fresh hearts, the fight you were in starts again
-  const respawnAtCheckpoint = () => {
-    const s = state.current;
-    const cp = s.cp;
-    if (!cp) return;
-    s.cpDeaths += 1;
-    s.lives = Math.min(maxLives(), KEEP_CHECKPOINT_HEARTS);
-    s.kboss = null;
-    s.kwaves = [];
-    s.kshots = [];
-    s.bossState = "none";
-    s.knockT = 0;
-    s.karenas = cp.arenas.map((a) => ({ ...a }));
-    if (s.karenas.length) s.bossCol = s.karenas[0].col;
-    for (const a of cp.arenas) {
-      // the ? boxes in the arenas that are still ahead fill up again
-      for (let k = 0; k < 22; k++) {
-        const c = s.cols[a.col + k];
-        if (c && c.bonus >= 0) c.used = false;
-      }
-    }
-    s.enemies = s.enemies.filter((e) => !e.summoned); // (anything a boss called in is gone)
-    s.cover = [];
-    s.power = "none";
-    s.ammo = 0;
-    s.fireTime = 0;
-    s.doubleJumps = 0;
-    s.flying = false;
-    s.x = cp.x;
-    s.y = 8 * T - SPRITE_H - 1;
-    s.vx = 0;
-    s.vy = 0;
-    s.onGround = false;
-    s.airJumped = false;
-    s.cam = cp.cam;
-    s.camY = 0;
-    heldRef.current = { left: false, right: false, up: false };
-    touchRef.current = 0;
-    s.invuln = 2;
-    s.mode = "running";
-    s.flash = 2.8;
-    s.flashText = "BACK AT THE CHECKPOINT";
-    [392, 523, 659].forEach((f, i) => beep(f, f * 1.01, 0.1, 0.05, "triangle", i * 0.09));
-  };
-
   const hurt = (pit = false) => {
     const s = state.current;
-    if (s.levelMode) s.hitsTaken += 1; // (any hit at all: it ends the NO-HIT star)
     const inFight = s.bossState === "fight";
     if (!pit && s.shield > 0) {
       // SHIELD (a spin prize): the bubble takes the hit and pops. Falling in a pit still costs a heart.
@@ -5072,10 +4592,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       s.flash = 3.4;
       s.flashText = "SECOND WIND!";
       [392, 523, 659, 784, 1047].forEach((f, i) => beep(f, f * 1.01, 0.1, 0.055, "triangle", 0.25 + i * 0.08));
-    }
-    if (s.lives <= 0 && s.levelMode && s.cp) {
-      respawnAtCheckpoint();
-      return;
     }
     if (s.lives <= 0) {
       s.mode = "dying";
@@ -5178,34 +4694,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       playHeart();
       return;
     }
-    if (row.kind === "bskin") {
-      // a skin for BOBO: buy it if he doesn't have it yet, then he wears it
-      const bo = row.outfit;
-      const owned = boboOwns(bo.id);
-      if (!owned && !bo.cost) {
-        shopSay("GET THE PINKMANE ONE FIRST");
-        playBump();
-        return;
-      }
-      if (owned && s.petSkin === bo.id) {
-        shopSay("BOBO IS WEARING IT");
-        return;
-      }
-      if (!owned) {
-        if (!shopPay(boboSkinCost(bo))) return;
-        s.petSkins = [...s.petSkins, bo.id];
-        try {
-          localStorage.setItem(PET_SKINS_KEY, JSON.stringify(s.petSkins));
-        } catch {}
-        playHeart();
-      }
-      s.petSkin = bo.id;
-      try {
-        localStorage.setItem(PET_SKIN_KEY, bo.id);
-      } catch {}
-      shopSay(owned ? "BOBO IS WEARING IT NOW" : `${boboSkinName(bo)} IS HIS!`);
-      return;
-    }
     // a skin: buy it if you don't have it yet, then put it on
     const o = row.outfit;
     const isNew = !s.unlocked.includes(o.id);
@@ -5231,8 +4719,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     getAudio(); // browsers only allow sound after a click, so wake it up here
     if (s.mode === "wax") {
       // the wax moment: OK / jump skips the rest once the hit is done
-      // (skipping doesn't cut away: it zooms back out into the game)
-      if (!okRepeatRef.current && s.waxT >= WAX_T_EXHALE && s.waxT < WAX_T_END - WAX_T_OUT) s.waxT = WAX_T_END - WAX_T_OUT;
+      if (!okRepeatRef.current && s.waxT >= WAX_T_EXHALE) closeWax();
       return;
     }
     if (s.mode === "spin") {
@@ -5425,7 +4912,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     playLeaf();
   };
 
-  // ---------- BOBO ----------
+  // ---------- The bichon ----------
   const newPet = () => {
     const s = state.current;
     return {
@@ -5563,10 +5050,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const p = s.pet;
     if (!p) return;
     const frame = p.moving && s.mode === "running" ? Math.floor(s.t * 10) % 2 : 0;
-    const skin = BOBO_SKIN_COLORS[s.petSkin] ?? BOBO_COLORS;
-    if (s.petSkin === "ghost") ctx.globalAlpha = 0.7;
-    drawPixels(ctx, (p.facing < 0 ? BOBO_LEFT : BOBO)[frame], Math.round(p.x - cam), Math.round(p.y), skin, 1);
-    ctx.globalAlpha = 1;
+    drawPixels(ctx, (p.facing < 0 ? BICHON_LEFT : BICHON)[frame], Math.round(p.x - cam), Math.round(p.y), BICHON_COLORS, 1);
   };
 
   const KILL_STREAK_WINDOW = 1.2; // seconds you have to chain the next stomp
@@ -5591,98 +5075,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     playStomp();
   };
 
-  // The blizzard: snow all over the screen and ice spikes that form on the ceiling and fall. Returns true if a spike hurt you.
-  const updateBlizzard = (dt: number): boolean => {
-    const s = state.current;
-    const sm = s.lboss && s.lboss.kind === "snowman" && s.lboss.dead <= 0 ? s.lboss : null;
-    s.blizzard += ((sm ? 1 : 0) - s.blizzard) * Math.min(1, dt * (sm ? 1.2 : 1.3)); // (in 1.2/s, out 1.3/s)
-    if (!sm && s.blizzard < 0.01) {
-      s.blizzard = 0;
-      s.flakes = [];
-    }
-    // the snowflakes: they drift left on a little wind and sway as they fall
-    const want = Math.round(BLIZZARD_FLAKES * s.blizzard);
-    while (s.flakes.length < want) s.flakes.push({ x: rand(0, W), y: rand(-24, -2), vy: rand(34, 78), ph: rand(0, 6.3), big: Math.random() < 0.4 });
-    for (const fl of s.flakes) {
-      fl.y += fl.vy * dt;
-      fl.x += (-16 + Math.sin(s.t * 1.6 + fl.ph) * 12) * dt;
-      if (fl.x < -4) fl.x += W + 8;
-      if (fl.y > H + 3) {
-        fl.y = -3;
-        fl.x = rand(0, W);
-      }
-    }
-    if (s.flakes.length > want + 3) s.flakes.length = want + 3; // (it eases off when the fight ends)
-    // the ice spikes
-    if (sm) {
-      if (sm.dazed <= 0) {
-        s.icicleTimer -= dt; // (none while he's dizzy: go and stomp him)
-        const mood = 1 - Math.max(0, sm.hp) / Math.max(1, sm.maxHp);
-        const volley = mood > 0.5 ? 3 : 2;
-        if (s.icicleTimer <= 0 && s.icicles.length <= ICICLE_MAX - volley) {
-          s.icicleTimer = ICICLE_EVERY[0] + (ICICLE_EVERY[1] - ICICLE_EVERY[0]) * mood;
-          const px = s.x + SPRITE_W / 2;
-          for (let k = 0; k < volley; k++) {
-            // a volley: the first one over you (give or take), the rest anywhere, each starting a moment after the last
-            const x = k === 0 ? px + rand(-45, 45) : s.cam + rand(14, W - 14);
-            s.icicles.push({ x: Math.max(s.cam + 10, Math.min(s.cam + W - 10, x)), y: 0, len: 0, vy: 0, grow: -k * 0.2, act: "grow" });
-          }
-        }
-      }
-    } else if (s.icicles.length > 0) {
-      for (const ic of s.icicles) burst(ic.x, ic.y + ic.len, 6, ["#e6f6ff", "#9fd8ff", "#ffffff"], 40); // (the fight's over: they all crack)
-      s.icicles = [];
-    }
-    const kept: typeof s.icicles = [];
-    for (const ic of s.icicles) {
-      if (ic.dead) continue; // (a shot broke it: it's just dropped from the list)
-      if (ic.act === "grow") {
-        ic.grow += dt;
-        ic.len = ICICLE_LEN * Math.max(0, Math.min(1, ic.grow / ICICLE_GROW));
-        if (ic.grow >= ICICLE_GROW) {
-          ic.act = "fall";
-          ic.vy = 40;
-          beep(1300, 500, 0.08, 0.03, "triangle");
-        }
-        kept.push(ic);
-        continue;
-      }
-      ic.vy = Math.min(380, ic.vy + 900 * dt);
-      ic.y += ic.vy * dt;
-      const tip = ic.y + ic.len;
-      if (s.invuln <= 0 && s.x + HB_X + HB_W > ic.x - 3 && s.x + HB_X < ic.x + 3 && s.y + HB_Y + HB_H > ic.y && s.y + HB_Y < tip) {
-        burst(ic.x, tip, 10, ["#e6f6ff", "#9fd8ff", "#ffffff"], 60);
-        hurt();
-        s.icicles = kept.concat(s.icicles.slice(s.icicles.indexOf(ic) + 1));
-        return true;
-      }
-      if (solidAt(ic.x, tip + 1) || tip >= 8 * T) {
-        // it hits the floor, a block or a pillar and shatters
-        burst(ic.x, Math.min(tip, 8 * T - 2), 9, ["#e6f6ff", "#9fd8ff", "#ffffff"], 55);
-        s.shake = Math.max(s.shake, 0.06);
-        beep(900, 300, 0.07, 0.03, "triangle");
-        continue;
-      }
-      kept.push(ic);
-    }
-    s.icicles = kept;
-    return false;
-  };
-
   const update = (dt: number) => {
     const s = state.current;
     s.t += dt;
-    if (s.levelMode && LEVELS[s.level - 1]?.zone === LEVEL_KEEP) {
-      // the crypt wing is dark (not during a fight: you need to see the knight)
-      const dc = (s.cam + W / 2) / T;
-      const inCrypt = Math.max(0, Math.min(1, (dc - KEEP_WINGS[1].from) / 10)) * Math.max(0, Math.min(1, (KEEP_WINGS[2].from - dc) / 10));
-      s.dark += ((s.bossState === "fight" ? 0 : inCrypt) - s.dark) * Math.min(1, dt * 3);
-    } else s.dark = 0;
-    if (s.waxTrip > 0 && s.mode === "running") {
-      // (only while you're really playing: the prize machine that opens right after the wax used to eat all of it)
-      s.waxTrip = Math.max(0, s.waxTrip - dt);
-      s.waxHue = (s.waxHue + dt * WAX_TRIP_HUE_SPEED * (0.35 + 0.65 * waxTripLevels().col)) % 360;
-    }
     if (s.shake > 0) s.shake -= dt;
     if (s.flash > 0) s.flash -= dt;
 
@@ -5932,18 +5327,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         if (landed) break;
       }
     }
-    // Trampolines (Void rooms): land on a pad and it throws you up
-    if (s.onGround && s.inBonus) {
-      const pad = colAt(Math.floor((hx() + HB_W / 2) / T));
-      if (pad.spring && Math.abs(hy() + HB_H - pad.ground * T) < 3) {
-        s.vy = SPRING_VY;
-        s.onGround = false;
-        s.coyote = 0; // (no extra jump on top of the bounce)
-        pad.bump = 0.25;
-        burst(s.x + SPRITE_W / 2, s.y + SPRITE_H, 10, [PINK, "#ffffff", "#ff8ff0"], 60);
-        beep(180, 760, 0.16, 0.05, "square");
-      }
-    }
     if (s.onGround) {
       s.coyote = 0.09;
       s.airJumped = false;
@@ -5976,23 +5359,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         if (s.lbossState === "waiting" && s.cam >= s.bossCol * T) startLevelBoss();
         if (s.karenas.length > 0 && s.bossState === "none" && s.cam >= s.karenas[0].col * T) startKnight();
         if (s.tarena >= 0 && s.bossState === "none" && s.cam >= s.tarena * T) startTombfell();
-        // the wings of the Keep: their name shows when you walk into a new one
-        if (LEVELS[s.level - 1]?.zone === LEVEL_KEEP) {
-          const wi = wingAt(Math.floor((s.x + SPRITE_W / 2) / T));
-          if (wi !== s.wing) {
-            s.wing = wi;
-            s.flash = 2.6; // (always announced, whatever message was up)
-            s.flashText = KEEP_WINGS[wi].name;
-          }
-        }
-        // the checkpoint flag: touch it once and it's saved
-        if (s.cpCol >= 0 && !s.cp && s.bossState === "none" && s.x + SPRITE_W / 2 >= s.cpCol * T) {
-          s.cp = { x: s.cpCol * T, cam: s.cam, arenas: s.karenas.map((a) => ({ ...a })) };
-          s.flash = 2.4;
-          s.flashText = "CHECKPOINT!";
-          playPowerUp();
-          burst(s.cpCol * T + 8, 8 * T - 24, 22, ["#ffd700", "#ffffff", "#ff5fe0"], 70);
-        }
       }
     }
 
@@ -6005,7 +5371,15 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     if (Math.abs(s.camY - desiredCamY) < 0.05) s.camY = desiredCamY;
 
     // Score: distance + bonus
+    const tilesBefore = Math.floor(s.farthest / T);
     if (!s.inBonus) s.farthest = Math.max(s.farthest, s.x);
+    if (s.wax) {
+      // WAX MODE: every gram counts double. Whatever you picked up or beat since the last frame is added
+      // once more, and so is the distance you just covered.
+      if (s.bonus > s.bonusSeen) s.bonus += s.bonus - s.bonusSeen;
+      s.bonus += Math.floor(s.farthest / T) - tilesBefore;
+    }
+    s.bonusSeen = s.bonus;
     s.score = Math.floor(s.farthest / T) + s.bonus;
 
     // Picking up the secret jetpack
@@ -6078,17 +5452,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           s.sipFuel = sipMax();
           popup(s.x + SPRITE_W / 2, s.y - 20, "JETPACK FULL!");
         }
-        // STASH SPIN every few zones (SPIN_EVERY_ZONES)
-        if (SPIN_EVERY_ZONES > 0 && zoneIndex % SPIN_EVERY_ZONES === 0) {
+        // STASH SPIN after every second zone
+        if (zoneIndex % SPIN_EVERY_ZONES === 0) {
           s.spinQueue.push(false);
           s.spinWait = Math.max(s.spinWait, 0.3);
         }
-      }
-      // The opening spin: a few seconds into the run, so everybody finds out what the machine is
-      if (SPIN_AT_START && !s.startSpinDone && s.runTime >= SPIN_START_DELAY && s.bossState === "none") {
-        s.startSpinDone = true;
-        s.spinQueue.push(false);
-        s.spinWait = Math.max(s.spinWait, 0);
       }
       // The wax moment comes first (right after the 20k boss), the boss spin after it.
       // A spin is waiting: it opens once you're standing on the ground (never in the Void or during a boss fight)
@@ -6267,9 +5635,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         const bh = lb.kind === "snowman" ? SN_H : EL_H;
         if (lb.dazed <= 0 && f.x + 4 > lb.x + 6 && f.x < lb.x + bw - 6 && f.y + 4 > lb.y + 4 && f.y < lb.y + bh - 4) {
           f.life = 0;
-          if (f.pet) {
-            burst(f.x, f.y, 4, PET_SPARKS, 30); // BOBO's shots are too small to hurt a boss
-          } else if (!spent) {
+          if (!spent) {
             if (f.spike) s.spikeHitVolley = f.volley ?? -1;
             hitLevelBoss(shotSparks(f));
           }
@@ -6359,33 +5725,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         }
       }
     }
-    // Your shots (not the dog's) break the ice spikes, whether they're still forming or already falling
-    for (const ic of s.icicles) {
-      for (const f of s.fireballs) {
-        if (f.life > 0 && !f.pet && f.x + 4 > ic.x - 4 && f.x < ic.x + 4 && f.y + 4 > 0 && f.y < ic.y + Math.max(ic.len, 6)) {
-          f.life = 0;
-          ic.dead = true;
-          burst(ic.x, Math.min(f.y, 120), 10, ["#e6f6ff", "#9fd8ff", "#ffffff"], 60);
-          beep(1100, 350, 0.06, 0.03, "triangle");
-          break;
-        }
-      }
-    }
-    // Crypt torches (standing on the floor, where a normal shot reaches them): a fire shot lights one. It lights the way (the crypt is dark) and drops a gold coin.
-    for (const tc of s.torches) {
-      if (tc.lit) continue;
-      for (const f of s.fireballs) {
-        if (f.life > 0 && !f.ice && f.x + 4 > tc.x - 2 && f.x < tc.x + 14 && f.y + 4 > tc.y - 20 && f.y < tc.y + 18) {
-          tc.lit = true;
-          f.life = 0;
-          burst(tc.x + 6, tc.y + 4, 16, ["#ffd23c", "#ff8c1e", "#ffffff"], 70);
-          s.leaves.push({ x: tc.x + 2, y: tc.y - 16, taken: false, coin: true });
-          popup(tc.x + 6, tc.y - 6, "LIT!");
-          playPowerUp();
-          break;
-        }
-      }
-    }
     s.fireballs = s.fireballs.filter((f) => f.life > 0);
 
     // Drone lasers: swoop down to waist height, then fly straight. Touching one hurts.
@@ -6403,7 +5742,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
     // Monsters
     const woodsLevel = s.levelMode && LEVELS[s.level - 1]?.zone === LEVEL_WOODS; // Level 4: cats, doves and bears
-    const keepLevel = s.levelMode && LEVELS[s.level - 1]?.zone === LEVEL_KEEP; // Level 3: skeletons and oni
     for (const e of s.enemies) {
       if (!e.alive) {
         e.squash -= dt;
@@ -6552,51 +5890,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         }
         if (e.y > H + 20) e.alive = false;
       } else {
-        // SKELETON (Level 3): walks like any walker, but when you're close in front of it, it stops and a red "!" shows over its head
-        // (the exact warning the SKELETON KNIGHT gives), then it slashes its knife. Jump the slash, or stomp it while it winds up.
-        if (keepLevel && e.kind === "walker" && e.phase === 0) {
-          if (e.sv === undefined) e.sv = Math.abs(e.vx) || 30;
-          e.timer = (e.timer ?? 0) - dt;
-          const sdx = s.x + SPRITE_W / 2 - (e.x + 7);
-          if (e.act === "wind") {
-            e.vx = 0;
-            if (e.timer <= 0) {
-              e.act = "slash";
-              e.timer = 0.22;
-              beep(900, 200, 0.1, 0.04, "sawtooth");
-            }
-          } else if (e.act === "slash") {
-            e.vx = 0;
-            const kx1 = (e.dir ?? -1) < 0 ? e.x - 24 : e.x + 14; // the knife reaches 24px in front of it
-            if (s.invuln <= 0 && hx() + HB_W > kx1 && hx() < kx1 + 24 && hy() + HB_H > e.y - 4 && hy() < e.y + 14) {
-              hurt();
-              return;
-            }
-            if (e.timer <= 0) {
-              e.act = "walk";
-              e.timer = 1;
-              e.vx = (sdx < 0 ? -1 : 1) * e.sv;
-            }
-          } else if (e.timer <= 0 && e.vy === 0 && Math.abs(sdx) < 50 && Math.abs(s.y + SPRITE_H - (e.y + 14)) < 24) {
-            e.act = "wind";
-            e.timer = 0.5;
-            e.dir = sdx < 0 ? -1 : 1;
-            e.vx = 0;
-          }
-        }
         // Walker (and the walking eye): walks, turns at edges and walls
         e.vy = Math.min(420, e.vy + GRAVITY * dt);
         e.x += e.vx * dt;
-        if (e.summoned) {
-          // (a skeleton the Warlord called in stays in the arena)
-          if (e.x < s.cam + 2) {
-            e.x = s.cam + 2;
-            e.vx = Math.abs(e.vx);
-          } else if (e.x > s.cam + W - 16) {
-            e.x = s.cam + W - 16;
-            e.vx = -Math.abs(e.vx);
-          }
-        }
         const front = e.vx < 0 ? e.x : e.x + 14;
         const footRow = Math.floor((e.y + 14) / T);
         const wall = solidAt(front, e.y + 7);
@@ -6660,7 +5956,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
     // The evil weed leaf: floats around, follows you, and every few seconds dives at you
     const lb = s.lboss;
-    if (lb) {
+    if (s.levelMode && lb) {
       if (lb.dead > 0) {
         lb.dead -= dt;
         lb.y += 40 * dt;
@@ -6672,14 +5968,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           s.lboss = null;
           s.lbossState = "done";
           s.bossState = "none";
-          if (!s.levelMode) {
-            runBossBeaten("snowman"); // the infinite run: points, the boss spin, on you go
-          } else {
-            s.flash = 2.5;
-            s.flashText = lb.kind === "snowman" ? "THE EVIL SNOWMAN MELTED! GO HIT THE BONG" : "EVIL LEAF DOWN! GO HIT THE BONG";
-            if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
-            s.ammo = Math.min(s.ammo, 5);
-          }
+          s.flash = 2.5;
+          s.flashText = lb.kind === "snowman" ? "THE EVIL SNOWMAN MELTED! GO HIT THE BONG" : "EVIL LEAF DOWN! GO HIT THE BONG";
+          if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
+          s.ammo = Math.min(s.ammo, 5);
         }
       } else if (lb.kind === "snowman") {
         // THE EVIL SNOWMAN: stomps after you and hops. Shots only; once he's out of hits he gets
@@ -6721,9 +6013,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         const by1 = lb.y + 6;
         if (hx() + HB_W > bx1 && hx() < bx1 + SN_W - 16 && hy() + HB_H > by1 && hy() < lb.y + SN_H) {
           const onTop = s.vy > 0 && hy() + HB_H - by1 < 14;
-          // while he's dizzy any landing on him counts (a jump from the side used to do nothing)
-          const dazedStomp = lb.dazed > 0 && s.vy > 0 && hy() + HB_H - by1 < (SN_H - 6) * 0.7;
-          if (dazedStomp) {
+          if (onTop && lb.dazed > 0) {
             // the finishing stomp!
             s.vy = STOMP_BOUNCE;
             lb.dazed = 0;
@@ -6800,7 +6090,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
     // ---------- LEVEL 3 knights ----------
     const kn = s.kboss;
-    if (kn) {
+    if (s.levelMode && kn) {
       const d = KN_DIM[kn.kind];
       const floorY = 8 * T - d.foot;
       if (kn.hit > 0) kn.hit -= dt;
@@ -6818,17 +6108,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           s.bossState = "none"; // the screen scrolls again
           s.kwaves = [];
           s.kshots = [];
-          s.cover = [];
-          s.enemies = s.enemies.filter((e) => !e.summoned);
-          if (!s.levelMode) {
-            runBossBeaten("skeleton"); // the infinite run: points, the boss spin, on you go
-          } else {
-            s.flash = 2.5;
-            s.flashText =
-              kn.kind === "warlord" ? "WARLORD IS DOWN! GO HIT THE BONG" : kn.kind === "horned" ? "HORNED WARRIOR DOWN! KEEP GOING" : "SKELETON KNIGHT DOWN! KEEP GOING";
-            if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
-            s.ammo = Math.min(s.ammo, 5);
-          }
+          s.flash = 2.5;
+          s.flashText =
+            kn.kind === "warlord" ? "WARLORD IS DOWN! GO HIT THE BONG" : kn.kind === "horned" ? "HORNED WARRIOR DOWN! KEEP GOING" : "SKELETON KNIGHT DOWN! KEEP GOING";
+          if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
+          s.ammo = Math.min(s.ammo, 5);
         }
       } else {
         const angry = kn.kind === "warlord" && kn.hp <= Math.ceil(kn.maxHp / 2);
@@ -6881,7 +6165,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
             kn.facing = towards;
             kn.vx = kn.facing * 46;
             kn.cool -= dt;
-            if (kn.cool <= 0 && Math.abs(pc - bc) < (s.levelMode ? 95 : RUN_SKELETON_TRIGGER)) {
+            if (kn.cool <= 0 && Math.abs(pc - bc) < 95) {
               kn.act = "wind";
               kn.timer = 0.28;
               kn.vx = 0;
@@ -6923,7 +6207,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
             if (kn.cool <= 0) {
               if (Math.abs(pc - bc) < 130 && Math.random() < 0.7) {
                 kn.act = "wind";
-                kn.timer = untilBeat((angry ? 0.5 : 0.75) + 0.26) - 0.26; // (the slam lands on a beat)
+                kn.timer = angry ? 0.5 : 0.75;
                 kn.vx = 0;
                 playBump();
               } else if (angry && Math.random() < 0.4) {
@@ -6934,7 +6218,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
               } else {
                 // eyes start glowing... sound waves incoming
                 kn.act = "beam";
-                kn.timer = untilBeat(0.6); // (the first wave fires on a beat)
+                kn.timer = 0.6;
                 kn.waves = EYE_WAVES;
                 kn.vx = 0;
               }
@@ -6970,7 +6254,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
             if (kn.timer <= 0) {
               fireEyeWaves(kn);
               kn.waves -= 1;
-              if (kn.waves > 0) kn.timer = untilBeat(0.25); // the next wave, on the next beat, aimed at where you are now
+              if (kn.waves > 0) kn.timer = 0.4; // the next wave, aimed at where you are now
               else {
                 kn.act = "rest";
                 kn.timer = 0.6;
@@ -7033,7 +6317,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         // touching his body hurts, landing on his head hurts HIM (except the horned warrior)
         const bx = knightBox(kn);
         if (hx() + HB_W > bx.x1 && hx() < bx.x2 && hy() + HB_H > bx.y1 && hy() < bx.y2) {
-          const onTop = s.vy > 0 && hy() + HB_H - bx.y1 < 16 + Math.max(0, s.vy) * dt; // (+ how far you fall in one frame, so a slow computer can't fall through his head)
+          const onTop = s.vy > 0 && hy() + HB_H - bx.y1 < 16;
           if (onTop) {
             s.y = bx.y1 - HB_Y - HB_H - 1;
             if (kn.kind === "horned") {
@@ -7075,7 +6359,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
                   if (kn.hp === Math.ceil(kn.maxHp / 2)) {
                     s.flash = 2;
                     s.flashText = "THE WARLORD IS ANGRY NOW!";
-                    if (!kn.p2) startWarlordPhase2(kn);
                   }
                 }
               }
@@ -7300,14 +6583,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           if (c.act === "roll") {
             // kicked: bounces off the edges of the screen (twice), knocks over every cat in its way...
             if ((c.x < s.cam + 2 && c.vx < 0) || (c.x > s.cam + W - 16 && c.vx > 0)) {
-              if (tomb.short) {
-                // The quick fight in the infinite run: a ball that misses him is just gone. (It used to bounce back off the wall
-                // and hit him anyway, so aiming never mattered.)
-                c.act = "gone";
-                burst(c.x + 7, c.y + 7, 8, ["#1a1622", "#9a8fb8", "#ffffff"], 45);
-                playBump();
-                continue;
-              }
               c.bounces += 1;
               c.vx = -c.vx;
               playBump();
@@ -7410,29 +6685,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         }
       }
     }
-    if (updateBlizzard(dt)) return; // (an ice spike hit you)
-    // Shockwave statues (Level 3, in the throne room before the Warlord): when you're near they wake up, a red "!" shows, then they slam the
-    // floor and send a shockwave both ways. It's the lesson for his own slams: jump the wave.
-    for (const st of s.statues) {
-      if (st.x < s.cam - 40 || st.x > s.cam + W + 40) continue;
-      st.timer -= dt;
-      if (st.act === "idle" && st.timer <= 0) {
-        st.act = "wind";
-        st.timer = 0.7;
-        beep(300, 150, 0.15, 0.05, "sawtooth");
-      } else if (st.act === "wind" && st.timer <= 0) {
-        st.act = "slam";
-        st.timer = 0.5;
-        s.kwaves.push({ x: st.x + 14, dir: -1, life: 1.1 }, { x: st.x + 14, dir: 1, life: 1.1 });
-        s.shake = 0.2;
-        burst(st.x + 14, 8 * T - 2, 12, KNIGHT_DUST, 70);
-        playBump();
-      } else if (st.act === "slam" && st.timer <= 0) {
-        st.act = "idle";
-        st.timer = 2.4;
-      }
-    }
-    for (const c of s.cover) c.rise = Math.min(1, c.rise + dt * 2.5); // (the Warlord's pillars rise out of the floor)
     // WARLORD's shockwaves running along the floor: jump over them
     for (const w of s.kwaves) {
       w.x += w.dir * 150 * dt;
@@ -7452,15 +6704,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       w.x += w.vx * dt;
       w.y += w.vy * dt;
       w.life -= dt;
-      // a pillar in the way stops the wave (stand right behind one)
-      for (const c of s.cover) {
-        if (c.rise >= 0.9 && w.x + 4 > c.x && w.x - 4 < c.x + 18 && w.y > 8 * T - 56) {
-          w.life = 0;
-          burst(w.x, w.y, 6, KNIGHT_DUST, 50);
-          playBump();
-          break;
-        }
-      }
       if (w.life > 0 && s.invuln <= 0 && w.x + 4 > hx() && w.x - 4 < hx() + HB_W && w.y + 4 > hy() && w.y - 4 < hy() + HB_H) {
         w.life = 0;
         hurt();
@@ -7511,9 +6754,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         const bx1 = b.x + bhx;
         const by1 = b.y + bhy;
         if (hx() + HB_W > bx1 && hx() < bx1 + bhw && hy() + HB_H > by1 && hy() < by1 + bhh) {
-          // (Any landing on him while you're falling counts, not just one dead-straight down on his head:
-          // he's a tall box lying there, and a jump from the side puts your feet deeper than 14px at first touch.)
-          if (s.vy > 0 && hy() + HB_H - by1 < bhh * 0.7) {
+          if (s.vy > 0 && hy() + HB_H - by1 < 14) {
             // The finishing move!
             s.vy = STOMP_BOUNCE;
             b.dazed = 0;
@@ -7583,7 +6824,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       }
     }
 
-    updatePet(dt); // BOBO (does nothing until you've won him)
+    updatePet(dt); // the bichon (does nothing until you've won it)
 
     // MAGNET (a spin prize): leaves and coins close to you fly to you
     const magnetRange = MAGNET_RANGE[Math.min(s.perks.magnet, MAGNET_RANGE.length - 1)];
@@ -8163,20 +7404,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     }
   };
 
-  // A colour wash over the Keep's backdrop, different in each wing (it blends from one to the next over about 12 tiles)
-  const drawWingTint = (ctx: CanvasRenderingContext2D) => {
-    const s = state.current;
-    if (!s.levelMode) return;
-    const col = (s.cam + W / 2) / T;
-    const i = wingAt(col);
-    const cur = KEEP_WINGS[i];
-    const prev = KEEP_WINGS[Math.max(0, i - 1)];
-    const k = i === 0 ? 1 : Math.min(1, (col - cur.from) / 12);
-    const mix = (n: number) => prev.tint[n] + (cur.tint[n] - prev.tint[n]) * k;
-    ctx.fillStyle = `rgba(${Math.round(mix(0))}, ${Math.round(mix(1))}, ${Math.round(mix(2))}, ${mix(3).toFixed(3)})`;
-    ctx.fillRect(-4, -1200, W + 8, H + 1400);
-  };
-
   const drawBackground = (ctx: CanvasRenderingContext2D, zone: number) => {
     const s = state.current;
     const cam = s.cam;
@@ -8190,7 +7417,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     }
     if (zone === LEVEL_KEEP) {
       drawKeep(ctx);
-      drawWingTint(ctx);
       return;
     }
     if (zone === LEVEL_WOODS) {
@@ -8204,14 +7430,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       ctx.fillStyle = pal.bg;
       // Extended upward so it still fully covers the screen when the vertical camera scrolls up
       ctx.fillRect(-4, -1200, W + 8, H + 1400);
-      // (one band of sound wave per screen, so the tall rooms keep it going all the way up)
-      const bands = s.camY < -20 ? Math.min(4, Math.ceil(-s.camY / H) + 1) : 1;
-      for (let band = 0; band < bands; band++) {
-        for (let i = 0; i < W / 4 + 1; i++) {
-          const h = 10 + (Math.sin(s.t * 3 + i * 0.5 + band) + 1) * 14 + hash(i + band * 31) * 12;
-          ctx.fillStyle = i % 2 === 0 ? pal.a : pal.b;
-          ctx.fillRect(i * 4, 64 - band * H - h / 2, 3, h);
-        }
+      for (let i = 0; i < W / 4 + 1; i++) {
+        const h = 10 + (Math.sin(s.t * 3 + i * 0.5) + 1) * 14 + hash(i) * 12;
+        ctx.fillStyle = i % 2 === 0 ? pal.a : pal.b;
+        ctx.fillRect(i * 4, 64 - h / 2, 3, h);
       }
       return;
     }
@@ -8816,32 +8038,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   // The way down into the Void: a dark well with the void swirling in its mouth and sparks drifting up
   // out of it. Once you've been in, it goes grey and shuts. (In the code it's still called "pipe".)
   // It's drawn in two halves, one per tile: left half first, then the right half.
-  // A tall pillar of a Void room (it starts above the screen and goes all the way down), same look as the pipe wells
-  const drawTallPillar = (ctx: CanvasRenderingContext2D, c: Column, x: number) => {
-    const top = c.ground * T;
-    ctx.fillStyle = INK;
-    ctx.fillRect(x, top, T, H - top);
-    ctx.fillStyle = "#2a1240";
-    ctx.fillRect(x, top + 2, T, H - top);
-    ctx.fillStyle = "#5a2a86";
-    ctx.fillRect(x, top, T, 3);
-    ctx.fillRect(x + T - 3, top, 2, H - top);
-  };
-  // A trampoline pad. It squashes flat for a moment when you land on it.
-  const drawSpring = (ctx: CanvasRenderingContext2D, x: number, top: number, bump: number) => {
-    const squash = bump > 0 ? 3 : 0;
-    const padY = top - 8 + squash;
-    ctx.fillStyle = INK;
-    ctx.fillRect(x + 1, top - 3, 14, 3); // the base
-    ctx.fillRect(x, padY - 1, 16, 5); // the pad's outline
-    ctx.fillStyle = PINK;
-    ctx.fillRect(x + 1, padY, 14, 3);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(x + 2, padY, 6, 1);
-    ctx.fillStyle = INK; // the springs under it
-    ctx.fillRect(x + 4, padY + 4, 2, Math.max(1, top - 3 - (padY + 4)));
-    ctx.fillRect(x + 10, padY + 4, 2, Math.max(1, top - 3 - (padY + 4)));
-  };
   const drawPipe = (ctx: CanvasRenderingContext2D, c: Column, x: number) => {
     const s = state.current;
     const top = c.ground * T;
@@ -9122,12 +8318,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       } else if (row.kind === "soon") {
         label = row.label;
         tag = "SOON";
-      } else if (row.kind === "bskin") {
-        label = boboSkinName(row.outfit);
-        if (s.petSkin === row.outfit.id) tag = "WORN";
-        else if (boboOwns(row.outfit.id)) tag = "OWNED";
-        else if (row.outfit.cost) price = boboSkinCost(row.outfit);
-        else tag = "LOCKED";
       } else if (row.kind === "skin") {
         label = row.outfit.name;
         if (s.outfit === row.outfit.id) tag = "WORN";
@@ -9194,12 +8384,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       ctx.textAlign = "center";
       ctx.fillStyle = on ? "#ff5fe0" : "#8a1f86";
       ctx.fillText("? ? ?", mx, my - 4);
-    } else if (row && row.kind === "bskin") {
-      // BOBO, big, in the skin you're looking at (he bounces a little)
-      const cols = BOBO_SKIN_COLORS[row.outfit.id] ?? BOBO_COLORS;
-      ctx.globalAlpha = row.outfit.id === "ghost" ? 0.7 : 1;
-      drawPixels(ctx, BOBO[Math.floor(s.t * 3) % 2], Math.round(mx - 40), Math.round(my - 30 - (Math.floor(s.t * 3) % 2)), cols, 5);
-      ctx.globalAlpha = 1;
     } else {
       drawDude(row && row.kind === "skin" ? row.outfit.id : s.outfit, Math.round(mx - SPRITE_W), Math.round(my - SPRITE_H), 2);
     }
@@ -9213,19 +8397,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       line2 = row.spell.info[1];
     } else if (row && row.kind === "soon") {
       line1 = "NEW SPELLS ARE ON THE WAY";
-    } else if (row && row.kind === "bskin") {
-      const bo = row.outfit;
-      const bcost = boboSkinCost(bo);
-      if (s.petSkin === bo.id) line1 = "BOBO IS WEARING THIS ONE";
-      else if (boboOwns(bo.id)) line1 = "PRESS OK TO PUT IT ON BOBO";
-      else if (!bo.cost) {
-        line1 = "BOBO GETS THIS ONE FREE";
-        line2 = `WHEN YOU UNLOCK ${bo.name}`;
-      } else if (s.coins >= bcost) line1 = `PRESS OK TO BUY (${bcost} COINS)`;
-      else {
-        line1 = `YOU NEED ${bcost - s.coins} MORE COINS`;
-        line2 = "GOLD COINS HIDE AMONG THE LEAVES";
-      }
     } else if (row && row.kind === "skin") {
       const cost = row.outfit.cost ?? 0;
       if (s.outfit === row.outfit.id) line1 = "YOU'RE WEARING THIS ONE";
@@ -9510,7 +8681,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       const last = i === MAP_NODES.length - 1;
       textBox(ctx, lv ? `LVL ${i + 1}: ${lv.name}` : last ? `LVL ${i + 1}: THE FINAL BOSS` : `LVL ${i + 1}`, 6);
       const best = s.levelBest[String(i + 1)];
-      textBox(ctx, lv ? (best ? `BEST ${fmtTime(best)}${medalTag(i + 1)}  -  OK TO PLAY` : "OK TO PLAY") : i === WARLORD_STOP && !WARLORD_SHOWN ? WARLORD_SOON_TEXT : "COMING SOON", 18);
+      textBox(ctx, lv ? (best ? `BEST ${fmtTime(best)}  -  OK TO PLAY` : "OK TO PLAY") : i === WARLORD_STOP && !WARLORD_SHOWN ? WARLORD_SOON_TEXT : "COMING SOON", 18);
     }
     if (s.flash > 0) textBox(ctx, s.flashText, 34);
     if (Math.floor(s.t * 2) % 2 === 0) {
@@ -9519,12 +8690,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       ctx.fillStyle = "#ffffff";
       ctx.fillText("ARROWS / WASD TO WALK, ESC BACK", W / 2, H - 10);
     }
-  };
-
-  // " GOLD NO-HIT" after a level's best time on the level-select line
-  const medalTag = (level: number) => {
-    const m = state.current.medals[String(level)];
-    return m ? `${m.time ? " " + m.time.toUpperCase() : ""}${m.nohit ? " NO-HIT" : ""}` : "";
   };
 
   // You hit the bong
@@ -9543,11 +8708,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     } else if (best) {
       textBox(ctx, `YOUR BEST ${fmtTime(best)}`, 70);
     }
-    const md = s.medal;
-    if (md && md.time) textBox(ctx, `${md.time.toUpperCase()} MEDAL${md.newTime ? " - NEW!" : ""}`, 83);
-    textBox(ctx, "PINKMANE HIT THE BONG", 97);
-    if (md && md.nohit) textBox(ctx, `NO-HIT STAR${md.newNoHit ? " - NEW!" : ""}`, 109);
-    if (md && md.skin) textBox(ctx, "WARLORD SKIN UNLOCKED!", 109);
+    textBox(ctx, "PINKMANE HIT THE BONG", 92);
     if (since > 1 && Math.floor(s.t * 2) % 2 === 0) textBox(ctx, "OK TO GO ON", 120);
   };
 
@@ -9632,9 +8793,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const tx = x1 + 3;
     ctx.fillStyle = INK;
     ctx.fillRect(tx - 1, y - 5, 9, 8);
-    const nextBoss = bossKindAt(s.bossCount); // green troll, white snowman, purple giant, red skeleton, TOMBFELL (dark blue, pointy hat)
+    const nextBoss = bossKindAt(s.bossCount); // green troll, purple giant, TOMBFELL (dark blue, pointy hat)
     const giantNext = nextBoss === "giant";
-    ctx.fillStyle = s.bossState === "fight" && Math.floor(s.t * 6) % 2 === 0 ? "#ffffff" : giantNext ? "#8a4fc0" : nextBoss === "tombfell" ? "#3a1d8a" : nextBoss === "snowman" ? "#dff0ff" : nextBoss === "skeleton" ? "#b03844" : "#6aa84f";
+    ctx.fillStyle = s.bossState === "fight" && Math.floor(s.t * 6) % 2 === 0 ? "#ffffff" : giantNext ? "#8a4fc0" : nextBoss === "tombfell" ? "#3a1d8a" : "#6aa84f";
     ctx.fillRect(tx, y - 4, 7, 6);
     if (nextBoss === "tombfell") {
       // his hat
@@ -9674,12 +8835,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     ctx.fillText("PICK YOUR SPELL", W / 2, 14);
     ctx.fillStyle = "#ffc800";
     const need = b ? b.maxHp : s.lboss ? s.lboss.maxHp : s.kboss ? s.kboss.maxHp : 0;
-    const runSnow = !!s.lboss && !s.levelMode; // the snowman in the infinite run works like the troll: few shots, stash boxes
-    const shots = s.kboss ? HORNED_AMMO : b || runSnow ? BOSS_START_SHOTS : need + BOSS_SPARE_SHOTS;
+    const shots = s.kboss ? HORNED_AMMO : b ? BOSS_START_SHOTS : need + BOSS_SPARE_SHOTS;
     ctx.fillText(
       s.tboss
         ? `${TOMB_AMMO} SHOTS. THEY ONLY WORK ONCE HE'S OFF THE BEAR`
-        : s.kboss || b || runSnow
+        : s.kboss || b
           ? `${shots} SHOTS, IT TAKES ${need}. USE THE STASH BOXES`
           : `${shots} SHOTS, IT TAKES ${need}`,
       W / 2,
@@ -9759,286 +8919,92 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   };
 
   // ---------- The wax moment: drawing ----------
-  // How strong the wobble (wig) and the colours (col) are right now, 0 to 1, from how long it has been going (see the 3 parts above)
-  const waxTripLevels = () => {
-    const e = WAX_TRIP_SECONDS - state.current.waxTrip; // seconds since it started
-    const tail = Math.max(0.001, WAX_TRIP_SECONDS - WAX_TRIP_FULL - WAX_TRIP_MID);
-    let wig = 1;
-    let col = 1;
-    if (e > WAX_TRIP_FULL) {
-      const k = Math.min(1, (e - WAX_TRIP_FULL) / WAX_TRIP_MID); // part 2: a bit calmer
-      wig = 1 - (1 - WAX_TRIP_MID_WIGGLE) * k;
-      col = 1 - (1 - WAX_TRIP_MID_COLOUR) * k;
-    }
-    if (e > WAX_TRIP_FULL + WAX_TRIP_MID) {
-      const k = Math.min(1, (e - WAX_TRIP_FULL - WAX_TRIP_MID) / tail); // part 3: coming down to nothing
-      const ease = k * k * (3 - 2 * k);
-      wig = WAX_TRIP_MID_WIGGLE * (1 - ease);
-      col = WAX_TRIP_MID_COLOUR * (1 - ease);
-    }
-    const ramp = Math.min(1, e / 0.5); // it builds up over the first half second
-    return { wig: wig * ramp, col: col * ramp };
-  };
-
-  // The wobble after the rip: the finished picture is put back in thin strips, each one swaying sideways on a
-  // travelling wave, while the colours slowly turn round and round. It builds up quickly, then eases off and stops.
-  const drawWaxTrip = (ctx: CanvasRenderingContext2D) => {
-    const s = state.current;
-    const { wig, col } = waxTripLevels();
-    if (wig <= 0.001 && col <= 0.001) return;
-    let buf = tripBufRef.current;
-    if (!buf) {
-      buf = document.createElement("canvas");
-      buf.width = W;
-      buf.height = H;
-      tripBufRef.current = buf;
-    }
-    const bc = buf.getContext("2d");
-    if (!bc) return;
-    bc.drawImage(ctx.canvas, 0, 0);
-    const STRIP = 4;
-    const sway = WAX_TRIP_WIGGLE * wig;
-    for (let y = 0; y < H; y += STRIP) {
-      const dx = Math.round(Math.sin(s.t * 7 + y * 0.09) * sway + Math.sin(s.t * 3.1 + y * 0.21) * sway * 0.5);
-      ctx.drawImage(buf, 0, y, W, STRIP, dx, y, W, STRIP);
-    }
-    const hue = s.waxHue;
-    ctx.save();
-    ctx.globalCompositeOperation = "hue"; // keeps the light and dark of the picture, swaps the colours
-    ctx.globalAlpha = 0.6 * col;
-    ctx.fillStyle = `hsl(${hue.toFixed(0)}, 100%, 55%)`;
-    ctx.fillRect(0, 0, W, H);
-    ctx.globalCompositeOperation = "saturation"; // and turns the colours up
-    ctx.globalAlpha = 0.75 * col;
-    ctx.fillStyle = "hsl(0, 100%, 50%)";
-    ctx.fillRect(0, 0, W, H);
-    ctx.globalCompositeOperation = "overlay"; // a second colour a third of a turn away, so it never looks like one flat tint
-    ctx.globalAlpha = 0.3 * col;
-    ctx.fillStyle = `hsl(${((hue + 120) % 360).toFixed(0)}, 100%, 50%)`;
-    ctx.fillRect(0, 0, W, H);
-    ctx.restore();
-  };
-
   const drawWax = (ctx: CanvasRenderingContext2D) => {
     const s = state.current;
     const t = s.waxT;
-    const clamp01 = (k: number) => Math.max(0, Math.min(1, k));
-    const ease = (k: number) => {
-      const x = clamp01(k);
-      return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-    };
-    // --- the zoom: 0 = the normal game screen, 1 = zoomed in on you. It goes in at the start and back out at the end.
-    const zin = ease(t / WAX_T_ZOOM);
-    const zout = ease((t - (WAX_T_END - WAX_T_OUT)) / WAX_T_OUT);
-    const k = zin * (1 - zout);
-    const z = 1 + (WAX_ZOOM - 1) * k;
-    const fx = s.waxFx;
-    const fy = s.waxFy;
-    const cx = fx + (WAX_STAGE_X - fx) * k; // where his middle point is on the screen right now
-    const cy = fy + (WAX_STAGE_Y - fy) * k;
-    const mx = (x: number) => cx + (x - fx) * z; // a spot on the frozen screen -> where it is on the zoomed screen
-    const my = (y: number) => cy + (y - fy) * z;
-    const out = t - WAX_T_EXHALE; // seconds since the exhale started (negative before it)
-    const R = (x: number, y: number, w: number, h: number) => ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
-
-    ctx.save();
-    // the cough: when the smoke comes out the whole screen kicks for a moment
-    if (out > 0 && out < 0.5) {
-      const kick = 1 - out / 0.5;
-      ctx.translate(Math.round(Math.sin(t * 90) * 3 * kick), Math.round(Math.cos(t * 70) * 2 * kick));
-    }
-    ctx.fillStyle = "#16101d";
-    ctx.fillRect(-4, -4, W + 8, H + 8);
-
-    // 1) the frozen world, zoomed in on you (and BOBO, if you have him)
-    ctx.save();
-    ctx.translate(cx - fx * z, cy - fy * z);
-    ctx.scale(z, z);
-    if (s.waxSnap) ctx.drawImage(s.waxSnap, 0, 0);
-    if (s.pet) {
-      ctx.translate(0, -Math.round(s.camY));
-      drawPet(ctx, s.cam);
-    }
-    ctx.restore();
-
-    // 2) the world dims down to a dark stage, with a spotlight on you
-    const dim = 0.93 * ease((t - WAX_T_ZOOM * 0.5) / (WAX_T_INTRO - WAX_T_ZOOM * 0.5)) * (1 - zout);
-    ctx.fillStyle = `rgba(22, 12, 29, ${dim.toFixed(3)})`;
-    ctx.fillRect(-4, -4, W + 8, H + 8);
-
-    // 3) you: drawn live on top, so you can lean in to the bong
-    const leanIn = ease((t - (WAX_T_HIT - 0.55)) / 0.55); // leans in for the pull...
-    const recoil = ease(out / 0.35); // ...and throws his head back on the exhale
-    const lean = WAX_LEAN * leanIn * (1 - recoil);
-    const pulling = t >= WAX_T_HIT && t < WAX_T_EXHALE;
-    const tremble = pulling ? Math.round(Math.sin(t * 50)) : 0;
-    const bob = t >= WAX_T_INTRO && !pulling ? Math.round(Math.sin(t * 3)) : 0;
-    const left = Math.round(mx(fx - 12) + (lean + tremble) * (z / WAX_ZOOM));
-    const top = Math.round(my(fy - 18)) + bob;
-    const pw = Math.round(SPRITE_W * z);
-    const ph = Math.round(SPRITE_H * z);
-    if (dim > 0.02) {
-      // a soft pink spotlight behind him
-      for (let i = 0; i < 3; i++) {
-        ctx.fillStyle = `rgba(255, 95, 200, ${(0.05 * dim).toFixed(3)})`;
-        ctx.beginPath();
-        ctx.ellipse(left + pw / 2, top + ph / 2, 44 + i * 16, 62 + i * 14, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    const sprite = spritesRef.current[s.outfit];
-    const flip = s.facing < 0 && t < WAX_T_ZOOM; // he turns to face the bong once the stage is dark
-    if (sprite && sprite.complete && sprite.naturalWidth > 0) {
-      ctx.save();
-      if (flip) {
-        ctx.translate(left + pw, top);
-        ctx.scale(-1, 1);
-        ctx.drawImage(sprite, 0, 0, SPRITE_W, SPRITE_H, 0, 0, pw, ph);
-      } else {
-        ctx.drawImage(sprite, 0, 0, SPRITE_W, SPRITE_H, left, top, pw, ph);
-      }
-      ctx.restore();
-    } else {
-      ctx.fillStyle = OUTFIT_FALLBACK[s.outfit];
-      R(left + HB_X * z, top + HB_Y * z, HB_W * z, HB_H * z);
-    }
-
-    // 4) the rig: a bong held up to his mouth, with a glass banger on the side
-    const sc = WAX_BONG_SC;
-    const u = sc / 5; // (the torch and the sparks were drawn for a bong 5 big)
-    const bongA = ease((t - WAX_T_ZOOM * 0.9) / 0.5) * (1 - ease((t - (WAX_T_END - WAX_T_OUT)) / 0.25));
-    const stageLeft = WAX_STAGE_X - 12 * WAX_ZOOM;
-    const stageTop = WAX_STAGE_Y - 18 * WAX_ZOOM;
-    const rx = Math.round(stageLeft + WAX_MOUTH_X * WAX_ZOOM + WAX_LEAN + 2 - 5 * sc);
-    const ry = Math.round(stageTop + WAX_MOUTH_Y * WAX_ZOOM - 2 + (1 - bongA) * 14);
-    const bowlX = rx + 8 * sc;
-    const bowlY = ry + 7 * sc;
-    const heating = t >= WAX_T_HEAT && t < WAX_T_HIT;
-    if (bongA > 0.01) {
-      ctx.globalAlpha = bongA;
-      if (heating) {
-        // the torch heats the banger: a warm glow behind the rig
-        const glow = 0.14 + 0.06 * Math.sin(t * 14);
-        ctx.fillStyle = `rgba(255, 150, 40, ${glow.toFixed(3)})`;
-        R(bowlX - 18 * u, bowlY - 14 * u, 40 * u, 30 * u);
-        ctx.fillStyle = `rgba(255, 190, 80, ${(glow * 0.9).toFixed(3)})`;
-        R(bowlX - 9 * u, bowlY - 7 * u, 22 * u, 16 * u);
-      }
-      drawPixels(ctx, BONG, rx, ry, BONG_COLORS, sc);
-      // the dab: amber wax in the banger (it glows while the torch is on it)
-      ctx.fillStyle = heating ? "#ffe08a" : t >= WAX_T_HIT ? "#b8860b" : "#ffb03c";
-      R(bowlX, bowlY, sc, sc);
-      if (heating) {
-        // the torch: a grey can and a blue flame that licks the banger
-        ctx.fillStyle = INK;
-        R(bowlX + 26 * u, bowlY - 6 * u, 24 * u, 16 * u);
-        ctx.fillStyle = "#9b8fa6";
-        R(bowlX + 28 * u, bowlY - 4 * u, 20 * u, 12 * u);
-        ctx.fillStyle = "#5a4a6a";
-        R(bowlX + 22 * u, bowlY, 6 * u, 4 * u);
-        const lick = Math.floor(t * 4) % 2; // a slow flicker
-        ctx.fillStyle = "#1d4fa8";
-        R(bowlX + (6 - lick * 2) * u, bowlY, (16 + lick * 2) * u, 4 * u);
-        ctx.fillStyle = "#4aa3ff";
-        R(bowlX + (9 - lick * 2) * u, bowlY + u, (13 + lick * 2) * u, 2 * u);
-        ctx.fillStyle = "#ffffff";
-        R(bowlX + 16 * u, bowlY + u, 6 * u, 2 * u);
-        // little sparks jumping off the hot wax
-        for (let i = 0; i < 7; i++) {
-          const age = (t * 1.7 + i * 0.29) % 1;
-          const sx = bowlX + 2 + (hash(i + 1) - 0.5) * 26 * u * age;
-          const sy = bowlY - 2 - age * 30 * u;
-          ctx.fillStyle = `rgba(${i % 2 ? "255, 225, 120" : "255, 150, 50"}, ${(1 - age).toFixed(2)})`;
-          R(sx, sy, 2, 2);
-        }
-      }
-      if (t >= WAX_T_HIT) {
-        // the pull: bubbles in the water, the neck fills with milky smoke (it clears again on the exhale)
-        const fill = t < WAX_T_EXHALE ? Math.min(1, (t - WAX_T_HIT) / 1.4) : Math.max(0, 1 - out / 0.7);
-        const h = 7 * sc * fill;
-        ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
-        R(rx + 4 * sc, ry + 8 * sc - h, 2 * sc, h);
-        if (t < WAX_T_EXHALE) {
-          for (let i = 0; i < 7; i++) {
-            const up = (t * 46 + i * 11) % (24 * u);
-            ctx.fillStyle = i % 2 === 0 ? "#ffffff" : "#bfe3ff";
-            R(rx + (2 + ((i * 37) % 6)) * sc + 1, ry + 13 * sc - up, 2, 2);
-          }
-        }
-      }
-      ctx.globalAlpha = 1;
-    }
-
-    // 5) THE EXHALE: it pours out of HIS mouth, billows out in every direction and fills the whole screen
-    if (out > 0) {
-      const haze = 0.34 * Math.min(1, out / 1.2) * Math.min(1, Math.max(0, 3.3 - out) / 0.9);
-      ctx.fillStyle = `rgba(235, 240, 255, ${haze.toFixed(3)})`;
-      ctx.fillRect(-4, -4, W + 8, H + 8);
-      const clearUp = clamp01((WAX_T_END - 0.1 - t) / 0.9); // everything thins out over the last second, so it never cuts away
-      const puff = (px: number, py: number, r: number, a0: number, tint: number) => {
-        const a = a0 * clearUp;
-        ctx.fillStyle = tint === 0 ? `rgba(255, 215, 245, ${a.toFixed(3)})` : tint === 1 ? `rgba(255, 255, 255, ${a.toFixed(3)})` : `rgba(205, 225, 255, ${a.toFixed(3)})`;
-        ctx.fillRect(Math.round(px - r), Math.round(py - r / 2), Math.round(r * 2), Math.round(r));
-        ctx.fillRect(Math.round(px - r / 2), Math.round(py - r), Math.round(r), Math.round(r * 2));
-        ctx.fillRect(Math.round(px - r * 0.8), Math.round(py - r * 0.8), Math.round(r * 1.6), Math.round(r * 1.6));
-      };
-      const ox = left + WAX_MOUTH_X * z;
-      const oy = top + WAX_MOUTH_Y * z;
-      // (Every puff has its own direction and size, worked out from its number so nothing flickers.)
-      for (let i = 0; i < 44; i++) {
-        const age = out - i * 0.05;
-        if (age <= 0 || age > 3) continue;
-        const ang = (hash(i * 3.1) - 0.5) * Math.PI * 2; // every direction (a bit more up than down)
-        const speed = 34 + hash(i * 7.7) * 70;
-        const px = ox + Math.cos(ang) * speed * age * (1 + age * 0.35);
-        const py = oy + Math.sin(ang) * speed * age * (1 + age * 0.2) - age * 10;
-        const r = 5 + age * (14 + hash(i * 5.3) * 16);
-        puff(px, py, r, 0.5 * Math.min(1, age / 0.25) * Math.max(0, 1 - age / 3), i % 3);
-      }
-      // ...and big slow clouds bloom all over the screen until everything is smoke
-      for (let i = 0; i < 16; i++) {
-        const age = out - 0.5 - i * 0.07;
-        if (age <= 0 || age > 2.8) continue;
-        const px = hash(i * 9.1) * W;
-        const py = hash(i * 4.7) * H;
-        const r = 10 + age * (22 + hash(i * 2.3) * 16);
-        puff(px, py, r, 0.3 * Math.min(1, age / 0.6) * Math.max(0, 1 - age / 2.8), (i + 1) % 3);
-      }
-    }
-
-    // 6) the words go on top of the smoke so you can always read them
+    ctx.fillStyle = "rgba(22, 12, 29, 0.9)";
+    ctx.fillRect(0, 0, W, H);
     ctx.font = `8px ${fontFamily}`;
     ctx.textBaseline = "top";
+    // the two lines get typed out
     const typed = (text: string, from: number, y: number, color: string) => {
       const n = Math.max(0, Math.min(text.length, Math.floor((t - from) / 0.045)));
       if (n <= 0) return;
       ctx.textAlign = "left";
       const x = Math.round(W / 2 - ctx.measureText(text).width / 2);
       ctx.fillStyle = INK;
-      for (const [dx, dy] of [[1, 1], [-1, 0], [1, 0], [0, -1], [0, 1]]) ctx.fillText(text.slice(0, n), x + dx, y + dy); // outline
+      ctx.fillText(text.slice(0, n), x + 1, y + 1);
       ctx.fillStyle = color;
       ctx.fillText(text.slice(0, n), x, y);
     };
-    ctx.globalAlpha = 1 - zout;
-    typed(WAX_LINE_1, WAX_T_INTRO + 0.2, 10, "#ffffff");
+    // the rig: the level bong, big, with a glass banger on the side
+    const sc = 5;
+    const rx = Math.round(W / 2 - 25);
+    const ry = 42;
+    drawPixels(ctx, BONG, rx, ry, BONG_COLORS, sc);
+    const bowlX = rx + 8 * sc;
+    const bowlY = ry + 7 * sc;
+    const heating = t >= WAX_T_HEAT && t < WAX_T_HIT;
+    // the dab: amber wax in the banger (it glows while the torch is on it)
+    ctx.fillStyle = heating ? "#ffe08a" : t >= WAX_T_HIT ? "#b8860b" : "#ffb03c";
+    ctx.fillRect(bowlX, bowlY, sc, sc);
+    if (heating) {
+      // the torch: a grey can and a blue flame that licks the banger
+      ctx.fillStyle = INK;
+      ctx.fillRect(bowlX + 26, bowlY - 6, 24, 16);
+      ctx.fillStyle = "#9b8fa6";
+      ctx.fillRect(bowlX + 28, bowlY - 4, 20, 12);
+      ctx.fillStyle = "#5a4a6a";
+      ctx.fillRect(bowlX + 22, bowlY, 6, 4);
+      const lick = Math.floor(t * 4) % 2; // a slow flicker
+      ctx.fillStyle = "#1d4fa8";
+      ctx.fillRect(bowlX + 6 - lick * 2, bowlY, 16 + lick * 2, 4);
+      ctx.fillStyle = "#4aa3ff";
+      ctx.fillRect(bowlX + 9 - lick * 2, bowlY + 1, 13 + lick * 2, 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(bowlX + 16, bowlY + 1, 6, 2);
+    }
+    if (t >= WAX_T_HIT) {
+      // the pull: bubbles in the water, the neck fills with milky smoke (it clears again on the exhale)
+      const fill = t < WAX_T_EXHALE ? Math.min(1, (t - WAX_T_HIT) / 1.4) : Math.max(0, 1 - (t - WAX_T_EXHALE) / 0.7);
+      const h = Math.round(7 * sc * fill);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+      ctx.fillRect(rx + 4 * sc, ry + 8 * sc - h, 2 * sc, h);
+      if (t < WAX_T_EXHALE) {
+        for (let i = 0; i < 7; i++) {
+          const up = (t * 46 + i * 11) % 24;
+          ctx.fillStyle = i % 2 === 0 ? "#ffffff" : "#bfe3ff";
+          ctx.fillRect(rx + (2 + ((i * 37) % 6)) * sc + 1, Math.round(ry + 13 * sc - up), 3, 3);
+        }
+      }
+    }
+    if (t >= WAX_T_EXHALE) {
+      // the exhale: soft square puffs rolling up and out of the neck
+      for (let i = 0; i < 18; i++) {
+        const age = t - WAX_T_EXHALE - i * 0.1;
+        if (age <= 0 || age > 2.8) continue;
+        const drift = (((i * 53) % 7) - 3) * 10;
+        const px = rx + 5 * sc + drift * age;
+        const py = ry - 2 - age * (14 + (i % 4) * 6);
+        const r = 3 + age * 6;
+        ctx.fillStyle = `rgba(255, 255, 255, ${Math.max(0, 0.75 - age * 0.27).toFixed(3)})`;
+        ctx.fillRect(Math.round(px - r), Math.round(py - r / 2), Math.round(r * 2), Math.round(r));
+        ctx.fillRect(Math.round(px - r / 2), Math.round(py - r), Math.round(r), Math.round(r * 2));
+        ctx.fillRect(Math.round(px - r * 0.8), Math.round(py - r * 0.8), Math.round(r * 1.6), Math.round(r * 1.6));
+      }
+    }
+    // the words go on top of the smoke so you can always read them
+    typed(WAX_LINE_1, 0.2, 10, "#ffffff");
     typed(WAX_LINE_2, WAX_T_LINE2, 23, "#ffc800");
     if (t >= WAX_T_EXHALE) {
-      typed(WAX_LINE_3, WAX_T_EXHALE + 0.6, 135, "#ff5fe0");
+      typed(WAX_LINE_3, WAX_T_EXHALE + 0.6, 127, "#ff5fe0");
       if (t >= WAX_T_EXHALE + 2 && Math.floor(s.t * 2) % 2 === 0) {
         ctx.textAlign = "center";
         ctx.fillStyle = "#ffffff";
-        ctx.fillText(touchPadRef.current ? "A = KEEP GOING" : "JUMP = KEEP GOING", W / 2, 148);
+        ctx.fillText(touchPadRef.current ? "A = KEEP GOING" : "JUMP = KEEP GOING", W / 2, 143);
       }
     }
-    ctx.globalAlpha = 1;
     ctx.textAlign = "center";
-
-    // the freeze: a quick flash, like a camera
-    if (t < 0.2) {
-      ctx.fillStyle = `rgba(255, 255, 255, ${(0.55 * (1 - t / 0.2)).toFixed(3)})`;
-      ctx.fillRect(-4, -4, W + 8, H + 8);
-    }
-    ctx.restore();
   };
 
   // ---------- STASH SPIN: drawing ----------
@@ -10241,7 +9207,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       else if (d.curse) head = `CURSE: ${d.name}`;
       else if (d.id !== "snack" && perkMax(d) === 1) head = `${d.name}  RARE!`;
       else if (d.id !== "snack") head = `${d.name}  LV ${have + 1}/${perkMax(d)}`;
-      // (BOBO has a different line for each level)
+      // (the bichon has a different line for each level)
       const level = Math.max(0, sp.took >= 0 ? have - 1 : have);
       const info = d.infoAt ? d.infoAt[Math.min(level, d.infoAt.length - 1)] : d.info;
       ctx.fillStyle = d.curse ? "#ff5a64" : sp.jackpot && !slow ? "#ffffff" : "#ffc800";
@@ -10261,32 +9227,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
   const draw = (ctx: CanvasRenderingContext2D) => {
     const s = state.current;
-
-    // The wax moment: its first frame takes a picture of the frozen world WITHOUT you or your dog in it
-    // (drawing a frame never changes the game, so it's safe to draw one more). The zoom uses that picture.
-    if (s.mode === "wax" && !s.waxSnap && !s.waxHide) {
-      const pic = document.createElement("canvas");
-      pic.width = W;
-      pic.height = H;
-      const pc = pic.getContext("2d");
-      if (pc) {
-        pc.imageSmoothingEnabled = false;
-        const keep = { shake: s.shake, flash: s.flash, hint: s.hintTime };
-        s.shake = 0;
-        s.flash = 0;
-        s.hintTime = 0;
-        s.waxHide = true;
-        try {
-          draw(pc);
-        } finally {
-          s.waxHide = false;
-          s.shake = keep.shake;
-          s.flash = keep.flash;
-          s.hintTime = keep.hint;
-        }
-      }
-      s.waxSnap = pic;
-    }
 
     if (s.mode === "board") {
       drawBoard(ctx);
@@ -10330,12 +9270,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       const c = colAt(col);
       const x = col * T - cam;
       if (c.ground >= 0 && !c.pipe) drawGround(ctx, c, col, x);
-      else if (c.ground <= -2 && !c.pipe) drawTallPillar(ctx, c, x);
       if (c.pipe) drawPipe(ctx, c, x);
-      if (c.spring && c.ground >= 0) drawSpring(ctx, x, c.ground * T, c.bump);
       if (c.block >= 0) drawBrick(ctx, x, c.block * T, c.zone);
       if (c.block2 >= 0) drawBrick(ctx, x, c.block2 * T, c.zone);
-      if (c.line !== -1) {
+      if (c.line >= 0) {
         const ly = c.line * T;
         const blinking = c.crumble > 0 && Math.floor(s.t * (c.crumble < 1 ? 16 : 8)) % 2 === 0;
         ctx.fillStyle = INK;
@@ -10430,8 +9368,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         drawPixels(ctx, LEAF, l.x - cam, l.y + Math.round(Math.sin(s.t * 4 + l.x) * 2), { G: GREEN, D: DARK_GREEN }, 2);
       }
     }
-    // Level signs (lore) and the bong at the end (the infinite run has signs too: the boss signs)
-    if (s.levelMode || s.signs.length > 0) {
+    // Level signs (lore) and the bong at the end
+    if (s.levelMode) {
       for (const sg of s.signs) {
         const sx = Math.round(sg.x - cam);
         if (sx < -20 || sx > W + 20) continue;
@@ -10445,31 +9383,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         ctx.fillStyle = "#5a3a1e";
         ctx.fillRect(sx + 3, gy - 19, 10, 1);
         ctx.fillRect(sx + 3, gy - 16, 7, 1);
-      }
-      if (s.cpCol >= 0) {
-        // the checkpoint flag: grey until you touch it, then gold and waving
-        const fx = Math.round(s.cpCol * T - cam);
-        if (fx > -20 && fx < W + 20) {
-          const gy = colAt(s.cpCol).ground * T;
-          const on = !!s.cp;
-          ctx.fillStyle = INK;
-          ctx.fillRect(fx + 6, gy - 32, 3, 32);
-          ctx.fillStyle = on ? "#ffd700" : "#9b8fa6";
-          ctx.fillRect(fx + 7, gy - 32, 1, 32);
-          for (let k = 0; k < 12; k++) {
-            const wave = on ? Math.round(Math.sin(s.t * 6 + k * 0.5) * 1.5) : 0;
-            ctx.fillStyle = INK;
-            ctx.fillRect(fx + 9 + k, gy - 31 + wave, 1, 12 - (k >> 1));
-            ctx.fillStyle = on ? (k % 4 < 2 ? "#ffd700" : "#ffef8a") : "#8a7f96";
-            ctx.fillRect(fx + 9 + k, gy - 30 + wave, 1, 10 - (k >> 1));
-          }
-          if (on) {
-            ctx.fillStyle = INK;
-            ctx.fillRect(fx + 12, gy - 28, 4, 4);
-            ctx.fillStyle = "#ff5fe0";
-            ctx.fillRect(fx + 13, gy - 27, 2, 2);
-          }
-        }
       }
       if (s.bong) {
         const bx = Math.round(s.bong.x - cam);
@@ -10603,7 +9516,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       const x = e.x - cam;
       if (e.kind === "eye") {
         if (e.alive) {
-          const frame = EYE_FRAMES[pmod(Math.floor(s.t * EYE_FPS + e.x * 0.05), EYE_FRAMES.length)];
+          const frame = EYE_FRAMES[Math.floor(s.t * EYE_FPS + e.x * 0.05) % EYE_FRAMES.length];
           drawPixels(ctx, e.vx > 0 ? flipRows(frame) : frame, x - 2, e.y - 6, EYE_COLORS, 1);
         } else {
           ctx.fillStyle = "#ff5fae";
@@ -10644,7 +9557,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           }
         } else if (e.alive) {
           const dir = e.dir ?? (e.vx < 0 ? -1 : 1);
-          const fr = e.act === "crouch" ? CAT[2] : e.act === "leap" ? CAT[1] : CAT[pmod(Math.floor(s.t * 7 + e.x * 0.1), 2)];
+          const fr = e.act === "crouch" ? CAT[2] : e.act === "leap" ? CAT[1] : CAT[Math.floor(s.t * 7 + e.x * 0.1) % 2];
           drawRimmed(ctx, dir < 0 ? fr : flipRows(fr), Math.round(x) - 4, Math.round(e.y) - 2, CAT_COLORS, 2);
         } else {
           ctx.fillStyle = "#1a1622";
@@ -10666,25 +9579,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         } else if (e.alive) {
           const bob = Math.floor(s.t * 6 + e.x) % 2;
           if (e.phase === 1) {
-            const fr = KN_ONI[pmod(Math.floor(s.t * 10 + e.x * 0.1), KN_ONI.length)];
+            const fr = KN_ONI[Math.floor(s.t * 10 + e.x * 0.1) % KN_ONI.length];
             drawPixels(ctx, fr, x - 12, e.y - 16 - bob, KN_ONI_COLORS, 2);
           } else {
             const fr = KN_SKEL_WALK[Math.floor(s.t * 6) % 2];
-            const faceLeft = e.act === "wind" || e.act === "slash" ? (e.dir ?? -1) < 0 : e.vx < 0;
-            drawPixels(ctx, faceLeft ? flipRows(fr) : fr, x, e.y - bob, KN_SKEL_WALK_COLORS, 2);
-            if (e.act === "wind") {
-              // the red "!": it's about to slash
-              ctx.fillStyle = "#ff2a2a";
-              ctx.fillRect(Math.round(x) + 6, Math.round(e.y) - 13, 3, 7);
-              ctx.fillRect(Math.round(x) + 6, Math.round(e.y) - 4, 3, 3);
-            } else if (e.act === "slash") {
-              ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
-              ctx.lineWidth = 2;
-              ctx.beginPath();
-              const sl = faceLeft;
-              ctx.arc(Math.round(x) + (sl ? 4 : 10), Math.round(e.y) + 8, 15, sl ? Math.PI * 0.68 : -Math.PI * 0.32, sl ? Math.PI * 1.32 : Math.PI * 0.32);
-              ctx.stroke();
-            }
+            drawPixels(ctx, e.vx < 0 ? flipRows(fr) : fr, x, e.y - bob, KN_SKEL_WALK_COLORS, 2);
           }
         } else {
           ctx.fillStyle = e.phase === 1 ? "#c4282e" : "#ece6d6";
@@ -10911,8 +9810,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       const walking = Math.abs(lb.vx) > 5 && lb.vy === 0;
       const ly = Math.round(lb.y) - (walking && Math.floor(s.t * 6) % 2 === 0 ? 1 : 0) + (lb.dazed > 0 ? 2 : 0);
       const flash = (lb.hit > 0 && Math.floor(s.t * 20) % 2 === 0) || (lb.dead > 0 && Math.floor(s.t * 14) % 2 === 0);
-      const colors = flash ? whiteOf(EVIL_SNOWMAN_COLORS) : EVIL_SNOWMAN_COLORS; // (cached: no new objects every frame)
-      const rows = lb.facing > 0 ? flipRows(EVIL_SNOWMAN) : EVIL_SNOWMAN;
+      const colors = flash ? { W: "#ffffff", K: "#ffffff", R: "#ffffff", O: "#ffffff", B: "#ffffff", S: "#ffffff" } : EVIL_SNOWMAN_COLORS;
+      const rows = lb.facing > 0 ? EVIL_SNOWMAN.map((r) => r.split("").reverse().join("")) : EVIL_SNOWMAN;
       drawPixels(ctx, rows, lx, ly, colors, 2);
       if (lb.dazed > 0) {
         // dizzy stars circling his hat
@@ -10969,85 +9868,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       }
     }
 
-    // the evil snowman's ice spikes: they form on the ceiling (glittering, a faint line shows where they'll land), then drop
-    for (const ic of s.icicles) {
-      const ix = Math.round(ic.x - cam);
-      const len = Math.max(2, Math.round(ic.len));
-      const jit = ic.act === "grow" ? Math.round(Math.sin(s.t * 40 + ic.x) * Math.max(0, ic.grow / ICICLE_GROW)) : 0;
-      if (ic.act === "grow" && ic.grow > 0) {
-        ctx.fillStyle = "#cfeaff"; // frost on the ceiling where it's forming
-        ctx.fillRect(ix - 6, 0, 12, 2);
-        if (ic.grow > ICICLE_GROW * 0.45) {
-          ctx.fillStyle = "rgba(190, 230, 255, 0.35)"; // the warning: where it will land
-          for (let yy = len + 6; yy < 8 * T; yy += 6) ctx.fillRect(ix, yy, 1, 3);
-        }
-      }
-      for (let r = 0; r < len; r++) {
-        const wdt = Math.max(1, Math.round(8 * (1 - r / ICICLE_LEN)));
-        const rx = Math.round(ix - wdt / 2) + jit;
-        ctx.fillStyle = INK;
-        ctx.fillRect(rx - 1, Math.round(ic.y) + r, wdt + 2, 1);
-        ctx.fillStyle = r % 6 < 2 ? "#ffffff" : "#bfe6ff";
-        ctx.fillRect(rx, Math.round(ic.y) + r, wdt, 1);
-        if (wdt > 2) {
-          ctx.fillStyle = "#7fc3f0";
-          ctx.fillRect(rx + wdt - 1, Math.round(ic.y) + r, 1, 1);
-        }
-      }
-      if (ic.act === "grow" && Math.floor(s.t * 14 + ic.x) % 3 === 0) {
-        ctx.fillStyle = "#ffffff"; // a glint at the tip
-        ctx.fillRect(ix - 1 + jit, Math.round(ic.y) + len, 3, 1);
-        ctx.fillRect(ix + jit, Math.round(ic.y) + len - 1, 1, 3);
-      }
-    }
-    // the crypt's wall torches
-    for (const tc of s.torches) {
-      const tx = Math.round(tc.x - cam);
-      if (tx < -20 || tx > W + 20) continue;
-      ctx.fillStyle = INK;
-      ctx.fillRect(tx + 4, tc.y + 8, 4, 8); // the bracket
-      ctx.fillRect(tx + 2, tc.y + 6, 8, 3);
-      ctx.fillStyle = "#6b5a4a";
-      ctx.fillRect(tx + 5, tc.y + 9, 2, 6);
-      if (tc.lit) {
-        const fl = Math.floor(s.t * 10 + tc.x) % 3;
-        ctx.fillStyle = "#ff8c1e";
-        ctx.fillRect(tx + 3, tc.y - 2 - fl, 6, 8 + fl);
-        ctx.fillStyle = "#ffd23c";
-        ctx.fillRect(tx + 4, tc.y - fl, 4, 6 + fl);
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(tx + 5, tc.y + 2, 2, 3);
-      } else if (Math.floor(s.t * 1.5 + tc.x) % 3 !== 0) {
-        ctx.fillStyle = "#7a2a10"; // a dying ember
-        ctx.fillRect(tx + 5, tc.y + 4, 2, 2);
-      }
-    }
-    // the stone statues that wake up before the Warlord
-    for (const st of s.statues) {
-      const sx = Math.round(st.x - cam);
-      if (sx < -40 || sx > W + 40) continue;
-      const shake = st.act === "wind" ? Math.round(Math.sin(s.t * 50)) : 0;
-      drawPixels(ctx, KN_SKEL[0], sx - 14 + shake, 8 * T - 58 + (st.act === "slam" ? 2 : 0), STATUE_COLORS, 2);
-      if (st.act === "wind") {
-        ctx.fillStyle = "#ff2a2a";
-        ctx.fillRect(sx + 12, 8 * T - 72, 3, 7);
-        ctx.fillRect(sx + 12, 8 * T - 63, 3, 3);
-      }
-    }
-    // the Warlord's pillars (phase 2): stand behind one and his eye waves can't touch you
-    for (const c of s.cover) {
-      const px = Math.round(c.x - cam);
-      const hh = Math.round(56 * c.rise);
-      ctx.fillStyle = INK;
-      ctx.fillRect(px - 1, 8 * T - hh - 1, 20, hh + 1);
-      ctx.fillStyle = "#8a909c";
-      ctx.fillRect(px, 8 * T - hh, 18, hh);
-      ctx.fillStyle = "#b9bfca";
-      ctx.fillRect(px + 2, 8 * T - hh, 4, hh);
-      ctx.fillStyle = "#5d626d";
-      ctx.fillRect(px + 13, 8 * T - hh, 5, hh);
-      if (hh > 8) ctx.fillRect(px, 8 * T - hh, 18, 4);
-    }
     // LEVEL 3 knights
     const kd = s.kboss;
     if (kd) {
@@ -11086,8 +9906,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         }
       } else if (kd.kind === "skeleton") {
         const fr = KN_SKEL[Math.floor(s.t * 10) % KN_SKEL.length];
-        const skelColors = s.levelMode ? KN_SKEL_COLORS : KN_SKEL_RUN_COLORS; // red in the infinite run
-        drawPixels(ctx, left ? fr : flipRows(fr), kx, ky, flash ? whiteOf(skelColors) : skelColors, 2);
+        drawPixels(ctx, left ? fr : flipRows(fr), kx, ky, flash ? whiteOf(KN_SKEL_COLORS) : KN_SKEL_COLORS, 2);
         if (kd.dead <= 0 && kd.act === "wind") {
           // a red "!" over his head: he's about to swing
           ctx.fillStyle = "#ff2a2a";
@@ -11101,8 +9920,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
           ctx.lineWidth = 3;
           ctx.beginPath();
-          if (left) ctx.arc(cx, ky + 34, skeletonReach() - 6, Math.PI * 0.68, Math.PI * 1.32);
-          else ctx.arc(cx, ky + 34, skeletonReach() - 6, -Math.PI * 0.32, Math.PI * 0.32);
+          if (left) ctx.arc(cx, ky + 34, SKELETON_REACH - 6, Math.PI * 0.68, Math.PI * 1.32);
+          else ctx.arc(cx, ky + 34, SKELETON_REACH - 6, -Math.PI * 0.32, Math.PI * 0.32);
           ctx.stroke();
         }
       } else {
@@ -11296,8 +10115,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
     // You
     const blinking = s.invuln > 0 && Math.floor(s.t * 12) % 2 === 0;
-    const showYou = ["select", "ready", "running", "pipe", "golden", "choose", "paused", "spin", "wax"].includes(s.mode) && !s.waxHide;
-    if (s.pet && s.mode !== "select" && !s.waxHide) drawPet(ctx, cam); // BOBO, just behind you
+    const showYou = ["select", "ready", "running", "pipe", "golden", "choose", "paused", "spin", "wax"].includes(s.mode);
+    if (s.pet && s.mode !== "select") drawPet(ctx, cam); // the bichon, just behind you
     if (showYou && !blinking) {
       const previewOutfit = s.mode === "select" ? OUTFITS[s.selectIndex].id : s.outfit;
       const levelOutfit = s.levelMode ? LEVELS[s.level - 1]?.outfit : undefined;
@@ -11333,7 +10152,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           // Only draw the part above the pipe while sinking in
           const c = colAt(s.pipeCol);
           ctx.beginPath();
-          ctx.rect(0, -2000, W, 2000 + c.ground * T); // (everything above the pipe's mouth, however high up it is)
+          ctx.rect(0, 0, W, c.ground * T);
           ctx.clip();
         }
         // Jetpack on your back
@@ -11406,8 +10225,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       }
     }
 
-    // The wax afterglow (off by default, see WAX_AFTERGLOW): the colours slowly breathe brighter, then darker
-    if (WAX_AFTERGLOW && s.wax && !s.levelMode && s.mode !== "select") {
+    // WAX MODE: the colours slowly breathe brighter, then darker (one breath every few seconds, never a flash)
+    if (s.wax && !s.levelMode && s.mode !== "select") {
       const breath = Math.sin(((s.t - s.waxAt) * Math.PI * 2) / WAX_PULSE_SECONDS);
       ctx.save();
       if (breath > 0) {
@@ -11421,37 +10240,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       ctx.restore();
     }
 
-    // The blizzard: a cold haze and snow falling over the whole screen
-    if (s.blizzard > 0.02 && !s.waxHide) {
-      ctx.fillStyle = `rgba(190, 220, 255, ${(0.13 * s.blizzard).toFixed(3)})`;
-      ctx.fillRect(0, 0, W, H);
-      for (const fl of s.flakes) {
-        ctx.fillStyle = fl.big ? "#ffffff" : "rgba(255, 255, 255, 0.8)";
-        const sz = fl.big ? 3 : 2;
-        ctx.fillRect(Math.round(fl.x), Math.round(fl.y), sz, sz);
-      }
-    }
-    // The crypt is dark: a circle of light around you and around each lit torch, everything else dimmed (in little blocks)
-    if (s.dark > 0.02 && s.levelMode && !s.waxHide) {
-      const lights: [number, number, number][] = [[s.x - cam + SPRITE_W / 2, s.y - s.camY + SPRITE_H / 2, PLAYER_LIGHT]];
-      for (const tc of s.torches) lights.push([tc.x - cam + 6, tc.y - s.camY + 8, tc.lit ? TORCH_LIGHT : TORCH_EMBER]);
-      const CELL = 6;
-      for (let cy = 0; cy < H; cy += CELL) {
-        for (let cx = 0; cx < W; cx += CELL) {
-          let best = 0;
-          for (const [lx, ly, lr] of lights) {
-            const d = Math.hypot(cx + CELL / 2 - lx, cy + CELL / 2 - ly);
-            if (d < lr) best = Math.max(best, 1 - d / lr);
-          }
-          const k = best * best * (3 - 2 * best);
-          const a = DARK_MAX * s.dark * (1 - k);
-          if (a > 0.02) {
-            ctx.fillStyle = `rgba(8, 4, 24, ${a.toFixed(3)})`;
-            ctx.fillRect(cx, cy, CELL, CELL);
-          }
-        }
-      }
-    }
     // Point popups
     ctx.font = `8px ${fontFamily}`;
     ctx.textBaseline = "top";
@@ -11472,6 +10260,15 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     ctx.fillStyle = hudInk;
     ctx.textAlign = "left";
     ctx.fillText(s.levelMode ? fmtTime(s.levelTime * 1000) : pad(s.score), 22, 6);
+    if (s.wax && !s.levelMode) {
+      // WAX MODE: a gold X2 right behind your grams
+      const x2 = 22 + Math.round(ctx.measureText(pad(s.score)).width) + 5;
+      ctx.fillStyle = INK;
+      ctx.fillText("X2", x2 + 1, 7);
+      ctx.fillStyle = "#ffc800";
+      ctx.fillText("X2", x2, 6);
+      ctx.fillStyle = hudInk;
+    }
     ctx.textAlign = "right";
     if (s.levelMode) {
       const best = s.levelBest[String(s.level)];
@@ -11514,15 +10311,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       ctx.fillText(KN_NAMES[kn.kind], W / 2 + 1, 40);
       ctx.fillStyle = "#ffffff";
       ctx.fillText(KN_NAMES[kn.kind], W / 2, 39);
-      // the beat: two little squares that shrink onto every beat (his slams and eye waves land on it)
-      const bph = ((s.t - WARLORD_BEAT_OFFSET) % warlordBeatLen()) / warlordBeatLen();
-      const bsz = Math.max(2, Math.round(8 - bph * 6));
-      ctx.fillStyle = INK;
-      ctx.fillRect(bx - 10 - (bsz >> 1) - 1, 31 - (bsz >> 1) - 1, bsz + 2, bsz + 2);
-      ctx.fillRect(bx + bw + 10 - (bsz >> 1) - 1, 31 - (bsz >> 1) - 1, bsz + 2, bsz + 2);
-      ctx.fillStyle = bph < 0.15 ? "#ffffff" : "#ff5fe0";
-      ctx.fillRect(bx - 10 - (bsz >> 1), 31 - (bsz >> 1), bsz, bsz);
-      ctx.fillRect(bx + bw + 10 - (bsz >> 1), 31 - (bsz >> 1), bsz, bsz);
     }
 
     // LEVEL 4: TOMBFELL's huge health bar across the top, in the middle (like WARLORD's).
@@ -11695,17 +10483,16 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     if (s.mode === "choose") drawSpellPick(ctx);
     if (s.mode === "bossIntro") drawBossIntro(ctx);
     if (s.mode === "spin") drawSpin(ctx);
-    if (s.mode === "wax" && !s.waxHide) drawWax(ctx);
-    if (s.waxTrip > 0 && ["running", "hurt", "pipe"].includes(s.mode) && !s.waxHide) drawWaxTrip(ctx);
+    if (s.mode === "wax") drawWax(ctx);
     // Lore sign you're standing next to
-    if ((s.levelMode || s.signs.length > 0) && s.mode === "running" && s.flash <= 0) {
-      const near = s.signs.find((sg) => Math.abs(sg.x + 8 - (s.x + SPRITE_W / 2)) < (sg.r ?? 36));
+    if (s.levelMode && s.mode === "running" && s.flash <= 0) {
+      const near = s.signs.find((sg) => Math.abs(sg.x + 8 - (s.x + SPRITE_W / 2)) < 36);
       if (near && near.text) near.text.split("\n").forEach((line, i) => textBox(ctx, line, 30 + i * 12));
     }
     // "How to use it" hint the first time you get a power-up (PRESS S TO SHOOT etc.)
     // Drawn AFTER the lore signs so it's always on top, and pushed below the sign's text so they don't overlap
     if (s.mode === "running" && s.hintTime > 0 && s.flash <= 0) {
-      const sign = s.signs.find((sg) => Math.abs(sg.x + 8 - (s.x + SPRITE_W / 2)) < (sg.r ?? 36));
+      const sign = s.levelMode ? s.signs.find((sg) => Math.abs(sg.x + 8 - (s.x + SPRITE_W / 2)) < 36) : undefined;
       const signLines = sign && sign.text ? sign.text.split("\n").length : 0;
       const hintY = signLines > 0 ? Math.min(H - 30, 30 + signLines * 12 + 6) : 52;
       flashBox(ctx, s.hintText, hintY, s.t);
@@ -11783,9 +10570,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       return im;
     });
     deathSoundRef.current = new Audio(DEATH_SOUND);
-    const bossSound = new Audio(TROLL_DEATH_SOUND);
-    bossSound.preload = "auto";
-    trollSoundRef.current = bossSound;
     window.addEventListener("pinkmane-level-control", levelMusicControl);
     const weedBg = new Image();
     weedBg.src = WEEDLAND_BG;
@@ -11827,12 +10611,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (Array.isArray(savedUnlocked) && savedUnlocked.length) {
         state.current.unlocked = Array.from(new Set(["classic", ...savedUnlocked])) as OutfitId[];
       }
-      const savedMedals = JSON.parse(localStorage.getItem(LEVEL_MEDALS_KEY) || "{}");
-      if (savedMedals && typeof savedMedals === "object" && !Array.isArray(savedMedals)) state.current.medals = savedMedals;
-      const savedPetSkins = JSON.parse(localStorage.getItem(PET_SKINS_KEY) || "[]");
-      if (Array.isArray(savedPetSkins)) state.current.petSkins = OUTFITS.map((o) => o.id).filter((id) => savedPetSkins.includes(id));
-      const savedPetSkin = localStorage.getItem(PET_SKIN_KEY) as OutfitId | null;
-      if (savedPetSkin && boboOwns(savedPetSkin)) state.current.petSkin = savedPetSkin;
       const savedSpells = JSON.parse(localStorage.getItem(SPELLS_KEY) || "[]");
       if (Array.isArray(savedSpells)) {
         state.current.spells = SHOP_SPELLS.map((sp) => sp.id).filter((id) => savedSpells.includes(id));
@@ -11979,9 +10757,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if ((k === "7" || k === "6") && mode === "running" && !state.current.levelMode && !state.current.inBonus && localTesting()) {
         const st = state.current;
         st.testRun = true;
-        if (k === "7") openWax(true); // (replays the rip as often as you like, to polish it)
+        if (k === "7" && !st.wax) st.waxWait = 0.01;
         if (k === "6" && st.bossState === "none") {
           st.bonus += Math.max(0, BOSS_EVERY * (st.bossCount + 1) - 250 - st.score);
+          st.bonusSeen = st.bonus; // (so WAX MODE doesn't double the jump)
         }
       }
       // 8 = a test spin that walks through every prize in order, three at a time, so you can get a specific one
@@ -12027,47 +10806,14 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     };
     window.addEventListener("pinkmane-pad", padButton);
 
-    // Add ?perf=1 to the address to see a little frame-time meter in the corner (and long frames in the console).
-    // "GAME" is how long the game's own code took. If a frame is long but GAME is small, the hiccup isn't the game
-    // (it's the page behind it, the sound, or the graphics card).
-    const perfOn = new URLSearchParams(window.location.search).get("perf") !== null;
-    const perfGaps: number[] = [];
-    const perfJs: number[] = [];
-    const drawPerfMeter = (c: CanvasRenderingContext2D, gap: number, js: number) => {
-      perfGaps.push(gap);
-      perfJs.push(js);
-      if (perfGaps.length > 180) {
-        perfGaps.shift();
-        perfJs.shift();
-      }
-      if (gap > 50) console.warn(`[perf] long frame: ${gap.toFixed(0)}ms (the game's own code: ${js.toFixed(1)}ms) mode=${state.current.mode}`);
-      const worst = Math.max(...perfGaps);
-      const avg = perfGaps.reduce((a, b) => a + b, 0) / perfGaps.length;
-      const worstJs = Math.max(...perfJs);
-      const long = perfGaps.filter((g) => g > 40).length;
-      c.save();
-      c.fillStyle = "rgba(0, 0, 0, 0.7)";
-      c.fillRect(W - 112, H - 30, 110, 28);
-      c.font = `8px ${fontFamily}`;
-      c.textAlign = "left";
-      c.textBaseline = "top";
-      c.fillStyle = worst > 40 ? "#ff6070" : "#7dff9a";
-      c.fillText(`${Math.round(1000 / Math.max(1, avg))}FPS WORST ${Math.round(worst)}MS`, W - 108, H - 27);
-      c.fillStyle = "#ffffff";
-      c.fillText(`GAME ${worstJs.toFixed(1)}MS  LONG ${long}`, W - 108, H - 16);
-      c.restore();
-    };
     let raf = 0;
     let last = performance.now();
     const loop = (now: number) => {
-      const gap = now - last; // milliseconds since the last frame
-      const dt = Math.min(0.033, gap / 1000);
+      const dt = Math.min(0.033, (now - last) / 1000);
       last = now;
-      const t0 = perfOn ? performance.now() : 0;
       update(dt);
       draw(ctx);
       syncLevelMusic();
-      if (perfOn) drawPerfMeter(ctx, gap, performance.now() - t0);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -12259,7 +11005,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           }}
         >
           <div style={{ fontSize: "clamp(10px, 3vw, 15px)", color: "#ffd700" }}>YOU FOUND THE GOLDEN LEAF!</div>
-          <div style={{ fontSize: "clamp(8px, 2.2vw, 11px)", color: "#ffd700" }}>+{PTS_GOLD} GRAMS</div>
+          <div style={{ fontSize: "clamp(8px, 2.2vw, 11px)", color: "#ffd700" }}>+{PTS_GOLD * (state.current.wax ? 2 : 1)} GRAMS</div>
           <div style={{ fontSize: "clamp(8px, 2.2vw, 11px)", lineHeight: 1.6 }}>
             SECRET TRACK: STUTTERS REMIX
             <br />
