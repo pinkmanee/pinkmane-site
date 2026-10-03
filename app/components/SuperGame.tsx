@@ -15,7 +15,7 @@ type Props = {
   // screen itself no longer walks or jumps (menus can still be tapped)
   touchPad?: boolean;
   // The page's beat clock (optional): kick = 1 right on each beat and fades through it, sway swings left/right each beat,
-  // live = the music is really playing. The painted PINK FIELDS background wiggles to it. Without it the picture just stays still.
+  // live = the music is really playing. The painted zone backgrounds wiggle to it. Without it the picture just stays still.
   beatRef?: React.MutableRefObject<{ kick: number; sway: number; live: boolean }>;
 };
 
@@ -1405,12 +1405,15 @@ const BONG_IDLE_LIFE = 14; // seconds a bong waits for a kick before it disappea
 // sun, hills and leaves. No file there = the game keeps using the drawn one. The picture is 4.2 times as wide
 // as it is tall (like 2688x640) and wraps around, so make its left and right edges match.
 const WEEDLAND_BG = "/game/weedland-bg.png";
-// Your painted PINK FIELDS background (the first zone). Put the picture at public/game/pinkfields-bg.png and it replaces the drawn hills.
-// It's scaled to the screen height, tiled and scrolled slowly, and it WIGGLES TO THE MUSIC: the page's beat makes it ripple and sway.
-// (If the file isn't there, the old drawn hills are used.)
-const PINK_FIELDS_BG = "/game/pinkfields-bg.png";
-const PINK_FIELDS_SKY = "#dceec1"; // the sky colour of the painting (shows above and below it when the camera moves)
-const PINK_FIELDS_PARALLAX = 0.3; // how fast it scrolls compared to you (smaller = farther away)
+// Your painted zone backgrounds. Each is a picture in public/game/ that replaces that zone's drawn background. It's scaled to the screen
+// height, tiled and scrolled slowly, and it WIGGLES TO THE MUSIC: the page's beat makes it ripple and sway. To add another zone, put its
+// picture in public/game/ and add a line here (the number is the zone: 0 = PINK FIELDS, 1 = SPEAKER HILLS, 2 = ROOFTOPS, 3 = PINK CLOUDS).
+// If a picture file isn't there, that zone just keeps its drawn background.
+//   sky = the sky colour of the painting (shows above and below it when the camera moves), parallax = how fast it scrolls (smaller = farther)
+const PAINTED_BGS: Record<number, { src: string; sky: string; parallax: number }> = {
+  0: { src: "/game/pinkfields-bg.png", sky: "#dceec1", parallax: 0.3 },
+  1: { src: "/game/speakerhills-bg.png", sky: "#dceec1", parallax: 0.3 },
+};
 const FIELD_WIGGLE_BASE = 0.5; // pixels of sway while music plays, even between beats
 const FIELD_WIGGLE_KICK = 2.6; // extra pixels on each beat (it settles back before the next one)
 const FIELD_WIGGLE_RIPPLE = 0.11; // how tight the ripple is going down the picture (bigger = more waves)
@@ -2256,8 +2259,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   const stuttersRef = useRef<HTMLAudioElement | null>(null); // the secret Stutters remix
   if (stuttersRef.current) stuttersRef.current.muted = muted; // follows the iPod mute button
   const keepImgsRef = useRef<Record<string, HTMLImageElement>>({}); // Level 3 backdrop pictures
-  const fieldBgRef = useRef<HTMLImageElement | null>(null); // your painted PINK FIELDS background (public/game/pinkfields-bg.png)
-  const fieldBgCacheRef = useRef<HTMLCanvasElement | null>(null); // that picture at exactly the game's size, so each wiggle strip is a plain copy
+  // your painted zone backgrounds (PAINTED_BGS), each with a copy at exactly the game's size so every wiggle strip is a plain copy
+  const paintedBgRef = useRef<Record<number, { img: HTMLImageElement; cache: HTMLCanvasElement | null }>>({});
   const weedBgRef = useRef<HTMLImageElement | null>(null); // your own Weedland background (public/game/weedland-bg.png)
   const levelMusicRef = useRef<HTMLAudioElement | null>(null); // Level 3 song
   const levelMusicOnRef = useRef(false); // told the page to pause its own music
@@ -8189,14 +8192,17 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     }
   };
 
-  // Your painted PINK FIELDS background, wiggling to the beat. Returns false if the picture isn't there (then the drawn hills are used).
-  const drawPaintedFields = (ctx: CanvasRenderingContext2D): boolean => {
-    const im = fieldBgRef.current;
-    if (!im || !im.complete || im.naturalWidth <= 0) return false;
+  // A painted zone background (PAINTED_BGS), wiggling to the beat. Returns false if that zone has none or its picture isn't there.
+  const drawPaintedBackground = (ctx: CanvasRenderingContext2D, zone: number): boolean => {
+    const def = PAINTED_BGS[zone];
+    const entry = paintedBgRef.current[zone];
+    if (!def || !entry) return false;
+    const im = entry.img;
+    if (!im.complete || im.naturalWidth <= 0) return false;
     const s = state.current;
     // the picture shrunk to the game's height once, so every strip below is a quick 1:1 copy
     const tw = Math.max(1, Math.round(H * (im.naturalWidth / im.naturalHeight)));
-    let cache = fieldBgCacheRef.current;
+    let cache = entry.cache;
     if (!cache || cache.width !== tw) {
       cache = document.createElement("canvas");
       cache.width = tw;
@@ -8206,11 +8212,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       cc.imageSmoothingEnabled = true;
       cc.imageSmoothingQuality = "high";
       cc.drawImage(im, 0, 0, tw, H);
-      fieldBgCacheRef.current = cache;
+      entry.cache = cache;
     }
-    ctx.fillStyle = PINK_FIELDS_SKY;
+    ctx.fillStyle = def.sky;
     ctx.fillRect(-4, -1200, W + 8, H + 1400); // (covers the screen when the camera scrolls up)
-    const off = (((s.cam * PINK_FIELDS_PARALLAX) % tw) + tw) % tw;
+    const off = (((s.cam * def.parallax) % tw) + tw) % tw;
     const beat = beatPropRef.current?.current;
     const kick = beat && Number.isFinite(beat.kick) ? Math.max(0, beat.kick) : 0;
     const sway = beat && Number.isFinite(beat.sway) ? beat.sway : 0;
@@ -8336,7 +8342,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       return;
     }
 
-    if (zone === 0 && drawPaintedFields(ctx)) return; // your painted background (wiggles to the music)
+    if (drawPaintedBackground(ctx, zone)) return; // your painted background for this zone, if there is one (wiggles to the music)
     ctx.fillStyle = zone === Z_CLOUDS ? CLOUD_SKY : zone === Z_TREES ? TREE_SKY : zone === Z_SMOKE ? SMOKE_SKY : SCREEN;
     // Extended upward so it still fully covers the screen when the vertical camera scrolls up
     ctx.fillRect(-4, -1200, W + 8, H + 1400);
@@ -11877,9 +11883,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const weedBg = new Image();
     weedBg.src = WEEDLAND_BG;
     weedBgRef.current = weedBg;
-    const fieldBg = new Image();
-    fieldBg.src = PINK_FIELDS_BG;
-    fieldBgRef.current = fieldBg;
+    for (const [zoneNo, def] of Object.entries(PAINTED_BGS)) {
+      const im = new Image();
+      im.src = def.src;
+      paintedBgRef.current[Number(zoneNo)] = { img: im, cache: null };
+    }
     Object.entries(KEEP_IMAGES).forEach(([k, src]) => {
       const im = new Image();
       im.src = src;
