@@ -1075,9 +1075,27 @@ function warlordShown() {
 }
 const WARLORD_SHOWN = warlordShown();
 const WARLORD_STOP = ALL_LEVELS.findIndex((lv) => lv.zone === LEVEL_KEEP); // his stop on the map
+// =====================================================================================
+// THE TOMBFELL LEVEL SWITCH
+// =====================================================================================
+// false = visitors of the real site can't see or play Level 4 (Painted World): its stop on the map
+//         is a plain "coming soon" cloud. On your own computer (localhost) it still shows, so you can
+//         keep working on it. To see exactly what visitors see, open  http://localhost:3000/?visitor=1
+// true  = the level is live for everyone. Change false to true the day it's ready.
+// This is only about the LEVEL. TOMBFELL as a boss in PINK RUN INFINITE (at 15k grams) is live either way.
+const TOMBFELL_LEVEL_LIVE = false;
+function tombfellLevelShown() {
+  if (TOMBFELL_LEVEL_LIVE) return true;
+  if (!localTesting()) return false;
+  return new URLSearchParams(window.location.search).get("visitor") === null;
+}
+const TOMBFELL_LEVEL_SHOWN = tombfellLevelShown();
+const TOMBFELL_STOP = ALL_LEVELS.findIndex((lv) => lv.zone === LEVEL_WOODS); // its stop on the map
 // The levels the game actually uses. Every level keeps its own number and its own stop on the map:
-// while Level 3 is hidden its place is simply empty ("coming soon"), and Level 4 stays Level 4.
-const LEVELS: (LevelDef | undefined)[] = ALL_LEVELS.map((lv) => (WARLORD_SHOWN || lv.zone !== LEVEL_KEEP ? lv : undefined));
+// while a level is hidden its place is simply empty ("coming soon").
+const LEVELS: (LevelDef | undefined)[] = ALL_LEVELS.map((lv) =>
+  (lv.zone === LEVEL_KEEP && !WARLORD_SHOWN) || (lv.zone === LEVEL_WOODS && !TOMBFELL_LEVEL_SHOWN) ? undefined : lv
+);
 const LEVELS_PLAYABLE = LEVELS.filter((lv) => !!lv).length;
 
 const KEEP_IMAGES: Record<string, string> = {
@@ -1376,7 +1394,7 @@ const ALL_BOSS_CARDS: BossCard[] = [
   { id: "horned", name: "HORNED WARRIOR", moves: ["SWINGS HIS MACE", "RAGES WHEN HURT"], weak: "WEAK: YOUR SHOTS", where: "LEVEL 3", color: "#c8684a", sky: "#3a1418", ground: "#55505a" },
   { id: "skeleton", name: "SKELETON KNIGHT", moves: ["LONG SWORD SLASH", "ARMOUR EATS SHOTS"], weak: "WEAK: HEAD STOMP", where: "LEVEL 3", color: "#b9b2c8", sky: "#2a1a2e", ground: "#55505a" },
   { id: "warlord", main: true, name: "WARLORD COLOSSUS", moves: ["GIANT SWORD SLAM", "FLOOR SHOCKWAVES", "EYE SOUND WAVES"], weak: "WEAK: HEAD STOMP", where: "LEVEL 3", color: "#d23a3a", sky: "#200a10", ground: "#55505a" },
-  { id: "tombfell", main: true, name: "TOMBFELL", moves: ["WALLS OF DOVES", "POUNCING CATS", "RIDES A GIANT BEAR"], weak: "WEAK: HIS OWN PETS", where: "LEVEL 4", color: "#b06ce0", sky: "#241446", ground: "#3f6b3a" },
+  { id: "tombfell", main: true, name: "TOMBFELL", moves: TOMBFELL_LEVEL_SHOWN ? ["WALLS OF DOVES", "POUNCING CATS", "RIDES A GIANT BEAR"] : ["SPELL SHIELD EATS SHOTS", "POUNCING CATS"], weak: "WEAK: HIS OWN PETS", where: TOMBFELL_LEVEL_SHOWN ? "LEVEL 4" : "INFINITE RUN", color: "#b06ce0", sky: "#241446", ground: "#3f6b3a" },
 ];
 // The cards the game actually uses (without the three Level 3 bosses while WARLORD is hidden)
 const BOSS_CARDS: BossCard[] = ALL_BOSS_CARDS.filter((c) => WARLORD_SHOWN || !["horned", "skeleton", "warlord"].includes(c.id));
@@ -8604,7 +8622,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       ctx.beginPath();
       ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
       ctx.fill();
-      if (open) drawMapIcon(ctx, n.icon, n.x, n.y + (big ? 8 : 0));
+      // (while Level 4 is hidden its stop shows a plain cloud instead of the dove)
+      if (open) drawMapIcon(ctx, i === TOMBFELL_STOP && !TOMBFELL_LEVEL_SHOWN ? "cloud" : n.icon, n.x, n.y + (big ? 8 : 0));
       else {
         // padlock
         ctx.fillStyle = INK;
