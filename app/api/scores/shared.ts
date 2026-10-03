@@ -13,7 +13,7 @@ export const KEY = "pinkrun:scores";
 export type GameCfg = { key: string; rate: number; base: number; max: number; timed?: { minMs: number } };
 export const LEVEL_TIME_BASE = 10000000;
 const LEVEL_COUNT = 30; // boards exist for super-l1 ... super-l30 (add more levels without touching this file)
-const LEVEL_MIN_MS: Record<number, number> = { 1: 25000, 3: 60000 }; // anything else: 15 seconds (Level 3 is a long one)
+const LEVEL_MIN_MS: Record<number, number> = { 1: 25000, 3: 60000, 4: 45000 }; // anything else: 15 seconds (Levels 3 and 4 are long ones)
 
 export const GAMES: Record<string, GameCfg> = {
   pinkrun: { key: KEY, rate: 60, base: 100, max: 100000 },
@@ -23,7 +23,10 @@ export const GAMES: Record<string, GameCfg> = {
   // Pink Hexagon scores are survival time in hundredths of a second
   hex: { key: "pinkhex:scores", rate: 101, base: 50, max: 2000000 },
   maze: { key: "pinkmaze:scores", rate: 150, base: 5000, max: 1000000 },
-  super: { key: "pinksuper:scores", rate: 60, base: 500, max: 1000000 },
+  // PINKMANE VOID, infinite run. rate = the most grams per second a run can average.
+  // It was 60. With the STASH SPIN prizes (SPEED, more monsters per prize, LEAF LUCK) a very good run
+  // can now go well past that, so it's 200. Wax mode (grams count double) will need it raised again.
+  super: { key: "pinksuper:scores", rate: 200, base: 500, max: 1000000 },
 };
 
 for (let n = 1; n <= LEVEL_COUNT; n++) {

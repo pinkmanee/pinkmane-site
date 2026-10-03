@@ -34,7 +34,8 @@ type Mode =
   | "levelDone" // you hit the bong
   | "shop" // the PINK SHOP (from the pink start screen)
   | "cards" // your BOSS CARDS (from the pink start screen)
-  | "bossIntro"; // frozen on a boss's card right before his fight
+  | "bossIntro" // frozen on a boss's card right before his fight
+  | "spin"; // the STASH SPIN prize machine (PINK RUN INFINITE only): the run is frozen while you pick a prize
 
 // The pause (Esc) menu, top to bottom
 const PAUSE_OPTIONS = ["RESUME", "RESTART", "PICK OUTFIT", "SHOP", "GAME TYPE", "HOME"];
@@ -216,7 +217,12 @@ const BOSS_EVERY = 10000; // a troll at 10k, 20k, 30k ...
 const BOSS_HP_START = 8; // hits the first troll takes
 const BOSS_HP_STEP = 3; // each next troll takes this many more
 const BOSS_SPEED_STEP = 0.25; // each next troll is 25% faster
-const BOSS_SPARE_SHOTS = 2; // you get this many more shots than he needs
+const BOSS_SPARE_SHOTS = 2; // Level 1 + 2 bosses only: you get this many more shots than they need
+// Troll + giant fights: you only START with this many shots, so you can't just stand there and spam.
+// The rest come from the two ? stash boxes, one at each end of the arena (+3 shots each).
+// He stands between you and the other box, so you have to jump over him to reload.
+const BOSS_START_SHOTS = 3;
+const BOSS_BOX_REFILL = 10; // seconds until the used stash boxes fill up again
 const TROLL_DEATH_SOUND = "/sounds/trolldeath.mp3";
 const BOSS_ARENA = 21; // tiles wide (exactly one screen, now that the screen is wider)
 const TROLL_SPEED = 38; // slower than you (you run at 100)
@@ -243,6 +249,109 @@ const GIANT_SPEED_MULT = 0.7; // bigger, so a little slower than the regular tro
 const GIANT_DAZE_TIME = 3.5; // seconds you have to jump on his head once he's down
 const GIANT_DAZE_HP = 3; // miss the window and he gets back up with this much health
 const PTS_GIANT = 2000;
+
+// =====================================================================================
+// STASH SPIN: the prize machine (PINK RUN INFINITE only, the levels never see it)
+// =====================================================================================
+// After every second zone the run freezes, three reels spin and you keep ONE of the three prizes.
+// After a troll or giant you get a BOSS SPIN: the rarer prizes show up more often there.
+// Three matching reels = JACKPOT: that prize counts twice.
+// Every prize stacks up to 3 times, shows as a little icon at the bottom left, and is gone when the run ends.
+type PerkId = "speed" | "leafLuck" | "shield" | "heart" | "stash" | "magnet";
+type ReelId = PerkId | "snack"; // snack = the brownie, only shown when there are fewer than 3 prizes left to offer
+const PERK_MAX = 3; // how many times one prize can stack
+const SPIN_EVERY_ZONES = 2; // a spin after every this many zones
+const SPIN_JACKPOT = 0.06; // chance that all three reels match (0.06 = 6%)
+const SPIN_JACKPOT_BOSS = 0.18; // the same chance on a BOSS SPIN
+const SPIN_REEL_STOPS = [1.0, 1.6, 2.2]; // seconds until the 1st, 2nd and 3rd reel stop
+const SPIN_LOCK = 0.45; // after the last reel stops the buttons are ignored this long (a held jump can't pick by accident)
+const SPIN_TAKE_TIME = 0.9; // the prize you took glows this long, then the run carries on
+const SPIN_BOSS_DELAY = 1.6; // seconds after the boss falls before the BOSS SPIN opens (so you can read TROLL DOWN)
+// What one stack of each prize does
+const SPEED_STEP = 0.1; // SPEED: +10% run speed per stack
+const LEAF_LUCK_STEP = 0.12; // LEAF LUCK: floating bricks hold a ? stash box 15% of the time, +12% per stack
+const STASH_AMMO_STEP = 2; // BIGGER STASH: +2 shots per power leaf per stack (spikes and boss stash boxes: +1)
+const STASH_TIME_STEP = 5; // BIGGER STASH: +5 seconds on the fire timer per stack
+const MAGNET_RANGE = [0, 44, 66, 90]; // MAGNET: how far away (pixels) leaves and coins get pulled in, for 0 / 1 / 2 / 3 stacks
+const MAGNET_PULL = 190; // how fast they fly to you
+// Balance: every prize you take makes the rest of the run a bit harder
+const PERK_ENEMY_STEP = 0.05; // +5% monsters per prize you hold ...
+const PERK_ENEMY_CAP = 0.75; // ... up to +75%
+const PERK_BOSS_HP = 0.5; // trolls and giants: +1 hit for every 2 prizes you hold
+
+// art = the 9 x 9 pixel icon. weight = how often it shows up on a normal spin, bossWeight = on a BOSS SPIN
+// (a bigger number = more often). To make a prize rarer, lower its weight.
+type PerkDef = { id: ReelId; name: string; info: [string, string]; weight: number; bossWeight: number; art: string[]; colors: Record<string, string> };
+const PERKS: PerkDef[] = [
+  {
+    id: "speed",
+    name: "SPEED",
+    info: ["RUN FASTER.", "RISKY: LESS TIME TO REACT"],
+    weight: 10,
+    bossWeight: 4,
+    art: ["....KKKKK", "...KYYYK.", "..KYYYK..", ".KYYYKKK.", ".KYYYYYK.", "..KKKYYK.", "...KYYK..", "...KYK...", "...KK...."],
+    colors: { K: "#111111", Y: "#ffc800" },
+  },
+  {
+    id: "leafLuck",
+    name: "LEAF LUCK",
+    info: ["MORE ? STASH BOXES", "WITH POWER LEAVES"],
+    weight: 10,
+    bossWeight: 6,
+    art: ["....K....", "...KGK...", ".K.KGK.K.", "KGKGGGKGK", "KGGGYGGGK", ".KGGGGGK.", "..KKDKK..", "....D....", "....D...."],
+    colors: { K: "#111111", G: "#ff7a00", Y: "#ffc800", D: "#8a4a00" },
+  },
+  {
+    id: "shield",
+    name: "SHIELD",
+    info: ["A BUBBLE BLOCKS 1 HIT.", "COMES BACK EVERY ZONE"],
+    weight: 5,
+    bossWeight: 12,
+    art: ["..CCCCC..", ".CcccccC.", "CcWWccccC", "CcWcccccC", "CcccccccC", "CcccccccC", "CccccccbC", ".CcccbbC.", "..CCCCC.."],
+    colors: { C: "#1d4fa8", c: "#bfe3ff", W: "#ffffff", b: "#4aa3ff" },
+  },
+  {
+    id: "heart",
+    name: "EXTRA HEART",
+    info: ["+1 MAX HEART,", "AND IT COMES FILLED"],
+    weight: 4,
+    bossWeight: 12,
+    art: [".KK...KK.", "KPPK.KPPK", "KPPPKPPPK", "KPPPWPPPK", "KPPWWWPPK", ".KPPWPPK.", "..KPPPK..", "...KPK...", "....K...."],
+    colors: { K: "#111111", P: "#d63cc8", W: "#ffffff" },
+  },
+  {
+    id: "stash",
+    name: "BIGGER STASH",
+    info: ["MORE SHOTS PER LEAF,", "LONGER FIRE TIMER"],
+    weight: 8,
+    bossWeight: 8,
+    art: ["..KKKKK..", "..KLLLK..", ".KKKKKKK.", ".KWGgGgK.", ".KWgGgGK.", ".KGGgGgK.", ".KGgGgGK.", ".KgGgGgK.", ".KKKKKKK."],
+    colors: { K: "#111111", L: "#d63cc8", G: "#5cb84a", g: "#2e6e28", W: "#ebffeb" },
+  },
+  {
+    id: "magnet",
+    name: "MAGNET",
+    info: ["LEAVES AND COINS", "FLY TO YOU"],
+    weight: 10,
+    bossWeight: 6,
+    art: ["KKK...KKK", "KWK...KWK", "KKK...KKK", "KRK...KRK", "KRK...KRK", "KRKK.KKRK", "KRRKKKRRK", ".KRRRRRK.", "..KKKKK.."],
+    colors: { K: "#111111", R: "#e0303a", W: "#f7f7fb" },
+  },
+];
+// The filler: only on the reels once fewer than 3 prizes are left to offer (everything else is maxed out)
+const SNACK: PerkDef = {
+  id: "snack",
+  name: "BROWNIE",
+  info: ["+1 HEART RIGHT NOW", ""],
+  weight: 0,
+  bossWeight: 0,
+  art: [".........", ".KKKKKKK.", "KBBBBBBBK", "KBGBBBGBK", "KBBBBBBBK", "KBBGBBBBK", "KbbbbbbbK", ".KKKKKKK.", "........."],
+  colors: { K: "#111111", B: "#8a5a2b", b: "#5a3a1a", G: "#6fdc5a" },
+};
+const perkDef = (id: ReelId): PerkDef => PERKS.find((p) => p.id === id) ?? SNACK;
+// The machine's place on the screen (the three reel windows)
+const SPIN_WIN = { x: 64, y: 35, w: 60, h: 44, step: 74 };
+const SHIELD_COLORS = ["#9fe8ff", "#bfe3ff", "#4aa3ff", "#ffffff"];
 
 const MY_GOATS = ["LIL PEEP", "YUNG LEAN", "GHOSTEMANE", "WARLORD COLOSSUS", "SMOKEDOPE2016", "DRIPPIN SO PRETTY"];
 // Second sign, further left behind the jetpack
@@ -1522,6 +1631,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   const touchRef = useRef(0); // -1 holding left side, 1 holding right side
   const touchUpRef = useRef(false); // holding the middle of the screen (jetpack on phones)
   const wheelRef = useRef({ dir: 0, timer: 0 });
+  const okRepeatRef = useRef(false); // the last Space / Enter was the key repeating because it's held down (the prize machine ignores those)
 
   // Scoreboard (shared online) and name entry
   const [showEntry, setShowEntry] = useState(false);
@@ -1659,6 +1769,25 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       kind: "troll" | "giant";
       dazed: number; // giant only: >0 while he's down and waiting for the finishing stomp
     },
+    // STASH SPIN (the prize machine, infinite run only)
+    perks: { speed: 0, leafLuck: 0, shield: 0, heart: 0, stash: 0, magnet: 0 } as Record<PerkId, number>, // stacks of each prize, this run
+    shield: 0, // SHIELD: bubble hits left in this zone
+    spinQueue: [] as boolean[], // spins waiting to open (true = a BOSS SPIN)
+    spinWait: 0, // seconds until the next waiting spin opens
+    spin: null as null | {
+      boss: boolean; // the gold BOSS SPIN (rarer prizes)
+      reels: ReelId[]; // what each of the three reels lands on
+      strips: ReelId[][]; // the icons that roll past on each reel before it lands
+      stops: number[]; // when each reel stops (seconds)
+      t: number; // seconds since the machine opened
+      landed: number; // how many reels have stopped
+      tick: number; // timer for the ticking sound
+      jackpot: boolean; // all three match: the prize counts twice
+      pick: number; // which reel is highlighted (0, 1, 2)
+      took: number; // which reel you took (-1 = still choosing)
+      tookAt: number;
+      flashWas: number; // the message that was on screen when it opened (put back afterwards)
+    },
     hinted: [] as string[], // which "how to use it" hints were already shown this game
     hintText: "",
     hintTime: 0,
@@ -1731,12 +1860,15 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   const playJump = () => beep(260, 640, 0.12, 0.045, "square");
   const playCoin = () => [988, 1319].forEach((f, i) => beep(f, f, 0.07, 0.05, "square", i * 0.06));
   // Some leaves are gold coins (same spot = always the same answer). Never in the Void or in words.
-  const isCoin = (l: Leaf) =>
-    l.coin === true ||
-    (!l.small &&
+  const isCoin = (l: Leaf): boolean => {
+    if (l.coin !== undefined) return l.coin; // set by hand in a level, or remembered by the MAGNET prize
+    return (
+      !l.small &&
       !state.current.inBonus &&
       !state.current.levelMode &&
-      hash(Math.floor(l.x) * 7 + Math.floor(l.y) * 13) < COIN_CHANCE);
+      hash(Math.floor(l.x) * 7 + Math.floor(l.y) * 13) < COIN_CHANCE
+    );
+  };
   const playLeaf = () => {
     beep(988, 988, 0.05, 0.045);
     beep(1319, 1319, 0.1, 0.045, "square", 0.05);
@@ -2096,6 +2228,23 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     return 1;
   };
 
+  // ---------- STASH SPIN: what the prizes change ----------
+  // (all of these give the normal numbers in the levels: a level never has prizes)
+  const perkTotal = () => {
+    const p = state.current.perks;
+    return p.speed + p.leafLuck + p.shield + p.heart + p.stash + p.magnet;
+  };
+  // More prizes = more monsters (on top of the 12k / 15k / 20k steps above)
+  const perkPressure = () => 1 + Math.min(PERK_ENEMY_CAP, PERK_ENEMY_STEP * perkTotal());
+  const bossHpBonus = () => Math.floor(perkTotal() * PERK_BOSS_HP);
+  const runSpeed = () => RUN * (1 + SPEED_STEP * state.current.perks.speed);
+  const maxLives = () => MAX_LIVES + state.current.perks.heart;
+  const fireAmmo = () => FIRE_AMMO + STASH_AMMO_STEP * state.current.perks.stash;
+  const iceAmmo = () => ICE_AMMO + STASH_AMMO_STEP * state.current.perks.stash;
+  const spikeAmmo = () => SPIKE_AMMO + state.current.perks.stash;
+  const fireTimeMax = () => FIRE_TIME + STASH_TIME_STEP * state.current.perks.stash;
+  const boxShots = () => 3 + state.current.perks.stash; // shots from one stash box in a boss arena
+
   const addWalker = (i: number, ground: number, progress: number) => {
     state.current.enemies.push({
       kind: "walker",
@@ -2140,7 +2289,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const len = 3 + Math.floor(Math.random() * 3);
     const row = g - 3;
     const twoFloors = g >= 7 && Math.random() < (zone === 1 ? 0.6 : 0.35);
-    const bonusAt = Math.random() < 0.15 ? 1 + Math.floor(Math.random() * (len - 2)) : -1;
+    // LEAF LUCK (a spin prize) makes the ? stash boxes show up more often
+    const bonusAt = Math.random() < 0.15 + LEAF_LUCK_STEP * s.perks.leafLuck ? 1 + Math.floor(Math.random() * (len - 2)) : -1;
     for (let k = 0; k < len; k++) {
       const upper = twoFloors && k >= 1 && k < len - 1 ? row - 3 : -1;
       if (k === bonusAt) s.cols.push(makeCol(g, zone, { bonus: row, block2: upper }));
@@ -2211,7 +2361,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (s.genFlat > 0) {
         s.genFlat -= 1;
         s.cols.push(makeCol(s.genGround, zone));
-        const more = hardness();
+        const more = hardness() * perkPressure(); // every spin prize you hold adds monsters
         if (s.genFlat > 1 && zone !== Z_CLOUDS && Math.random() < (0.05 + progress * 0.09 + (zone === 1 ? 0.03 : 0)) * more) {
           if (progress > 0.02 && Math.random() < EYE_PERCENT) addEye(i, s.genGround, progress);
           else addWalker(i, s.genGround, progress);
@@ -2222,7 +2372,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         continue;
       }
 
-      // The troll's arena: a flat screen-wide floor with two bonus blocks (they refill during the fight)
+      // The troll's arena: a flat screen-wide floor with a ? stash box at each end (they refill during the fight)
       if (s.bossState === "none" && s.score >= BOSS_EVERY * (s.bossCount + 1) - 300) {
         s.bossState = "placed";
         s.genGround = 8;
@@ -2230,7 +2380,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         s.bossCol = s.cols.length;
         for (let k = 0; k < BOSS_ARENA; k++) {
           const c = makeCol(8, zoneOf(s.cols.length));
-          if (k === 4 || k === 11) c.bonus = 5;
+          if (k === 2 || k === 18) c.bonus = 5;
           if (k === 7 || k === 8) c.block = 4;
           s.cols.push(c);
         }
@@ -2583,6 +2733,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     s.bossCount = 0;
     s.boss = null;
     s.bossRefill = 0;
+    // spin prizes only last one run
+    s.perks = { speed: 0, leafLuck: 0, shield: 0, heart: 0, stash: 0, magnet: 0 };
+    s.shield = 0;
+    s.spin = null;
+    s.spinQueue = [];
+    s.spinWait = 0;
     s.zoneMarks = [{ score: 0, zone: 0 }];
     // reset the score first: the level builder looks at it (the old score made the troll appear right away)
     s.score = 0;
@@ -2869,7 +3025,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     }
     // Every other one is the bigger, tougher giant instead of the regular troll
     const kind: "troll" | "giant" = s.bossCount % 2 === 1 ? "giant" : "troll";
-    const hp = kind === "giant" ? GIANT_HP : BOSS_HP_START + s.bossCount * BOSS_HP_STEP;
+    // (he also gets tougher with every spin prize you hold)
+    const hp = (kind === "giant" ? GIANT_HP : BOSS_HP_START + s.bossCount * BOSS_HP_STEP) + bossHpBonus();
     const bh = kind === "giant" ? GIANT_H : TR_H;
     s.boss = { x: s.cam + W - 50, y: 8 * T - bh, vx: 0, vy: 0, hp, maxHp: hp, hit: 0, jumpTimer: 2.2, facing: -1, dead: 0, kind, dazed: 0 };
     // Freeze and let the player pick a spell
@@ -3181,7 +3338,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const kind: "fire" | "ice" | "spike" = choice === 2 && s.spells.includes("spike") ? "spike" : choice === 1 ? "ice" : "fire";
     s.bossSpell = kind;
     s.power = kind;
-    s.ammo = s.kboss ? HORNED_AMMO : (s.boss ? s.boss.maxHp : s.lboss ? s.lboss.maxHp : 10) + BOSS_SPARE_SHOTS;
+    s.ammo = s.kboss ? HORNED_AMMO : s.boss ? BOSS_START_SHOTS : (s.lboss ? s.lboss.maxHp : 10) + BOSS_SPARE_SHOTS;
     if (s.kboss) s.doubleJumps = 1; // the horned warrior fight: just one double jump (the ? boxes give more)
     s.fireTime = kind === "fire" ? 999 : 0; // no timer in a boss fight
     s.mode = "running";
@@ -3197,7 +3354,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         ? `FIGHT THE ${bossLabel}!`
         : `${bossLabel} #${s.bossCount + 1}!`;
     s.hinted = s.hinted.filter((h) => h !== "bossjump");
-    showHint("bossjump", s.kboss ? "1 DOUBLE JUMP! MORE IN THE STASH BOXES" : "FREE DOUBLE JUMPS HERE!");
+    showHint("bossjump", s.kboss ? "1 DOUBLE JUMP! MORE IN THE STASH BOXES" : s.boss ? "FREE DOUBLE JUMPS! JUMP OVER HIM" : "FREE DOUBLE JUMPS HERE!");
     s.hintTime = 4;
     playPowerUp();
   };
@@ -3318,9 +3475,167 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     }
   };
 
+  // ---------- STASH SPIN: the prize machine ----------
+
+  // Picks what the three reels land on. Prizes you already have 3 times are left out.
+  const rollSpin = (boss: boolean): ReelId[] => {
+    const s = state.current;
+    const w = (p: PerkDef) => (boss ? p.bossWeight : p.weight);
+    const pickFrom = (list: PerkDef[]) => {
+      let r = Math.random() * list.reduce((sum, p) => sum + w(p), 0);
+      for (const p of list) {
+        r -= w(p);
+        if (r <= 0) return p;
+      }
+      return list[list.length - 1];
+    };
+    const open = PERKS.filter((p) => s.perks[p.id as PerkId] < PERK_MAX);
+    // JACKPOT: all three the same (only with a prize that still has room for both stacks)
+    const room = open.filter((p) => s.perks[p.id as PerkId] <= PERK_MAX - 2);
+    if (room.length > 0 && Math.random() < (boss ? SPIN_JACKPOT_BOSS : SPIN_JACKPOT)) {
+      const p = pickFrom(room);
+      return [p.id, p.id, p.id];
+    }
+    // otherwise three different prizes (a brownie fills the gap when there aren't three left)
+    const left = [...open];
+    const out: ReelId[] = [];
+    while (out.length < 3 && left.length > 0) {
+      const p = pickFrom(left);
+      out.push(p.id);
+      left.splice(left.indexOf(p), 1);
+    }
+    while (out.length < 3) out.push("snack");
+    return out;
+  };
+
+  // Freezes the run and starts the reels
+  const openSpin = (boss: boolean) => {
+    const s = state.current;
+    const reels = rollSpin(boss);
+    const jackpot = reels[0] === reels[1] && reels[1] === reels[2];
+    const all: ReelId[] = PERKS.map((p) => p.id);
+    // the icons that roll past before each reel lands ([0] is the one it lands on)
+    const strips = reels.map((id, r) => {
+      const strip: ReelId[] = [id];
+      const len = 10 + r * 4;
+      while (strip.length < len) {
+        const next = all[Math.floor(Math.random() * all.length)];
+        if (next !== strip[strip.length - 1]) strip.push(next);
+      }
+      return strip;
+    });
+    const stops = [...SPIN_REEL_STOPS];
+    if (jackpot) stops[2] += 0.7; // two the same already... the last reel takes its time
+    s.spin = { boss, reels, strips, stops, t: 0, landed: 0, tick: 0, jackpot, pick: 1, took: -1, tookAt: 0, flashWas: s.flash };
+    s.mode = "spin";
+    beep(240, 90, 0.18, 0.06, "square"); // the lever
+  };
+
+  // How far reel r still has to roll (in icons). 0 = it has landed.
+  const reelLeft = (r: number) => {
+    const sp = state.current.spin;
+    if (!sp || sp.t >= sp.stops[r]) return 0;
+    const k = 1 - sp.t / sp.stops[r];
+    return (sp.strips[r].length - 2) * k * k;
+  };
+
+  // The reels have stopped and the short "hands off" moment is over
+  const spinCanPick = () => {
+    const sp = state.current.spin;
+    return !!sp && sp.took < 0 && sp.t >= sp.stops[2] + SPIN_LOCK;
+  };
+
+  const spinMove = (dir: number) => {
+    const sp = state.current.spin;
+    if (!sp || !spinCanPick() || sp.jackpot) return;
+    sp.pick = (sp.pick + dir + 3) % 3;
+    beep(520, 520, 0.04, 0.04, "square");
+  };
+
+  // Gives you a prize (times = 2 on a jackpot)
+  const applyPerk = (id: ReelId, times: number) => {
+    const s = state.current;
+    for (let i = 0; i < times; i++) {
+      if (id === "snack") {
+        s.lives = Math.min(maxLives(), s.lives + 1);
+        continue;
+      }
+      if (s.perks[id] >= PERK_MAX) break;
+      s.perks[id] += 1;
+      if (id === "heart") s.lives = Math.min(maxLives(), s.lives + 1);
+      if (id === "shield") s.shield = s.perks.shield; // the bubble is up straight away
+    }
+  };
+
+  const spinTake = () => {
+    const s = state.current;
+    const sp = s.spin;
+    if (!sp || !spinCanPick()) return;
+    sp.took = sp.jackpot ? 1 : sp.pick;
+    sp.tookAt = sp.t;
+    applyPerk(sp.reels[sp.took], sp.jackpot ? 2 : 1);
+    playPowerUp();
+  };
+
+  // Back to the run
+  const closeSpin = () => {
+    const s = state.current;
+    const sp = s.spin;
+    s.spin = null;
+    s.mode = "running";
+    s.invuln = Math.max(s.invuln, 1.2); // a moment to find your feet again
+    if (sp) {
+      s.flash = sp.flashWas;
+      if (sp.took >= 0) {
+        const d = perkDef(sp.reels[sp.took]);
+        popup(s.x + SPRITE_W / 2, s.y - 8, sp.jackpot ? `${d.name} X2!` : `${d.name}!`);
+        burst(s.x + SPRITE_W / 2, s.y + SPRITE_H / 2, 18, sp.boss ? ["#ffd700", "#fff3a0", "#ffffff"] : [PINK, "#ff5fe0", "#ffffff"], 70);
+      }
+    }
+    if (s.spinQueue.length > 0) s.spinWait = 0.8; // another spin is waiting (a zone spin and a boss spin together)
+  };
+
+  // Runs while the machine is open (the rest of the game stands still)
+  const updateSpin = (dt: number) => {
+    const s = state.current;
+    const sp = s.spin;
+    if (!sp) {
+      s.mode = "running";
+      return;
+    }
+    const before = sp.t;
+    sp.t += dt;
+    // ticking while the reels turn
+    if (sp.landed < 3) {
+      sp.tick -= dt;
+      if (sp.tick <= 0) {
+        sp.tick = 0.09;
+        beep(620 + sp.landed * 90, 600 + sp.landed * 90, 0.02, 0.018, "square");
+      }
+    }
+    for (let r = 0; r < 3; r++) {
+      if (before < sp.stops[r] && sp.t >= sp.stops[r]) {
+        sp.landed = r + 1;
+        beep(300 + r * 90, 200 + r * 60, 0.09, 0.06, "square"); // clack
+        if (r === 2 && sp.jackpot) [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => beep(f, f * 1.01, 0.09, 0.055, "square", 0.1 + i * 0.07));
+      }
+    }
+    if (sp.took >= 0 && sp.t - sp.tookAt > SPIN_TAKE_TIME) closeSpin();
+  };
+
   const hurt = (pit = false) => {
     const s = state.current;
     const inFight = s.bossState === "fight";
+    if (!pit && s.shield > 0) {
+      // SHIELD (a spin prize): the bubble takes the hit and pops. Falling in a pit still costs a heart.
+      s.shield -= 1;
+      s.invuln = 1.5;
+      s.shake = 0.15;
+      burst(s.x + SPRITE_W / 2, s.y + SPRITE_H / 2, 22, SHIELD_COLORS, 80);
+      popup(s.x + SPRITE_W / 2, s.y - 8, "SHIELD!");
+      beep(1200, 300, 0.18, 0.06, "triangle");
+      return;
+    }
     if (hasFire() && !pit && !inFight) {
       // Getting hit while you have fire or ice only takes the power away
       burst(s.x + SPRITE_W / 2, s.y + 8, 16, powerSparks(s.power), 60);
@@ -3466,6 +3781,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   const press = () => {
     const s = state.current;
     getAudio(); // browsers only allow sound after a click, so wake it up here
+    if (s.mode === "spin") {
+      // the prize machine: OK / jump takes the highlighted prize.
+      // (A key that was simply still held down from before doesn't count, it has to be a fresh press.)
+      if (!okRepeatRef.current) spinTake();
+      return;
+    }
     if (s.mode === "shop") {
       shopPick();
       return;
@@ -3726,6 +4047,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (wheelRef.current.timer <= 0) wheelRef.current.dir = 0;
     }
 
+    if (s.mode === "spin") {
+      updateSpin(dt); // the prize machine: everything else stands still
+      return;
+    }
     if (s.mode === "dying") {
       if (s.t - s.deadAt > 3) finishDeath();
       return;
@@ -3798,7 +4123,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     if (want === 0) want = wheelRef.current.dir;
     if (want !== 0) s.facing = want;
 
-    const target = want * RUN;
+    const target = want * runSpeed(); // (faster with the SPEED prize)
     if (s.knockT > 0) {
       s.knockT -= dt; // thrown off by WARLORD: no steering for a moment
     } else {
@@ -3995,6 +4320,25 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         s.zoneMarks.push({ score: s.score, zone: zoneIndex % ZONE_NAMES.length });
         s.flash = 2;
         s.flashText = `ZONE ${zoneIndex + 1}: ${ZONE_NAMES[zoneIndex % ZONE_NAMES.length]}`;
+        // SHIELD: the bubble comes back in every new zone
+        if (s.shield < s.perks.shield) {
+          s.shield = s.perks.shield;
+          popup(s.x + SPRITE_W / 2, s.y - 8, "SHIELD BACK!");
+          beep(500, 1100, 0.12, 0.04, "triangle");
+        }
+        // STASH SPIN after every second zone
+        if (zoneIndex % SPIN_EVERY_ZONES === 0) {
+          s.spinQueue.push(false);
+          s.spinWait = Math.max(s.spinWait, 0.3);
+        }
+      }
+      // A spin is waiting: it opens once you're standing on the ground (never in the Void or during a boss fight)
+      if (s.spinQueue.length > 0 && s.bossState !== "fight") {
+        s.spinWait -= dt;
+        if (s.spinWait <= 0 && (s.onGround || s.spinWait < -2.5)) {
+          openSpin(s.spinQueue.shift() === true);
+          return;
+        }
       }
     }
 
@@ -4031,27 +4375,27 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         if (s.bossState === "fight" && pu.kind !== "double") {
           // in the arena the blocks top up your spell
           s.power = pu.kind;
-          s.ammo += 3;
+          s.ammo += boxShots(); // 3 (more with the BIGGER STASH prize)
           if (pu.kind === "fire") s.fireTime = 999;
           if (s.kboss && s.kboss.kind === "horned") {
             s.doubleJumps = Math.max(s.doubleJumps, 1);
             popup(pu.x + 7, pu.y - 4, "+3 SHOTS +1 JUMP");
-          } else popup(pu.x + 7, pu.y - 4, "+3 SHOTS");
+          } else popup(pu.x + 7, pu.y - 4, `+${boxShots()} SHOTS`);
         } else if (pu.kind === "fire") {
           s.power = "fire";
-          s.ammo = FIRE_AMMO;
-          s.fireTime = FIRE_TIME;
+          s.ammo = fireAmmo();
+          s.fireTime = fireTimeMax();
           popup(pu.x + 7, pu.y - 4, "FIRE!");
           showHint("shoot", "PRESS S TO SHOOT");
         } else if (pu.kind === "ice") {
           s.power = "ice";
-          s.ammo = ICE_AMMO;
+          s.ammo = iceAmmo();
           s.fireTime = 0;
           popup(pu.x + 7, pu.y - 4, "ICE!");
           showHint("shoot", "PRESS S TO SHOOT");
         } else if (pu.kind === "spike") {
           s.power = "spike";
-          s.ammo = SPIKE_AMMO;
+          s.ammo = spikeAmmo();
           s.fireTime = 0;
           popup(pu.x + 7, pu.y - 4, "SPIKES!");
           showHint("shoot", "PRESS S TO SHOOT");
@@ -4832,8 +5176,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           s.flash = 2.5;
           s.flashText = `${kind === "giant" ? "GIANT" : "TROLL"} DOWN! +${pts}`;
           // leftover shots stay, but back to normal rules
-          if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
-          s.ammo = Math.min(s.ammo, 5);
+          if (s.power === "fire") s.fireTime = Math.min(s.fireTime, fireTimeMax());
+          s.ammo = Math.min(s.ammo, fireAmmo());
+          // BOSS SPIN: a bonus turn on the prize machine, with the rarer prizes
+          s.spinQueue.push(true);
+          s.spinWait = Math.max(s.spinWait, SPIN_BOSS_DELAY);
         }
       } else if (b.dazed > 0) {
         // Down but not out: he just lies there while you line up the finishing stomp
@@ -4903,9 +5250,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           }
         }
       }
-      // The two bonus blocks in the arena refill every few seconds
+      // The two stash boxes in the arena refill every few seconds
       s.bossRefill += dt;
-      if (s.bossRefill > 10) {
+      if (s.bossRefill > BOSS_BOX_REFILL) {
         s.bossRefill = 0;
         for (let k = 0; k < BOSS_ARENA; k++) {
           const c = colAt(s.bossCol + k);
@@ -4914,6 +5261,26 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
             c.bump = 0.15;
           }
         }
+      }
+    }
+
+    // MAGNET (a spin prize): leaves and coins close to you fly to you
+    const magnetRange = MAGNET_RANGE[Math.min(s.perks.magnet, MAGNET_RANGE.length - 1)];
+    if (magnetRange > 0) {
+      const mx = hx() + HB_W / 2;
+      const my = hy() + HB_H / 2;
+      for (const l of s.leaves) {
+        if (l.taken) continue;
+        const half = l.small ? 4 : 7;
+        const dx = mx - (l.x + half);
+        const dy = my - (l.y + half);
+        const dist = Math.hypot(dx, dy);
+        if (dist > magnetRange || dist < 1) continue;
+        // a coin is a coin because of the spot it sits on, so remember what it is before it moves
+        if (l.coin === undefined) l.coin = isCoin(l);
+        const step = Math.min(dist, MAGNET_PULL * dt);
+        l.x += (dx / dist) * step;
+        l.y += (dy / dist) * step;
       }
     }
 
@@ -4942,7 +5309,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (h.taken) continue;
       if (hx() + HB_W > h.x && hx() < h.x + 14 && hy() + HB_H > h.y && hy() < h.y + 12) {
         h.taken = true;
-        if (s.lives < MAX_LIVES) {
+        if (s.lives < maxLives()) {
           s.lives += 1;
           popup(h.x + 7, h.y - 4, "+1 LIFE");
         } else {
@@ -6729,8 +7096,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     ctx.fillText("PICK YOUR SPELL", W / 2, 14);
     ctx.fillStyle = "#ffc800";
     const need = b ? b.maxHp : s.lboss ? s.lboss.maxHp : s.kboss ? s.kboss.maxHp : 0;
-    const shots = s.kboss ? HORNED_AMMO : need + BOSS_SPARE_SHOTS;
-    ctx.fillText(s.kboss ? `${shots} SHOTS, IT TAKES ${need}. USE THE STASH BOXES` : `${shots} SHOTS, IT TAKES ${need}`, W / 2, 26);
+    const shots = s.kboss ? HORNED_AMMO : b ? BOSS_START_SHOTS : need + BOSS_SPARE_SHOTS;
+    ctx.fillText(s.kboss || b ? `${shots} SHOTS, IT TAKES ${need}. USE THE STASH BOXES` : `${shots} SHOTS, IT TAKES ${need}`, W / 2, 26);
     const options = s.spells.includes("spike") ? 3 : 2;
     for (let i = 0; i < options; i++) {
       const bx = options === 3 ? 56 + i * 80 : i === 0 ? W / 2 - 78 : W / 2 + 14;
@@ -6801,6 +7168,218 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     if (Math.floor(s.t * 2) % 2 === 0) {
       ctx.fillStyle = "#ffffff";
       ctx.fillText("< > PICK, OK TO FIGHT", W / 2, H - 20);
+    }
+  };
+
+  // ---------- STASH SPIN: drawing ----------
+
+  // The little prize icons at the bottom left while you run: one per prize you hold, pink dots = how many times
+  const drawPerkHud = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    let x = 8;
+    const y = H - 31;
+    for (const p of PERKS) {
+      const n = s.perks[p.id as PerkId];
+      if (!n) continue;
+      ctx.fillStyle = INK;
+      ctx.fillRect(x, y, 13, 17);
+      ctx.fillStyle = SCREEN;
+      ctx.fillRect(x + 1, y + 1, 11, 11);
+      // the shield icon fades while the bubble is used up (it comes back in the next zone)
+      if (p.id === "shield" && s.shield <= 0) ctx.globalAlpha = 0.3;
+      drawPixels(ctx, p.art, x + 2, y + 2, p.colors, 1);
+      ctx.globalAlpha = 1;
+      for (let i = 0; i < PERK_MAX; i++) {
+        ctx.fillStyle = i < n ? "#ff5fe0" : "#4a3d55";
+        ctx.fillRect(x + 1 + i * 4, y + 13, 3, 3);
+      }
+      x += 15;
+    }
+  };
+
+  // SHIELD: the bubble around you (one little orb circling it for every hit it can still take)
+  const drawShieldBubble = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+    const s = state.current;
+    const cx = x + SPRITE_W / 2;
+    const cy = y + SPRITE_H / 2 + 1;
+    const rx = 15;
+    const ry = 21;
+    ctx.fillStyle = "rgba(159, 232, 255, 0.14)";
+    ctx.fillRect(cx - rx + 4, cy - ry + 4, rx * 2 - 8, ry * 2 - 8);
+    for (let i = 0; i < 40; i++) {
+      const a = (i / 40) * Math.PI * 2;
+      const shine = a > Math.PI * 1.05 && a < Math.PI * 1.45; // top left
+      ctx.fillStyle = shine ? "#ffffff" : i % 2 === 0 ? "#9fe8ff" : "#4aa3ff";
+      ctx.fillRect(Math.round(cx + Math.cos(a) * rx), Math.round(cy + Math.sin(a) * ry), 1, 1);
+    }
+    for (let k = 0; k < s.shield; k++) {
+      const a = s.t * 2.2 + (k / Math.max(1, s.shield)) * Math.PI * 2;
+      const ox = Math.round(cx + Math.cos(a) * rx);
+      const oy = Math.round(cy + Math.sin(a) * ry);
+      ctx.fillStyle = "#1d4fa8";
+      ctx.fillRect(ox - 2, oy - 2, 4, 4);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(ox - 1, oy - 1, 2, 2);
+    }
+  };
+
+  // The machine: a purple cabinet with three reel windows (gold for the BOSS SPIN)
+  const drawSpin = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    const sp = s.spin;
+    if (!sp) return;
+    const trim = sp.boss ? "#ffd700" : PINK;
+    const trimDark = sp.boss ? "#8a6400" : DARK_PINK;
+    const trimLight = sp.boss ? "#fff3a0" : "#ff5fe0";
+    const allLanded = sp.landed >= 3;
+    const ready = spinCanPick();
+    const slow = Math.floor(s.t * 2) % 2 === 0; // slow blink, twice a second
+
+    ctx.fillStyle = "rgba(22, 12, 29, 0.8)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.font = `8px ${fontFamily}`;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "center";
+
+    // the lever on the right: it gets pulled when the machine opens
+    const pull = sp.t < 0.2 ? sp.t / 0.2 : Math.max(0, 1 - (sp.t - 0.2) / 0.5);
+    const ballY = 30 + Math.round(pull * 30);
+    ctx.fillStyle = INK;
+    ctx.fillRect(296, 64, 9, 14);
+    ctx.fillStyle = trimDark;
+    ctx.fillRect(297, 66, 6, 10);
+    ctx.fillStyle = INK;
+    ctx.fillRect(300, ballY + 4, 4, 68 - ballY - 4);
+    ctx.fillStyle = "#9b8fa6";
+    ctx.fillRect(301, ballY + 4, 2, 68 - ballY - 4);
+    ctx.fillStyle = INK;
+    ctx.fillRect(297, ballY - 1, 10, 10);
+    ctx.fillStyle = trim;
+    ctx.fillRect(298, ballY, 8, 8);
+    ctx.fillStyle = trimLight;
+    ctx.fillRect(299, ballY + 1, 3, 3);
+
+    // the cabinet
+    ctx.fillStyle = INK;
+    ctx.fillRect(40, 5, 256, 150);
+    ctx.fillStyle = "#2a1640";
+    ctx.fillRect(42, 7, 252, 146);
+    ctx.fillStyle = "#3d2260";
+    ctx.fillRect(42, 7, 252, 2);
+    ctx.fillRect(42, 7, 2, 146);
+    // the sign on top, with a row of little lights that take turns
+    ctx.fillStyle = trim;
+    ctx.fillRect(42, 7, 252, 17);
+    ctx.fillStyle = trimDark;
+    ctx.fillRect(42, 22, 252, 2);
+    const chase = Math.floor(s.t * 3);
+    for (let i = 0; i < 31; i++) {
+      ctx.fillStyle = (i + chase) % 3 === 0 ? "#ffffff" : trimDark;
+      ctx.fillRect(46 + i * 8, 9, 2, 2);
+    }
+    drawPixels(ctx, LEAF, 50, 14, { G: trimDark, D: trimDark }, 1);
+    drawPixels(ctx, LEAF, 279, 14, { G: trimDark, D: trimDark }, 1);
+    const title = sp.boss ? "BOSS STASH SPIN" : "STASH SPIN";
+    ctx.fillStyle = trimDark;
+    ctx.fillText(title, W / 2 + 1, 14);
+    ctx.fillStyle = sp.boss ? INK : "#ffffff";
+    ctx.fillText(title, W / 2, 13);
+
+    // the three reels
+    for (let r = 0; r < 3; r++) {
+      const wx = SPIN_WIN.x + r * SPIN_WIN.step;
+      const wy = SPIN_WIN.y;
+      const landed = sp.t >= sp.stops[r];
+      const picked = allLanded && (sp.jackpot || (sp.took >= 0 ? sp.took === r : sp.pick === r));
+      // frame
+      ctx.fillStyle = INK;
+      ctx.fillRect(wx - 4, wy - 4, SPIN_WIN.w + 8, SPIN_WIN.h + 8);
+      ctx.fillStyle = picked ? (sp.took >= 0 ? "#ffffff" : Math.floor(s.t * 4) % 2 === 0 ? trim : trimLight) : "#5a4a6a";
+      ctx.fillRect(wx - 3, wy - 3, SPIN_WIN.w + 6, SPIN_WIN.h + 6);
+      ctx.fillStyle = INK;
+      ctx.fillRect(wx - 1, wy - 1, SPIN_WIN.w + 2, SPIN_WIN.h + 2);
+      // the window (the same pale green as the game's screen)
+      ctx.fillStyle = SCREEN;
+      ctx.fillRect(wx, wy, SPIN_WIN.w, SPIN_WIN.h);
+      ctx.fillStyle = HILLS;
+      ctx.fillRect(wx, wy, SPIN_WIN.w, 5);
+      ctx.fillRect(wx, wy + SPIN_WIN.h - 5, SPIN_WIN.w, 5);
+      // the icons rolling down
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(wx, wy, SPIN_WIN.w, SPIN_WIN.h);
+      ctx.clip();
+      const left = reelLeft(r);
+      const base = Math.floor(left);
+      const thud = landed && sp.t - sp.stops[r] < 0.1 ? 2 : 0; // a tiny bounce when it lands
+      for (const k of [base, base + 1]) {
+        const id = sp.strips[r][k];
+        if (!id) continue;
+        const d = perkDef(id);
+        drawPixels(ctx, d.art, wx + 12, wy + 4 + thud + Math.round((k - left) * SPIN_WIN.h), d.colors, 4);
+      }
+      ctx.restore();
+      // the two little pointers that mark the middle of the window
+      ctx.fillStyle = trimDark;
+      ctx.fillRect(wx, wy + 20, 3, 4);
+      ctx.fillRect(wx + SPIN_WIN.w - 3, wy + 20, 3, 4);
+      // prizes you didn't take go dark
+      if (sp.took >= 0 && !picked) {
+        ctx.fillStyle = "rgba(22, 12, 29, 0.65)";
+        ctx.fillRect(wx, wy, SPIN_WIN.w, SPIN_WIN.h);
+      }
+      // the arrow above the one you're on
+      if (picked && sp.took < 0 && ready) {
+        const ax = wx + SPIN_WIN.w / 2;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(ax - 3, wy - 9 + (slow ? 0 : 1), 6, 2);
+        ctx.fillRect(ax - 2, wy - 7 + (slow ? 0 : 1), 4, 1);
+        ctx.fillRect(ax - 1, wy - 6 + (slow ? 0 : 1), 2, 1);
+      }
+      // under each reel: how many of that prize you have (the new ones blink)
+      if (landed && sp.reels[r] !== "snack") {
+        const id = sp.reels[r] as PerkId;
+        const have = s.perks[id];
+        const gain = sp.took >= 0 ? 0 : sp.jackpot ? 2 : 1;
+        for (let i = 0; i < PERK_MAX; i++) {
+          const px = wx + 14 + i * 12;
+          ctx.fillStyle = INK;
+          ctx.fillRect(px - 1, wy + SPIN_WIN.h + 6, 10, 5);
+          ctx.fillStyle = i < have ? LIGHT_GREEN : i < have + gain && slow ? "#ffffff" : "#4a3d55";
+          ctx.fillRect(px, wy + SPIN_WIN.h + 7, 8, 3);
+        }
+      }
+    }
+
+    // the text panel under the reels
+    ctx.fillStyle = INK;
+    ctx.fillRect(48, 94, 240, 41);
+    ctx.fillStyle = "#160c1d";
+    ctx.fillRect(49, 95, 238, 39);
+    if (!allLanded) {
+      ctx.fillStyle = "#9b8fa6";
+      ctx.fillText(sp.boss ? "BOSS DOWN! RARE PRIZES INSIDE" : "KEEP 1 OF THE 3 PRIZES", W / 2, 103);
+      ctx.fillText("STACK A PRIZE UP TO 3 TIMES", W / 2, 117);
+    } else {
+      const shown = sp.jackpot ? 1 : sp.took >= 0 ? sp.took : sp.pick;
+      const d = perkDef(sp.reels[shown]);
+      const have = d.id === "snack" ? 0 : s.perks[d.id as PerkId];
+      let head = d.name;
+      if (sp.took >= 0) head = sp.jackpot ? `GOT ${d.name} X2!` : `GOT ${d.name}!`;
+      else if (sp.jackpot) head = `JACKPOT! ${d.name} X2`;
+      else if (d.id !== "snack") head = `${d.name}  LV ${have + 1}/${PERK_MAX}`;
+      ctx.fillStyle = sp.jackpot && !slow ? "#ffffff" : "#ffc800";
+      ctx.fillText(head, W / 2, 99);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(d.info[0], W / 2, 111);
+      ctx.fillText(d.info[1], W / 2, 122);
+    }
+
+    // what to press
+    if (ready && slow) {
+      ctx.fillStyle = "#ffffff";
+      const ok = touchPadRef.current ? "A = TAKE IT" : "JUMP = TAKE IT";
+      ctx.fillText(sp.jackpot ? ok : `< > CHOOSE   ${ok}`, W / 2, 141);
     }
   };
 
@@ -6920,7 +7499,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         const spin = Math.abs(Math.cos(s.t * 4 + l.x));
         const cw = Math.max(2, Math.round(12 * spin));
         const cx = Math.round(l.x - cam + 7 - cw / 2);
-        const cy = l.y + 1 + Math.round(Math.sin(s.t * 4 + l.x) * 2);
+        const cy = Math.round(l.y) + 1 + Math.round(Math.sin(s.t * 4 + l.x) * 2);
         ctx.fillStyle = "#6b4a00";
         ctx.fillRect(cx - 1, cy, cw + 2, 12);
         ctx.fillRect(cx, cy - 1, cw, 14);
@@ -7531,7 +8110,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
     // You
     const blinking = s.invuln > 0 && Math.floor(s.t * 12) % 2 === 0;
-    const showYou = ["select", "ready", "running", "pipe", "golden", "choose", "paused"].includes(s.mode);
+    const showYou = ["select", "ready", "running", "pipe", "golden", "choose", "paused", "spin"].includes(s.mode);
     if (showYou && !blinking) {
       const previewOutfit = s.mode === "select" ? OUTFITS[s.selectIndex].id : s.outfit;
       const levelOutfit = s.levelMode ? LEVELS[s.level - 1]?.outfit : undefined;
@@ -7614,6 +8193,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       }
     }
 
+    // SHIELD prize: the bubble around you while it can still take a hit
+    if (s.shield > 0 && showYou && s.mode !== "select") drawShieldBubble(ctx, Math.round(s.x - cam), Math.round(s.y));
+
     for (const p of s.particles) {
       ctx.fillStyle = p.color;
       ctx.fillRect(Math.round(p.x - cam), Math.round(p.y), 2, 2);
@@ -7658,9 +8240,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     ctx.fillStyle = hudInk;
     ctx.fillText(`${s.coins}`, W - 6, 16);
 
-    // Hearts = lives (max 4)
-    for (let i = 0; i < MAX_LIVES; i++) {
-      const x = W / 2 - 34 + i * 16;
+    // Hearts = lives (max 4, up to 7 with the EXTRA HEART prize: then they sit closer together)
+    const heartStep = Math.min(16, Math.floor(64 / (maxLives() - 1)));
+    for (let i = 0; i < maxLives(); i++) {
+      const x = W / 2 - 34 + i * heartStep;
       drawPixels(ctx, HEART, x + 1, 5, { P: INK }, 1);
       drawPixels(ctx, HEART, x, 4, { P: i < s.lives ? PINK : "#9b8fa6" }, 1);
     }
@@ -7754,7 +8337,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       ctx.fillRect(fbx, fby, Math.round(fbw * fuelFrac), 4);
     }
     if (hasFire() && s.power === "fire" && s.bossState !== "fight") {
-      const left = s.fireTime / FIRE_TIME;
+      const left = Math.min(1, s.fireTime / fireTimeMax());
       const low = s.fireTime < 4;
       const barOn = !low || Math.floor(s.t * 8) % 2 === 0;
       ctx.fillStyle = INK;
@@ -7764,6 +8347,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         ctx.fillRect(9, H - 11, Math.max(0, Math.round((W - 18) * left)), 2);
       }
     }
+    if (!s.levelMode) drawPerkHud(ctx); // the spin prizes you hold (infinite run only)
     } // end of the select-mode HUD gate
 
     if (s.mode !== "ready" && s.mode !== "select") drawProgress(ctx);
@@ -7810,6 +8394,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
     if (s.mode === "choose") drawSpellPick(ctx);
     if (s.mode === "bossIntro") drawBossIntro(ctx);
+    if (s.mode === "spin") drawSpin(ctx);
     // Lore sign you're standing next to
     if (s.levelMode && s.mode === "running" && s.flash <= 0) {
       const near = s.signs.find((sg) => Math.abs(sg.x + 8 - (s.x + SPRITE_W / 2)) < 36);
@@ -7969,6 +8554,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       const k = e.key;
       const mode = state.current.mode;
+      // Space / Enter reach the game through the page (as OK). Remember if this one is just the key being held down.
+      if (k === " " || k === "Enter") okRepeatRef.current = e.repeat;
       // Esc (or P) pauses / unpauses
       if (k === "Escape" || k === "p" || k === "P") {
         const st = state.current;
@@ -8024,6 +8611,21 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         if (k === "ArrowRight" || k === "d" || k === "D") state.current.selectIndex = (state.current.selectIndex + 1) % OUTFITS.length;
         return;
       }
+      // The prize machine: left / right to choose, jump (or OK) to take it
+      if (mode === "spin") {
+        const goLeft = k === "ArrowLeft" || k === "a" || k === "A";
+        const goRight = k === "ArrowRight" || k === "d" || k === "D";
+        const goUp = k === "ArrowUp" || k === "w" || k === "W";
+        // keep track of what you're holding, so you carry on walking the moment the run continues
+        if (goLeft) heldRef.current.left = true;
+        if (goRight) heldRef.current.right = true;
+        if (goUp || k === " ") heldRef.current.up = true;
+        if (e.repeat) return; // a key that's just being held down doesn't count
+        if (goLeft) spinMove(-1);
+        if (goRight) spinMove(1);
+        if (goUp) spinTake();
+        return;
+      }
       // Picking a spell before a boss fight
       if (mode === "choose") {
         const options = state.current.spells.includes("spike") ? 3 : 2;
@@ -8045,6 +8647,13 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (k === "ArrowDown" || k === "s" || k === "S") down();
       if (k === "f" || k === "F" || k === "x" || k === "X") shoot();
       if (k === "m" || k === "M") toggleSfx();
+      // Test shortcut (only on your own computer, never on the real site): while running in the infinite run,
+      // 9 opens a STASH SPIN right now and 0 opens a BOSS SPIN. A run where you used it never goes on the scoreboard.
+      if ((k === "9" || k === "0") && mode === "running" && !state.current.levelMode && localTesting()) {
+        state.current.testRun = true;
+        state.current.spinQueue.push(k === "0");
+        state.current.spinWait = 0;
+      }
       if (k === "-" || k === "_") setSfxVolume((sfxOnRef.current ? sfxVolRef.current : 0) - 0.1);
       if (k === "=" || k === "+") setSfxVolume((sfxOnRef.current ? sfxVolRef.current : 0) + 0.1);
     };
@@ -8071,6 +8680,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (!d || d.btn !== "a") return;
       if (d.down) {
         heldRef.current.up = true;
+        okRepeatRef.current = false; // a finger on the button is always a fresh press
         press();
       } else {
         heldRef.current.up = false;
@@ -8186,6 +8796,15 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
               state.current.pauseChoice = row;
               press();
             }
+            return;
+          }
+          if (mode === "spin") {
+            // the prize machine: tap a reel to highlight it, tap the highlighted one again to take it
+            const sp = state.current.spin;
+            if (!sp || cy < SPIN_WIN.y - 6 || cy > SPIN_WIN.y + SPIN_WIN.h + 14) return;
+            const r = Math.max(0, Math.min(2, Math.floor((cx - (SPIN_WIN.x - 7)) / SPIN_WIN.step)));
+            if (sp.jackpot || sp.pick === r) spinTake();
+            else spinMove(r - sp.pick);
             return;
           }
           if (mode === "choose") {
