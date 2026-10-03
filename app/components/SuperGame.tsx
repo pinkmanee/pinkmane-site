@@ -14,6 +14,9 @@ type Props = {
   // true on phones / tablets: the page shows its own big thumb buttons, so touching the game
   // screen itself no longer walks or jumps (menus can still be tapped)
   touchPad?: boolean;
+  // The page's beat clock (optional): kick = 1 right on each beat and fades through it, sway swings left/right each beat,
+  // live = the music is really playing. The painted PINK FIELDS background wiggles to it. Without it the picture just stays still.
+  beatRef?: React.MutableRefObject<{ kick: number; sway: number; live: boolean }>;
 };
 
 // golden = paused on the golden leaf screen, choose = picking your spell before a boss, paused = Esc
@@ -1402,6 +1405,15 @@ const BONG_IDLE_LIFE = 14; // seconds a bong waits for a kick before it disappea
 // sun, hills and leaves. No file there = the game keeps using the drawn one. The picture is 4.2 times as wide
 // as it is tall (like 2688x640) and wraps around, so make its left and right edges match.
 const WEEDLAND_BG = "/game/weedland-bg.png";
+// Your painted PINK FIELDS background (the first zone). Put the picture at public/game/pinkfields-bg.png and it replaces the drawn hills.
+// It's scaled to the screen height, tiled and scrolled slowly, and it WIGGLES TO THE MUSIC: the page's beat makes it ripple and sway.
+// (If the file isn't there, the old drawn hills are used.)
+const PINK_FIELDS_BG = "/game/pinkfields-bg.png";
+const PINK_FIELDS_SKY = "#dceec1"; // the sky colour of the painting (shows above and below it when the camera moves)
+const PINK_FIELDS_PARALLAX = 0.3; // how fast it scrolls compared to you (smaller = farther away)
+const FIELD_WIGGLE_BASE = 0.5; // pixels of sway while music plays, even between beats
+const FIELD_WIGGLE_KICK = 2.6; // extra pixels on each beat (it settles back before the next one)
+const FIELD_WIGGLE_RIPPLE = 0.11; // how tight the ripple is going down the picture (bigger = more waves)
 const WEEDLAND_BG_PARALLAX = 0.3; // how fast it scrolls compared to the level (smaller = farther away)
 const WL_SKY_TOP = "#c8f5b0";
 const WL_SKY_BOTTOM = "#78cf6e";
@@ -2220,7 +2232,11 @@ function getOwnerCode() {
   }
 }
 
-export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, touchPad }: Props) {
+export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, touchPad, beatRef }: Props) {
+  // The page's beat clock (kick = 1 right on each beat, fading through it; sway swings left/right each beat; live = music really playing).
+  // It's read through a ref because the game's loop is set up once.
+  const beatPropRef = useRef(beatRef);
+  beatPropRef.current = beatRef;
   const touchPadRef = useRef(false);
   touchPadRef.current = !!touchPad;
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -2233,12 +2249,15 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   mutedRef.current = muted;
   const audioCtxRef = useRef<AudioContext | null>(null);
   const noiseBufRef = useRef<AudioBuffer | null>(null); // one shared buffer of white noise for all the "shhh" sounds
+  const hitboxesRef = useRef(false); // ?hitboxes=1 in the address: show the danger zones
   const tripBufRef = useRef<HTMLCanvasElement | null>(null); // a copy of the screen for the wobble
   const trollSoundRef = useRef<HTMLAudioElement | null>(null); // the boss-down sound, loaded once (not on the first kill)
   const deathSoundRef = useRef<HTMLAudioElement | null>(null);
   const stuttersRef = useRef<HTMLAudioElement | null>(null); // the secret Stutters remix
   if (stuttersRef.current) stuttersRef.current.muted = muted; // follows the iPod mute button
   const keepImgsRef = useRef<Record<string, HTMLImageElement>>({}); // Level 3 backdrop pictures
+  const fieldBgRef = useRef<HTMLImageElement | null>(null); // your painted PINK FIELDS background (public/game/pinkfields-bg.png)
+  const fieldBgCacheRef = useRef<HTMLCanvasElement | null>(null); // that picture at exactly the game's size, so each wiggle strip is a plain copy
   const weedBgRef = useRef<HTMLImageElement | null>(null); // your own Weedland background (public/game/weedland-bg.png)
   const levelMusicRef = useRef<HTMLAudioElement | null>(null); // Level 3 song
   const levelMusicOnRef = useRef(false); // told the page to pause its own music
@@ -2423,6 +2442,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     waxHide: false, // true only while that picture is being taken: you and your dog are left out of it
     waxTest: false, // started with the localhost 7 key: doesn't use up the once-per-run rip
     waxTrip: 0, // seconds left of the wobble + colours after the rip (0 = not on)
+    bgWiggle: 0, // 0 -> 1: how much the painted background is wiggling to the music (it eases in and out when music starts/stops)
     waxHue: 0, // where the colours have got to in their turn (it slows down as the effect fades)
     petSkin: "classic" as OutfitId, // the skin BOBO is wearing
     petSkins: [] as OutfitId[], // the BOBO skins you bought
@@ -5678,6 +5698,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       const inCrypt = Math.max(0, Math.min(1, (dc - KEEP_WINGS[1].from) / 10)) * Math.max(0, Math.min(1, (KEEP_WINGS[2].from - dc) / 10));
       s.dark += ((s.bossState === "fight" ? 0 : inCrypt) - s.dark) * Math.min(1, dt * 3);
     } else s.dark = 0;
+    // the painted background only wiggles while the music is really playing
+    s.bgWiggle += ((beatPropRef.current?.current.live ? 1 : 0) - s.bgWiggle) * Math.min(1, dt * 3);
     if (s.waxTrip > 0 && s.mode === "running") {
       // (only while you're really playing: the prize machine that opens right after the wax used to eat all of it)
       s.waxTrip = Math.max(0, s.waxTrip - dt);
@@ -5880,6 +5902,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       s.vx = 0;
     }
     const prevBottom = hy() + HB_H;
+    // Did you come DOWN onto it? Yes if you're falling (or just at the top of a jump) and either your feet are only just below its top, or
+    // they were ABOVE its top a moment ago. (The old rule only looked at how far your feet had sunk at the moment of contact. On a phone with
+    // a hiccup you fall further in one step, so a jump that clearly landed on an enemy could count as the enemy hitting you.)
+    const cameDown = (top: number, tol: number) => s.vy > -40 && (hy() + HB_H - top < tol || prevBottom <= top + 6);
     s.y += s.vy * dt;
     s.onGround = false;
     if (boxHits(hx(), hy(), HB_W, HB_H)) {
@@ -6429,7 +6455,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         }
         if (e.y > H + 20) e.alive = false;
         if (hx() + HB_W > e.x + 3 && hx() < e.x + BEAR_W - 3 && hy() + HB_H > e.y + 3 && hy() < e.y + BEAR_H) {
-          if (s.vy > 0 && hy() + HB_H - e.y < 12) {
+          if (cameDown(e.y, 12)) {
             s.vy = STOMP_BOUNCE;
             if ((e.timer ?? 0) <= 0) hitBear(e);
           } else if (s.invuln <= 0) {
@@ -6615,7 +6641,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       const px1 = hx();
       const py1 = hy();
       if (px1 + HB_W > e.x + 2 && px1 < e.x + ew - 2 && py1 + HB_H > e.y + 2 && py1 < e.y + 12) {
-        const falling = s.vy > 0 && py1 + HB_H - e.y < 10;
+        const falling = cameDown(e.y, 10);
         if (e.kind === "bong") {
           // A bong never hurts you
           if (e.vx !== 0) {
@@ -6720,7 +6746,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         const bx1 = lb.x + 8;
         const by1 = lb.y + 6;
         if (hx() + HB_W > bx1 && hx() < bx1 + SN_W - 16 && hy() + HB_H > by1 && hy() < lb.y + SN_H) {
-          const onTop = s.vy > 0 && hy() + HB_H - by1 < 14;
+          const onTop = cameDown(by1, 14);
           // while he's dizzy any landing on him counts (a jump from the side used to do nothing)
           const dazedStomp = lb.dazed > 0 && s.vy > 0 && hy() + HB_H - by1 < (SN_H - 6) * 0.7;
           if (dazedStomp) {
@@ -6774,7 +6800,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         const bx1 = lb.x + 6;
         const by1 = lb.y + 4;
         if (hx() + HB_W > bx1 && hx() < bx1 + EL_W - 12 && hy() + HB_H > by1 && hy() < by1 + EL_H - 8) {
-          if (s.vy > 0 && hy() + HB_H - by1 < 12) {
+          if (cameDown(by1, 12)) {
             s.vy = STOMP_BOUNCE;
             popup(lb.x + EL_W / 2, lb.y - 6, "NOPE!");
             playBump();
@@ -7033,7 +7059,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         // touching his body hurts, landing on his head hurts HIM (except the horned warrior)
         const bx = knightBox(kn);
         if (hx() + HB_W > bx.x1 && hx() < bx.x2 && hy() + HB_H > bx.y1 && hy() < bx.y2) {
-          const onTop = s.vy > 0 && hy() + HB_H - bx.y1 < 16 + Math.max(0, s.vy) * dt; // (+ how far you fall in one frame, so a slow computer can't fall through his head)
+          const onTop = cameDown(bx.y1, 16);
           if (onTop) {
             s.y = bx.y1 - HB_Y - HB_H - 1;
             if (kn.kind === "horned") {
@@ -7244,7 +7270,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           d.y += d.vy * dt;
           if (d.state !== "fly") continue;
           if (hx() + HB_W > d.x + 2 && hx() < d.x + 16 && hy() + HB_H > d.y + 1 && hy() < d.y + 10) {
-            if (s.vy > 0 && hy() + HB_H - d.y < 10) {
+            if (cameDown(d.y, 10)) {
               // you jumped on it
               s.vy = STOMP_BOUNCE;
               s.airJumped = false;
@@ -7281,7 +7307,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
             onFloor = true;
           }
           const touching = hx() + HB_W > c.x + 2 && hx() < c.x + 12 && hy() + HB_H > c.y + 2 && hy() < c.y + 12;
-          const onTop = s.vy > 0 && hy() + HB_H - c.y < 10;
+          const onTop = cameDown(c.y, 10);
           if (c.act === "ball") {
             // curled up: walk into it (or jump on it) to kick it. It never hurts you.
             if (c.timer <= 0) {
@@ -7559,7 +7585,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         const bx1 = b.x + bhx;
         const by1 = b.y + bhy;
         if (hx() + HB_W > bx1 && hx() < bx1 + bhw && hy() + HB_H > by1 && hy() < by1 + bhh) {
-          if (s.vy > 0 && hy() + HB_H - by1 < 12) {
+          if (cameDown(by1, 12)) {
             s.vy = STOMP_BOUNCE;
             popup(b.x + bw / 2, b.y - 6, "NOPE!");
             playBump();
@@ -8163,6 +8189,51 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     }
   };
 
+  // Your painted PINK FIELDS background, wiggling to the beat. Returns false if the picture isn't there (then the drawn hills are used).
+  const drawPaintedFields = (ctx: CanvasRenderingContext2D): boolean => {
+    const im = fieldBgRef.current;
+    if (!im || !im.complete || im.naturalWidth <= 0) return false;
+    const s = state.current;
+    // the picture shrunk to the game's height once, so every strip below is a quick 1:1 copy
+    const tw = Math.max(1, Math.round(H * (im.naturalWidth / im.naturalHeight)));
+    let cache = fieldBgCacheRef.current;
+    if (!cache || cache.width !== tw) {
+      cache = document.createElement("canvas");
+      cache.width = tw;
+      cache.height = H;
+      const cc = cache.getContext("2d");
+      if (!cc) return false;
+      cc.imageSmoothingEnabled = true;
+      cc.imageSmoothingQuality = "high";
+      cc.drawImage(im, 0, 0, tw, H);
+      fieldBgCacheRef.current = cache;
+    }
+    ctx.fillStyle = PINK_FIELDS_SKY;
+    ctx.fillRect(-4, -1200, W + 8, H + 1400); // (covers the screen when the camera scrolls up)
+    const off = (((s.cam * PINK_FIELDS_PARALLAX) % tw) + tw) % tw;
+    const beat = beatPropRef.current?.current;
+    const kick = beat && Number.isFinite(beat.kick) ? Math.max(0, beat.kick) : 0;
+    const sway = beat && Number.isFinite(beat.sway) ? beat.sway : 0;
+    const amp = (FIELD_WIGGLE_BASE + FIELD_WIGGLE_KICK * kick) * s.bgWiggle;
+    const strip = amp > 0.25 ? 2 : H; // (still: one copy. Wiggling: a thin strip at a time, each pushed sideways a little differently)
+    for (let y = 0; y < H; y += strip) {
+      let dx = 0;
+      if (strip < H) {
+        const wave = Math.sin(y * FIELD_WIGGLE_RIPPLE + s.t * 3.2) * amp + Math.sin(y * FIELD_WIGGLE_RIPPLE * 2.3 - s.t * 4.1) * amp * 0.4;
+        dx = Math.round(wave + sway * amp * 0.6); // (and the whole picture leans left, then right, with the beat)
+      }
+      let sx = (((off - dx) % tw) + tw) % tw;
+      let x = 0;
+      while (x < W) {
+        const w = Math.min(tw - sx, W - x);
+        ctx.drawImage(cache, sx, y, w, strip, x, y, w, strip);
+        x += w;
+        sx = 0;
+      }
+    }
+    return true;
+  };
+
   // A colour wash over the Keep's backdrop, different in each wing (it blends from one to the next over about 12 tiles)
   const drawWingTint = (ctx: CanvasRenderingContext2D) => {
     const s = state.current;
@@ -8265,6 +8336,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       return;
     }
 
+    if (zone === 0 && drawPaintedFields(ctx)) return; // your painted background (wiggles to the music)
     ctx.fillStyle = zone === Z_CLOUDS ? CLOUD_SKY : zone === Z_TREES ? TREE_SKY : zone === Z_SMOKE ? SMOKE_SKY : SCREEN;
     // Extended upward so it still fully covers the screen when the vertical camera scrolls up
     ctx.fillRect(-4, -1200, W + 8, H + 1400);
@@ -10969,6 +11041,21 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       }
     }
 
+    // ?hitboxes=1 (for testing): RED = touching this hurts you, GREEN = coming down on this counts as a stomp, BLUE = you
+    if (hitboxesRef.current) {
+      ctx.lineWidth = 1;
+      for (const e of s.enemies) {
+        if (!e.alive || e.kind === "bong") continue;
+        const ew = e.kind === "flyer" ? 18 : 14;
+        const ex = Math.round(e.x - cam);
+        ctx.strokeStyle = "rgba(60, 255, 90, 0.95)"; // the stomp zone: from a little above it down to where your feet can still be
+        ctx.strokeRect(ex + 0.5, Math.round(e.y) - 6 + 0.5, ew, 16);
+        ctx.strokeStyle = "rgba(255, 50, 50, 0.95)"; // the part that hurts
+        ctx.strokeRect(ex + 2 + 0.5, Math.round(e.y) + 2 + 0.5, ew - 4, 10);
+      }
+      ctx.strokeStyle = "rgba(70, 170, 255, 0.95)";
+      ctx.strokeRect(Math.round(s.x + HB_X - cam) + 0.5, Math.round(s.y + HB_Y) + 0.5, HB_W, HB_H);
+    }
     // the evil snowman's ice spikes: they form on the ceiling (glittering, a faint line shows where they'll land), then drop
     for (const ic of s.icicles) {
       const ix = Math.round(ic.x - cam);
@@ -11790,6 +11877,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const weedBg = new Image();
     weedBg.src = WEEDLAND_BG;
     weedBgRef.current = weedBg;
+    const fieldBg = new Image();
+    fieldBg.src = PINK_FIELDS_BG;
+    fieldBgRef.current = fieldBg;
     Object.entries(KEEP_IMAGES).forEach(([k, src]) => {
       const im = new Image();
       im.src = src;
@@ -12031,6 +12121,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     // "GAME" is how long the game's own code took. If a frame is long but GAME is small, the hiccup isn't the game
     // (it's the page behind it, the sound, or the graphics card).
     const perfOn = new URLSearchParams(window.location.search).get("perf") !== null;
+    hitboxesRef.current = new URLSearchParams(window.location.search).get("hitboxes") !== null; // ?hitboxes=1 draws every enemy's danger zone (red) and stomp zone (green)
     const perfGaps: number[] = [];
     const perfJs: number[] = [];
     const drawPerfMeter = (c: CanvasRenderingContext2D, gap: number, js: number) => {

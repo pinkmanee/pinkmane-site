@@ -11,6 +11,7 @@ import BirdGame from "./components/BirdGame";
 import HexGame from "./components/HexGame";
 import MazeGame from "./components/MazeGame";
 import SuperGame from "./components/SuperGame";
+import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -170,6 +171,17 @@ const TRACKS: { title: string; file: string; bpm?: number; offset?: number; link
   { title: "small pretty titties", file: "/music/01.mp3", bpm: 140, offset: 0, link: "" },
   { title: "vomit trap", file: "/music/08.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee/vomit-trap" },
   { title: "gods psp (ft. TOMBFELL)", file: "/music/09.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee/gods-psp" },
+];
+
+// PINKMANE VOID beats. These 5 join your songs in the music player ONLY while you're playing PINKMANE VOID on the handheld (PSP);
+// they leave the player again when you go back to the menu. Put the mp3 files in public/music/ with exactly these names
+// (until a file is there, that beat is simply skipped). Rename them, set the real bpm, add a SoundCloud link whenever you like.
+const VOID_BEATS: typeof TRACKS = [
+  { title: "pinkmane's random ass beat 2", file: "/music/beat-2.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
+  { title: "pinkmane's random ass beat 3", file: "/music/beat-3.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
+  { title: "pinkmane's random ass beat 4", file: "/music/beat-4.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
+  { title: "pinkmane's random ass beat 5", file: "/music/beat-5.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
+  { title: "pinkmane's random ass beat 6", file: "/music/beat-6.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
 ];
 
 // Where clicking the now-playing text goes: the song's own link, or a SoundCloud search for it
@@ -414,7 +426,8 @@ const HH_BG_MODES = [
   { label: "MODE 4", sources: ["/bg/mode3.png", "/topshelf.png"], focus: 0.15, glow: "248, 208, 202" },
 ];
 
-type BeatState = { kick: number; sway: number; bass: number; quake: number };
+// live = the music is really playing right now (not paused or muted): the game's painted background only wiggles then
+type BeatState = { kick: number; sway: number; bass: number; quake: number; live: boolean };
 
 const LIQUID_VERT = `
 attribute vec2 pos;
@@ -701,6 +714,11 @@ export default function Home() {
   const spinRef = useRef(0);
   // Pink Maze and Pinkmane Void play on a wide handheld instead of the iPod
   const handheld = playing && (activeGame === "maze" || activeGame === "super");
+  // The song list. In PINKMANE VOID on the handheld the VOID_BEATS are added after your songs (your songs keep their places in the list).
+  const inVoid = handheld && activeGame === "super";
+  const tracks = inVoid ? [...TRACKS, ...VOID_BEATS] : TRACKS;
+  const tracksRef = useRef(tracks);
+  tracksRef.current = tracks;
   // PHONES + TABLETS: on a phone or tablet, Pink Maze and Pinkmane Void get their own full-screen
   // layout with big thumb buttons instead of the drawn handheld.
   // Computers never get it, even laptops with a touch screen (they keep the drawn handheld + keyboard).
@@ -709,6 +727,7 @@ export default function Home() {
   const [padDir, setPadDir] = useState<string | null>(null); // which way the round pad is pushed (lights up its arrow)
   const [tpAOn, setTpAOn] = useState(false);
   const [tpBOn, setTpBOn] = useState(false);
+  const fsc = useFullscreen(); // FULL SCREEN (see components/Fullscreen.tsx)
   useEffect(() => {
     const forced = new URLSearchParams(window.location.search).get("touch") !== null;
     const mq = window.matchMedia("(pointer: coarse)");
@@ -748,7 +767,7 @@ export default function Home() {
   // The whole page; the beat clock writes the beat values onto it
   const mainRef = useRef<HTMLElement>(null);
   // The beat numbers, shared with the liquid background
-  const beatRef = useRef<BeatState>({ kick: 0, sway: 0, bass: 0, quake: QUAKE_DEFAULT / 10 });
+  const beatRef = useRef<BeatState>({ kick: 0, sway: 0, bass: 0, quake: QUAKE_DEFAULT / 10, live: false });
   // BASS QUAKE level (0-10) from the slider, and when it was last moved (for a test shake)
   const [quake, setQuake] = useState(QUAKE_DEFAULT);
   const quakeRef = useRef(QUAKE_DEFAULT);
@@ -797,10 +816,11 @@ export default function Home() {
   const loadAndPlay = (i: number) => {
     const audio = songRef.current;
     if (!audio) return;
-    const idx = (i + TRACKS.length) % TRACKS.length;
+    const list = tracksRef.current;
+    const idx = (i + list.length) % list.length;
     trackRef.current = idx;
     setTrackIndex(idx);
-    audio.src = TRACKS[idx].file;
+    audio.src = list[idx].file;
     audio
       .play()
       .then(() => {
@@ -808,6 +828,20 @@ export default function Home() {
       })
       .catch(() => {});
   };
+
+  // Leaving PINKMANE VOID: the beats leave the player too. If one is on, go back to your first song (and keep it paused if it was paused).
+  useEffect(() => {
+    if (inVoid || trackRef.current < TRACKS.length) return;
+    const audio = songRef.current;
+    if (audio && !audio.paused) {
+      loadAndPlay(0);
+    } else {
+      trackRef.current = 0;
+      setTrackIndex(0);
+      if (audio) audio.src = TRACKS[0].file;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inVoid]);
 
   // Sends a music button press to the game (when a level song is playing)
   const gameMusic = (cmd: "next" | "prev" | "toggle") => {
@@ -1317,7 +1351,7 @@ export default function Home() {
       const dt = Math.min(0.1, (now - prev) / 1000);
       prev = now;
       const audio = songRef.current;
-      const track = TRACKS[trackRef.current] ?? TRACKS[0];
+      const track = tracksRef.current[trackRef.current] ?? TRACKS[0];
       const secondsPerBeat = 60 / (track.bpm && track.bpm > 0 ? track.bpm : DEFAULT_BPM);
       put("--beat", `${secondsPerBeat.toFixed(4)}s`);
 
@@ -1414,6 +1448,7 @@ export default function Home() {
       beatRef.current.sway = sway;
       beatRef.current.bass = bass;
       beatRef.current.quake = level10 / 10;
+      beatRef.current.live = live;
       frame = requestAnimationFrame(tick);
     };
 
@@ -1443,7 +1478,7 @@ export default function Home() {
     };
     // If a song file is missing, skip it (but don't loop forever)
     const onError = () => {
-      if (errorCountRef.current < TRACKS.length) {
+      if (errorCountRef.current < tracksRef.current.length) {
         errorCountRef.current += 1;
         loadAndPlay(trackRef.current + 1);
       }
@@ -1592,6 +1627,7 @@ activeGame === "maze" ? (
                   fontFamily={pixelFont.style.fontFamily}
                   muted={isMuted}
                   touchPad={isTouch}
+                  beatRef={beatRef}
                 />
               ) : activeGame === "hex" ? (
                 <HexGame
@@ -1731,10 +1767,11 @@ activeGame === "maze" ? (
       gameMusic(dir > 0 ? "next" : "prev");
       return;
     }
-    const idx = (((trackRef.current + dir) % TRACKS.length) + TRACKS.length) % TRACKS.length;
+    const list = tracksRef.current;
+    const idx = (((trackRef.current + dir) % list.length) + list.length) % list.length;
     if (dir > 0) nextTrack();
     else prevTrack();
-    showOsd({ kind: "text", value: 0, text: `♪ ${TRACKS[dir > 0 ? idx : trackRef.current].title.toUpperCase()}` });
+    showOsd({ kind: "text", value: 0, text: `♪ ${(list[dir > 0 ? idx : trackRef.current] ?? TRACKS[0]).title.toUpperCase()}` });
   };
   const hhPlay = () => {
     const paused = gameSongRef.current ? gameSongRef.current.paused : isPaused;
@@ -1826,7 +1863,7 @@ activeGame === "maze" ? (
 
   // While a game level plays its own song, the ticker and the play/pause buttons show that song
   const musicPaused = gameSong ? gameSong.paused : isPaused;
-  const tickerSong = gameSong ? `${gameSong.artist} - ${gameSong.title}` : TRACKS[trackIndex].title.toUpperCase();
+  const tickerSong = gameSong ? `${gameSong.artist} - ${gameSong.title}` : (tracks[trackIndex] ?? TRACKS[0]).title.toUpperCase();
   const tickerText = `${musicPaused ? "PAUSED" : "NOW PLAYING"}: ${tickerSong} ✦   `;
 
   return (
@@ -2248,12 +2285,12 @@ activeGame === "maze" ? (
           {/* Now-playing ticker: click it to open that song on SoundCloud */}
           <a
             className="ticker-wrap"
-            href={trackLink(TRACKS[trackIndex])}
+            href={trackLink(tracks[trackIndex] ?? TRACKS[0])}
             target="_blank"
             rel="noopener noreferrer"
             onMouseDown={noFocus}
             onClick={(e) => e.currentTarget.blur()}
-            aria-label={`Listen to ${TRACKS[trackIndex].title} on SoundCloud`}
+            aria-label={`Listen to ${(tracks[trackIndex] ?? TRACKS[0]).title} on SoundCloud`}
             title="Listen on SoundCloud"
           >
             <div
@@ -2510,6 +2547,11 @@ activeGame === "maze" ? (
             {activeGame === "super" && (
               <button className="tp-small" onClick={() => tapKey("Escape")} aria-label="Pause">
                 PAUSE
+              </button>
+            )}
+            {fsc.show && (
+              <button className="tp-small" onClick={fsc.toggle} aria-label={fsc.isFullscreen ? "Leave full screen" : "Full screen"}>
+                {fsc.isFullscreen ? "SMALL" : "FULL"}
               </button>
             )}
           </div>
@@ -2972,6 +3014,12 @@ activeGame === "maze" ? (
           </div>
         </div>
       )}
+
+      {/* FULL SCREEN: a small corner button on the menus (phones + tablets), and the "how to" popup where the browser can't do it itself */}
+      {isTouch && !handheld && fsc.show && (
+        <FullscreenCornerButton onClick={fsc.toggle} isFullscreen={fsc.isFullscreen} className={pixelFont.className} />
+      )}
+      {fsc.helpOpen && <InstallHelp onClose={fsc.closeHelp} isIOS={fsc.isIOS} className={pixelFont.className} />}
 
       <style jsx global>{`
         html,
