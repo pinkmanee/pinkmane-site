@@ -23,10 +23,11 @@ export const GAMES: Record<string, GameCfg> = {
   // Pink Hexagon scores are survival time in hundredths of a second
   hex: { key: "pinkhex:scores", rate: 101, base: 50, max: 2000000 },
   maze: { key: "pinkmaze:scores", rate: 150, base: 5000, max: 1000000 },
-  // PINKMANE VOID, infinite run. rate = the most grams per second a run can average.
-  // It was 60. With the STASH SPIN prizes (SPEED, more monsters per prize, LEAF LUCK) a very good run
-  // can now go well past that, so it's 200. Wax mode (grams count double) will need it raised again.
-  super: { key: "pinksuper:scores", rate: 200, base: 500, max: 1000000 },
+  // PINKMANE VOID, infinite run. rate = the most grams per second a run can average, max = the biggest score at all.
+  // It was 60 before the STASH SPIN prizes. With every prize plus the SWARM curse a perfect run tops out
+  // around 525 a second, and WAX MODE (after 20k) doubles every gram, so it's 1100.
+  // max went from 1 million to 5 million for the same reason: a long wax run can pass a million honestly.
+  super: { key: "pinksuper:scores", rate: 1100, base: 500, max: 5000000 },
 };
 
 for (let n = 1; n <= LEVEL_COUNT; n++) {

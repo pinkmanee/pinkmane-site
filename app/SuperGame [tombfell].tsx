@@ -34,9 +34,7 @@ type Mode =
   | "levelDone" // you hit the bong
   | "shop" // the PINK SHOP (from the pink start screen)
   | "cards" // your BOSS CARDS (from the pink start screen)
-  | "bossIntro" // frozen on a boss's card right before his fight
-  | "spin" // the STASH SPIN prize machine (PINK RUN INFINITE only): the run is frozen while you pick a prize
-  | "wax"; // the wax moment (PINK RUN INFINITE only): frozen on the wax bong hit after the 20k boss
+  | "bossIntro"; // frozen on a boss's card right before his fight
 
 // The pause (Esc) menu, top to bottom
 const PAUSE_OPTIONS = ["RESUME", "RESTART", "PICK OUTFIT", "SHOP", "GAME TYPE", "HOME"];
@@ -88,8 +86,7 @@ type Heart = { x: number; y: number; taken: boolean };
 type PowerKind = "fire" | "ice" | "double" | "spike";
 type PowerUp = { x: number; y: number; vx: number; vy: number; kind: PowerKind };
 // spike = one spike of a SPIKE SHOT, volley = which burst it belongs to (a burst can only hurt a boss once)
-// pierced = how many monsters this shot already went through (PIERCING SHOTS prize), pet = a little shot from your dog
-type Fireball = { x: number; y: number; vx: number; vy: number; life: number; ice: boolean; spike?: boolean; volley?: number; pierced?: number; pet?: boolean };
+type Fireball = { x: number; y: number; vx: number; vy: number; life: number; ice: boolean; spike?: boolean; volley?: number };
 type Particle = { x: number; y: number; vx: number; vy: number; color: string; life: number };
 type Popup = { x: number; y: number; text: string; life: number };
 type Entry = { name: string; score: number };
@@ -127,9 +124,6 @@ const STOMP_BOUNCE = -240;
 // Lives are hearts: you start with 2 and can collect up to 4
 const START_LIVES = 2;
 const MAX_LIVES = 4;
-// (those two are for the PINK LEVELS.) PINK RUN INFINITE: you start with 3 hearts and 3 is also the most
-// you can hold. The EXTRA HEART spin prize makes it 4.
-const RUN_LIVES = 3;
 
 // Zones change every this many tiles, each with its own look and harder jumping
 const ZONE_LEN = 150;
@@ -226,40 +220,11 @@ const STUTTERS_LINK = "";
 const GOLD_KEY = "pinksuper-golden"; // remembers you've found it before
 
 // ---------- Boss: the troll ----------
-const BOSS_EVERY = 5000; // a boss every 5,000 grams: 5k, 10k, 15k, 20k ...
-// ... and they take turns: the green troll (5k), the purple giant (10k), TOMBFELL (15k), then the troll again (20k) ...
-const RUN_BOSSES = ["troll", "giant", "tombfell"] as const;
-const bossKindAt = (count: number) => RUN_BOSSES[count % RUN_BOSSES.length];
-// TOMBFELL in the infinite run is the quick version of his Level 4 fight: only the cats part.
-// Cats drop in, you jump on one so it curls up, then kick the ball into him.
-const RUN_TOMB_HP = 3; // kicked cats it takes
-const PTS_TOMB = 1500;
-// ---------- The wax moment ----------
-// Right after the boss at 20,000 grams falls, the game stops for a wax bong hit. From then on it's WAX MODE:
-// every gram counts double and the colours slowly breathe brighter and darker.
-const WAX_AT = 20000;
-const WAX_DELAY = 1.4; // seconds after the boss falls before the wax moment starts (so you can read TROLL DOWN)
-const WAX_LINE_1 = "YOU SMOKED 20K GRAMS.";
-const WAX_LINE_2 = "U NEED SOME WAX AT THIS POINT";
-const WAX_LINE_3 = "WAX MODE: GRAMS COUNT DOUBLE";
-// when things happen in the wax moment (seconds)
-const WAX_T_LINE2 = 1.3;
-const WAX_T_HEAT = 2.6; // the torch
-const WAX_T_HIT = 3.4; // the bubbling
-const WAX_T_EXHALE = 5.2; // the smoke (from here on jump / OK skips the rest)
-const WAX_T_END = 8.6;
-const WAX_PULSE_SECONDS = 6; // WAX MODE: one slow breath of the colours (brighter, then darker) takes this long
-const WAX_PULSE_BRIGHT = 0.16; // how strong the bright half is (0 = off)
-const WAX_PULSE_DARK = 0.3; // how strong the dark half is (0 = off)
+const BOSS_EVERY = 10000; // a troll at 10k, 20k, 30k ...
 const BOSS_HP_START = 8; // hits the first troll takes
 const BOSS_HP_STEP = 3; // each next troll takes this many more
 const BOSS_SPEED_STEP = 0.25; // each next troll is 25% faster
-const BOSS_SPARE_SHOTS = 2; // Level 1 + 2 bosses only: you get this many more shots than they need
-// Troll + giant fights: you only START with this many shots, so you can't just stand there and spam.
-// The rest come from the two ? stash boxes, one at each end of the arena (+3 shots each).
-// He stands between you and the other box, so you have to jump over him to reload.
-const BOSS_START_SHOTS = 3;
-const BOSS_BOX_REFILL = 10; // seconds until the used stash boxes fill up again
+const BOSS_SPARE_SHOTS = 2; // you get this many more shots than he needs
 const TROLL_DEATH_SOUND = "/sounds/trolldeath.mp3";
 const BOSS_ARENA = 21; // tiles wide (exactly one screen, now that the screen is wider)
 const TROLL_SPEED = 38; // slower than you (you run at 100)
@@ -286,282 +251,6 @@ const GIANT_SPEED_MULT = 0.7; // bigger, so a little slower than the regular tro
 const GIANT_DAZE_TIME = 3.5; // seconds you have to jump on his head once he's down
 const GIANT_DAZE_HP = 3; // miss the window and he gets back up with this much health
 const PTS_GIANT = 2000;
-
-// =====================================================================================
-// STASH SPIN: the prize machine (PINK RUN INFINITE only, the levels never see it)
-// =====================================================================================
-// After every second zone the run freezes, three reels spin and you keep ONE of the three prizes.
-// After a troll or giant you get a BOSS SPIN: the rarer prizes show up more often there.
-// Three matching reels = JACKPOT: that prize counts twice.
-// Every prize stacks up to 3 times, shows as a little icon at the bottom left, and is gone when the run ends.
-type PerkId =
-  | "speed" | "leafLuck" | "shield" | "heart" | "stash" | "magnet" // the first six
-  | "pierce" | "airJump" | "coinLuck" | "jetSip" | "revive" | "pet" // piece 3
-  | "swarm" | "greed"; // the curses: a downside with an upside
-type ReelId = PerkId | "snack"; // snack = the brownie, only shown when there are fewer than 3 prizes left to offer
-const PERK_MAX = 3; // how many times one prize can stack (a few rare ones say max: 1 in the list below)
-const SPIN_EVERY_ZONES = 2; // a spin after every this many zones
-const SPIN_JACKPOT = 0.06; // chance that all three reels match (0.06 = 6%)
-const SPIN_JACKPOT_BOSS = 0.18; // the same chance on a BOSS SPIN
-const SPIN_REEL_STOPS = [1.0, 1.6, 2.2]; // seconds until the 1st, 2nd and 3rd reel stop
-const SPIN_LOCK = 0.45; // after the last reel stops the buttons are ignored this long (a held jump can't pick by accident)
-const SPIN_TAKE_TIME = 0.9; // the prize you took glows this long, then the run carries on
-const SPIN_BOSS_DELAY = 1.6; // seconds after the boss falls before the BOSS SPIN opens (so you can read TROLL DOWN)
-// What one stack of each prize does
-const SPEED_STEP = 0.15; // SPEED: +15% run speed per stack
-const LEAF_LUCK_STEP = 0.08; // LEAF LUCK: floating bricks hold a ? stash box 15% of the time, +8% per stack
-const STASH_AMMO_STEP = 2; // BIGGER STASH: +2 shots per power leaf per stack (spikes and boss stash boxes: +1)
-const STASH_TIME_STEP = 5; // BIGGER STASH: +5 seconds on the fire timer per stack
-const MAGNET_RANGE = [0, 44, 66, 90]; // MAGNET: how far away (pixels) leaves and coins get pulled in, for 0 / 1 / 2 / 3 stacks
-const MAGNET_PULL = 190; // how fast they fly to you
-// Balance: every prize you take makes the rest of the run a bit harder
-const PERK_ENEMY_STEP = 0.05; // +5% monsters per prize you hold ...
-const PERK_ENEMY_CAP = 1; // ... up to +100% (double)
-const PERK_BOSS_HP = 0.5; // trolls and giants: +1 hit for every 2 prizes you hold ...
-const PERK_BOSS_HP_CAP = 8; // ... up to +8 hits
-const MONSTER_MAX = 4; // monsters never get more than this many times denser than at the very start, whatever you hold
-// The run keeps getting harder after 20k grams (it used to stop there):
-const HARD_STEP = 0.2; // every 10,000 grams past 20k: this much more monsters and monster speed ...
-const HARD_MAX = 2.4; // ... up to this (reached at 60k). 1 = the very start, 1.6 = what 20k was already
-const HARD_SPEED_MAX = 2; // monsters never walk or fly faster than this many times their starting speed
-// The second batch of prizes
-const COIN_LUCK_STEP = 0.03; // COIN LUCK: 7% of leaves are gold coins, +3% per stack
-const JET_SIP_SECONDS = 2; // JETPACK SIP: seconds of fuel per stack, refilled in every new zone
-const REVIVE_LIVES = 2; // SECOND WIND: hearts you get back up with
-// The curses
-const SWARM_MONSTERS = 1.4; // SWARM: 40% more monsters ...
-const SWARM_PAY = 2; // ... but every monster pays double grams
-const GREED_COINS = 2; // GREED: no new hearts appear in the run, but every gold coin counts as 2
-// ---------- The pet: a small fluffy white bichon (the BICHON prize) ----------
-// Level 1: follows you and fires a little shot whenever you shoot. Level 2: also shoots by itself.
-// Level 3: also fetches leaves. Its shots only hurt normal monsters, never a troll or giant.
-const PET_W = 16;
-const PET_H = 13;
-const PET_TRAIL = 10; // how far behind you it runs (bigger = further back)
-const PET_SHOT_SPEED = 220;
-const PET_SHOT_LIFE = 0.9; // seconds a pet shot flies
-const PET_AUTO = 3; // level 2: seconds between the shots it fires by itself
-const PET_AUTO_RANGE = 130; // ... at a monster this close (pixels)
-const PET_FETCH_RANGE = 80; // level 3: how far away it spots a leaf
-const PET_FETCH_SPEED = 230;
-// two frames (the legs move). W = white fur, g = grey shading, P = tongue
-const BICHON = [
-  [
-    ".........KKKKK..",
-    "........KWWWWWK.",
-    ".KK....KWWWWWWWK",
-    "KWWK...KWWKWWKWK",
-    "KWWWK..KWWWWKWWK",
-    ".KWWKKKKgWWWPWgK",
-    "..KWWWWWKgWWWgK.",
-    ".KWWWWWWWKKKKK..",
-    ".KWWWWWWWWWWK...",
-    ".KgWWWWWWWWgK...",
-    "..KgWKKKKKWgK...",
-    "..KWWK...KWWK...",
-    "..KKKK...KKKK...",
-  ],
-  [
-    ".........KKKKK..",
-    "........KWWWWWK.",
-    ".KK....KWWWWWWWK",
-    "KWWK...KWWKWWKWK",
-    "KWWWK..KWWWWKWWK",
-    ".KWWKKKKgWWWPWgK",
-    "..KWWWWWKgWWWgK.",
-    ".KWWWWWWWKKKKK..",
-    ".KWWWWWWWWWWK...",
-    ".KgWWWWWWWWgK...",
-    "..KWgKKKKKgWK...",
-    "...KWWK.KWWK....",
-    "...KKKK.KKKK....",
-  ],
-];
-const BICHON_LEFT = BICHON.map((frame) => frame.map((row) => row.split("").reverse().join("")));
-const BICHON_COLORS = { K: "#111111", W: "#ffffff", g: "#d9d9e6", P: "#ff5fc8" };
-const PET_SPARKS = ["#ffffff", "#ffd6f0", "#ff5fc8", "#ffffff"];
-
-// art = the 9 x 9 pixel icon. weight = how often it shows up on a normal spin, bossWeight = on a BOSS SPIN
-// (a bigger number = more often). To make a prize rarer, lower its weight.
-// max = how many times it stacks (left out = 3). curse = a prize with a downside (shown in red, never a jackpot).
-// bossFrom = see below (the SHIELD uses it).
-// infoAt = a different description for each level (the bichon learns something new each time).
-type PerkDef = {
-  id: ReelId;
-  name: string;
-  info: [string, string];
-  weight: number;
-  bossWeight: number;
-  art: string[];
-  colors: Record<string, string>;
-  max?: number;
-  bossFrom?: number; // once you hold this many, more of it only comes from the gold BOSS SPIN
-  curse?: boolean;
-  infoAt?: [string, string][];
-};
-const PERKS: PerkDef[] = [
-  {
-    id: "speed",
-    name: "SPEED",
-    info: ["RUN FASTER.", "RISKY: LESS TIME TO REACT"],
-    weight: 10,
-    bossWeight: 4,
-    art: ["....KKKKK", "...KYYYK.", "..KYYYK..", ".KYYYKKK.", ".KYYYYYK.", "..KKKYYK.", "...KYYK..", "...KYK...", "...KK...."],
-    colors: { K: "#111111", Y: "#ffc800" },
-  },
-  {
-    id: "leafLuck",
-    name: "LEAF LUCK",
-    info: ["MORE ? STASH BOXES", "WITH POWER LEAVES"],
-    weight: 10,
-    bossWeight: 6,
-    art: ["....K....", "...KGK...", ".K.KGK.K.", "KGKGGGKGK", "KGGGYGGGK", ".KGGGGGK.", "..KKDKK..", "....D....", "....D...."],
-    colors: { K: "#111111", G: "#ff7a00", Y: "#ffc800", D: "#8a4a00" },
-  },
-  {
-    id: "shield",
-    name: "SHIELD",
-    info: ["A BUBBLE BLOCKS 1 HIT.", "COMES BACK EVERY ZONE"],
-    weight: 5,
-    bossWeight: 12,
-    max: 2,
-    bossFrom: 1, // the 2nd bubble only comes out of the gold BOSS SPIN
-    art: ["..CCCCC..", ".CcccccC.", "CcWWccccC", "CcWcccccC", "CcccccccC", "CcccccccC", "CccccccbC", ".CcccbbC.", "..CCCCC.."],
-    colors: { C: "#1d4fa8", c: "#bfe3ff", W: "#ffffff", b: "#4aa3ff" },
-  },
-  {
-    id: "heart",
-    name: "EXTRA HEART",
-    info: ["A 4TH HEART,", "AND IT COMES FILLED"],
-    weight: 4,
-    bossWeight: 12,
-    max: 1,
-    art: [".KK...KK.", "KPPK.KPPK", "KPPPKPPPK", "KPPPWPPPK", "KPPWWWPPK", ".KPPWPPK.", "..KPPPK..", "...KPK...", "....K...."],
-    colors: { K: "#111111", P: "#d63cc8", W: "#ffffff" },
-  },
-  {
-    id: "stash",
-    name: "BIGGER STASH",
-    info: ["MORE SHOTS PER LEAF,", "LONGER FIRE TIMER"],
-    weight: 8,
-    bossWeight: 8,
-    art: ["..KKKKK..", "..KLLLK..", ".KKKKKKK.", ".KWGgGgK.", ".KWgGgGK.", ".KGGgGgK.", ".KGgGgGK.", ".KgGgGgK.", ".KKKKKKK."],
-    colors: { K: "#111111", L: "#d63cc8", G: "#5cb84a", g: "#2e6e28", W: "#ebffeb" },
-  },
-  {
-    id: "magnet",
-    name: "MAGNET",
-    info: ["LEAVES AND COINS", "FLY TO YOU"],
-    weight: 10,
-    bossWeight: 6,
-    art: ["KKK...KKK", "KWK...KWK", "KKK...KKK", "KRK...KRK", "KRK...KRK", "KRKK.KKRK", "KRRKKKRRK", ".KRRRRRK.", "..KKKKK.."],
-    colors: { K: "#111111", R: "#e0303a", W: "#f7f7fb" },
-  },
-  {
-    id: "pierce",
-    name: "PIERCING SHOTS",
-    info: ["SHOTS GO THROUGH MONSTERS:", "1 MORE MONSTER PER LEVEL"],
-    weight: 7,
-    bossWeight: 8,
-    art: ["....K....", "....KK...", "KKKKKOK..", "KOOOOOOK.", "KOYYYYYOK", "KOOOOOOK.", "KKKKKOK..", "....KK...", "....K...."],
-    colors: { K: "#111111", O: "#ff7a00", Y: "#ffc800" },
-  },
-  {
-    id: "airJump",
-    name: "AIR JUMP",
-    info: ["ONE FREE EXTRA JUMP", "EVERY TIME YOU'RE IN THE AIR"],
-    weight: 2,
-    bossWeight: 9,
-    max: 1,
-    art: ["....K....", "...KTK...", "..KTTTK..", ".KTTTTTK.", "KKKTTTKKK", "..KTTTK..", "..KTTTK..", "..KKKKK..", ".W..W..W."],
-    colors: { K: "#111111", T: "#3de0c8", W: "#ffffff" },
-  },
-  {
-    id: "coinLuck",
-    name: "COIN LUCK",
-    info: ["MORE GOLD COINS", "FOR THE SHOP"],
-    weight: 8,
-    bossWeight: 4,
-    art: ["..KKKKK..", ".KYYYYYK.", "KYWYYYYYK", "KYWYDDYYK", "KYYYDDYYK", "KYYYDDYYK", "KYYYYYYYK", ".KYYYYYK.", "..KKKKK.."],
-    colors: { K: "#111111", Y: "#ffd700", W: "#fff3a0", D: "#b8860b" },
-  },
-  {
-    id: "jetSip",
-    name: "JETPACK SIP",
-    info: ["A SIP OF JETPACK FUEL", "EVERY ZONE. HOLD JUMP!"],
-    weight: 6,
-    bossWeight: 8,
-    art: ["..KKKKK..", ".KPPPPPK.", ".KPWWPPK.", ".KPPPPPK.", ".KPPPPPK.", ".KpppppK.", ".KgKKKgK.", "..O...O..", "..Y...Y.."],
-    colors: { K: "#111111", P: "#d63cc8", p: "#8a1f86", W: "#ffffff", g: "#78788a", O: "#ff7a00", Y: "#ffc800" },
-  },
-  {
-    id: "revive",
-    name: "SECOND WIND",
-    info: ["DIE ONCE AND GET BACK UP", "WITH 2 HEARTS"],
-    weight: 2,
-    bossWeight: 9,
-    max: 1,
-    art: [".........", "WW.K.K.WW", "WWKPKPKWW", ".WKPPPKW.", "..KPWPK..", "..KPPPK..", "...KPK...", "....K....", "........."],
-    colors: { K: "#111111", P: "#d63cc8", W: "#ffffff" },
-  },
-  {
-    id: "pet",
-    name: "BICHON",
-    info: ["A FLUFFY DOG FOLLOWS YOU", "AND SHOOTS WHEN YOU SHOOT"],
-    infoAt: [
-      ["A FLUFFY DOG FOLLOWS YOU", "AND SHOOTS WHEN YOU SHOOT"],
-      ["YOUR DOG NOW ALSO SHOOTS", "BY ITSELF"],
-      ["YOUR DOG NOW ALSO", "FETCHES LEAVES"],
-    ],
-    weight: 4,
-    bossWeight: 10,
-    art: [".KK.K.KK.", "KWWKWKWWK", "KWWWWWWWK", "KWKWWWKWK", "KWWWKWWWK", "KgWWPWWgK", "KgWWWWWgK", ".KgWWWgK.", "..KKKKK.."],
-    colors: { K: "#111111", W: "#ffffff", g: "#d9d9e6", P: "#ff5fc8" },
-  },
-  {
-    id: "swarm",
-    name: "SWARM",
-    info: ["40% MORE MONSTERS, BUT", "KILLS PAY DOUBLE GRAMS"],
-    weight: 3,
-    bossWeight: 3,
-    max: 1,
-    curse: true,
-    art: ["..KKKKK..", ".KWWWWWK.", "KWWWWWWWK", "KWRRWRRWK", "KWRRWRRWK", "KWWWKWWWK", ".KWWWWWK.", ".KWKWKWK.", "..K.K.K.."],
-    colors: { K: "#111111", W: "#e8e0f0", R: "#e0303a" },
-  },
-  {
-    id: "greed",
-    name: "GREED",
-    info: ["NO NEW HEARTS APPEAR, BUT", "GOLD COINS COUNT DOUBLE"],
-    weight: 3,
-    bossWeight: 3,
-    max: 1,
-    curse: true,
-    art: ["..KKKKK..", ".KYYYYYK.", "KYKKYKKYK", "KYKKKKKYK", "KYKKKKKYK", "KYYKKKYYK", "KYYYKYYYK", ".KYYYYYK.", "..KKKKK.."],
-    colors: { K: "#111111", Y: "#ffd700" },
-  },
-];
-// The filler: only on the reels once fewer than 3 prizes are left to offer (everything else is maxed out)
-const SNACK: PerkDef = {
-  id: "snack",
-  name: "BROWNIE",
-  info: ["+1 HEART RIGHT NOW", ""],
-  weight: 0,
-  bossWeight: 0,
-  art: [".........", ".KKKKKKK.", "KBBBBBBBK", "KBGBBBGBK", "KBBBBBBBK", "KBBGBBBBK", "KbbbbbbbK", ".KKKKKKK.", "........."],
-  colors: { K: "#111111", B: "#8a5a2b", b: "#5a3a1a", G: "#6fdc5a" },
-};
-const perkDef = (id: ReelId): PerkDef => PERKS.find((p) => p.id === id) ?? SNACK;
-const perkMax = (p: PerkDef) => p.max ?? PERK_MAX;
-// A run starts with none of them
-const noPerks = (): Record<PerkId, number> => ({
-  speed: 0, leafLuck: 0, shield: 0, heart: 0, stash: 0, magnet: 0,
-  pierce: 0, airJump: 0, coinLuck: 0, jetSip: 0, revive: 0, pet: 0,
-  swarm: 0, greed: 0,
-});
-// The machine's place on the screen (the three reel windows)
-const SPIN_WIN = { x: 64, y: 35, w: 60, h: 44, step: 74 };
-const SHIELD_COLORS = ["#9fe8ff", "#bfe3ff", "#4aa3ff", "#ffffff"];
 
 const MY_GOATS = ["LIL PEEP", "YUNG LEAN", "GHOSTEMANE", "WARLORD COLOSSUS", "SMOKEDOPE2016", "DRIPPIN SO PRETTY"];
 // Second sign, further left behind the jetpack
@@ -985,7 +674,6 @@ type Tomb = {
   // the giant bear: enter = walking in, paw = stamping (warning), charge = running, dizzy = crashed
   bear: null | { x: number; dir: number; act: "enter" | "paw" | "charge" | "dizzy"; timer: number };
   fallen: boolean; // part 3: he fell off the bear (now your shots hurt him)
-  short?: boolean; // the quick fight in PINK RUN INFINITE: cats only, he never moves on to the bear
 };
 
 // ---- Level 4 pixel art. One letter = one pixel, the colours are listed right below each picture. ----
@@ -1370,7 +1058,7 @@ type BossId = "troll" | "giant" | "leaf" | "snowman" | "horned" | "skeleton" | "
 type BossCard = { id: BossId; main?: boolean; name: string; moves: string[]; weak: string; where: string; color: string; sky: string; ground: string };
 const ALL_BOSS_CARDS: BossCard[] = [
   { id: "troll", name: "TROLL", moves: ["CHASES YOU DOWN", "JUMPS AT YOU"], weak: "WEAK: YOUR SHOTS", where: "INFINITE RUN", color: "#8fce5a", sky: "#d7efbc", ground: "#2e9e3a" },
-  { id: "giant", name: "GIANT", moves: ["BIGGER + TOUGHER", "GETS BACK UP"], weak: "WEAK: SHOTS+STOMP", where: "INFINITE RUN", color: "#b06ce0", sky: "#e6d3f7", ground: "#4a2a6a" },
+  { id: "giant", name: "GIANT", moves: ["BIGGER + TOUGHER", "GETS BACK UP"], weak: "WEAK: SHOTS+STOMP", where: "INFINITE RUN", color: "#e0913c", sky: "#f6d9a8", ground: "#8a5a2b" },
   { id: "leaf", main: true, name: "EVIL LEAF", moves: ["FLIES ABOVE YOU", "DIVES AT YOU"], weak: "WEAK: YOUR SHOTS", where: "LEVEL 1", color: "#5ab85a", sky: "#c8f5b0", ground: "#2d4a22" },
   { id: "snowman", main: true, name: "EVIL SNOWMAN", moves: ["COLD HORNED BRUTE", "GETS DIZZY"], weak: "WEAK: SHOTS+STOMP", where: "LEVEL 2", color: "#8fc8ee", sky: "#dff2ff", ground: "#ffffff" },
   { id: "horned", name: "HORNED WARRIOR", moves: ["SWINGS HIS MACE", "RAGES WHEN HURT"], weak: "WEAK: YOUR SHOTS", where: "LEVEL 3", color: "#c8684a", sky: "#3a1418", ground: "#55505a" },
@@ -1386,7 +1074,7 @@ const CARD_H = 148;
 // The boss's own pixel picture (the giant is the troll drawn bigger)
 function bossArt(id: BossId): { rows: string[]; colors: Record<string, string>; scale: number } {
   if (id === "troll") return { rows: TROLL, colors: TROLL_COLORS, scale: 2 };
-  if (id === "giant") return { rows: GIANT_ROWS, colors: GIANT_COLORS, scale: 3 };
+  if (id === "giant") return { rows: TROLL, colors: TROLL_COLORS, scale: 3 };
   if (id === "leaf") return { rows: EVIL_LEAF, colors: EVIL_COLORS, scale: 2 };
   if (id === "snowman") return { rows: EVIL_SNOWMAN, colors: EVIL_SNOWMAN_COLORS, scale: 2 };
   if (id === "horned") return { rows: KN_HORNED, colors: KN_HORNED_COLORS, scale: 2 };
@@ -1670,7 +1358,7 @@ const POWER_COLORS: Record<PowerKind, [string, string]> = {
 };
 // The spark colours that go with a spell / a shot
 const powerSparks = (kind: string) => (kind === "spike" ? SPIKE : kind === "ice" ? ICE : kind === "double" ? TURQ : FIRE);
-const shotSparks = (f: Fireball) => (f.pet ? PET_SPARKS : f.spike ? SPIKE : f.ice ? ICE : FIRE);
+const shotSparks = (f: Fireball) => (f.spike ? SPIKE : f.ice ? ICE : FIRE);
 // The little shot icons at the top of the screen: [main colour, shine]
 const hudShot = (power: string): [string, string] =>
   power === "spike" ? ["#b050f0", "#ffffff"] : power === "ice" ? ["#4aa3ff", "#ffffff"] : ["#ff7a00", "#ffc800"];
@@ -1806,32 +1494,6 @@ const TROLL_COLORS: Record<string, string> = {
   c: "#5f3720",
   N: "#5a321e",
 };
-// The giant (every second boss) is the same body in purple, with a pair of horns on top.
-const GIANT_COLORS: Record<string, string> = {
-  ...TROLL_COLORS,
-  G: "#8a4fc0",
-  g: "#56288a",
-  L: "#b98ae6",
-  T: "#ff7ad9",
-  t: "#c83ca8",
-  H: "#f3e9c8",
-  s: "#c4b184",
-};
-const GIANT_HORNS = [
-  ".KK............KK.....",
-  ".KHK..........KHK.....",
-  ".KHsK........KsHK.....",
-  "..KHsK......KsHK......",
-  "...KHsK....KsHK.......",
-];
-const GIANT_HORN_ROWS = GIANT_HORNS.length - 1; // how many rows stick out above his head
-// the last horn row sits on the top row of his head
-const GIANT_ROWS = [
-  ...GIANT_HORNS.slice(0, GIANT_HORN_ROWS),
-  TROLL[0].split("").map((ch, i) => (GIANT_HORNS[GIANT_HORN_ROWS][i] !== "." ? GIANT_HORNS[GIANT_HORN_ROWS][i] : ch)).join(""),
-  ...TROLL.slice(1),
-];
-const GIANT_ROWS_RIGHT = GIANT_ROWS.map((r) => r.split("").reverse().join(""));
 // Tiny letters for spelling words with weed leaves in the SoundCloud Void
 const LEAF_FONT: Record<string, string[]> = {
   F: ["###", "#..", "##.", "#..", "#.."],
@@ -2100,7 +1762,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   const touchRef = useRef(0); // -1 holding left side, 1 holding right side
   const touchUpRef = useRef(false); // holding the middle of the screen (jetpack on phones)
   const wheelRef = useRef({ dir: 0, timer: 0 });
-  const okRepeatRef = useRef(false); // the last Space / Enter was the key repeating because it's held down (the prize machine ignores those)
 
   // Scoreboard (shared online) and name entry
   const [showEntry, setShowEntry] = useState(false);
@@ -2244,47 +1905,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       kind: "troll" | "giant";
       dazed: number; // giant only: >0 while he's down and waiting for the finishing stomp
     },
-    // STASH SPIN (the prize machine, infinite run only)
-    perks: noPerks(), // stacks of each prize, this run
-    shield: 0, // SHIELD: bubble hits left in this zone
-    sipFuel: 0, // JETPACK SIP: seconds of fuel left in this zone
-    freeJumped: false, // AIR JUMP: the free jump was used since you last stood on something
-    reviveUsed: false, // SECOND WIND already saved you this run
-    testSpin: 0, // test key 8: which prizes the next test spin shows
-    // The wax moment + WAX MODE
-    wax: false, // WAX MODE is on: grams count double
-    waxWait: 0, // seconds until the wax moment starts (0 = not waiting)
-    waxT: 0, // seconds into the wax moment
-    waxAt: 0, // when WAX MODE started (the colour breathing starts from there)
-    bonusSeen: 0, // your bonus grams at the last frame (WAX MODE doubles whatever got added since)
-    // the bichon (null until you win it)
-    pet: null as null | {
-      x: number;
-      y: number;
-      facing: number;
-      trail: { x: number; y: number }[]; // where you've just been: it runs along this
-      still: number; // seconds you've been standing still
-      auto: number; // level 2: seconds until it may shoot by itself again
-      fetch: Leaf | null; // level 3: the leaf it's running to
-      fetchCool: number;
-      moving: boolean;
-    },
-    spinQueue: [] as boolean[], // spins waiting to open (true = a BOSS SPIN)
-    spinWait: 0, // seconds until the next waiting spin opens
-    spin: null as null | {
-      boss: boolean; // the gold BOSS SPIN (rarer prizes)
-      reels: ReelId[]; // what each of the three reels lands on
-      strips: ReelId[][]; // the icons that roll past on each reel before it lands
-      stops: number[]; // when each reel stops (seconds)
-      t: number; // seconds since the machine opened
-      landed: number; // how many reels have stopped
-      tick: number; // timer for the ticking sound
-      jackpot: boolean; // all three match: the prize counts twice
-      pick: number; // which reel is highlighted (0, 1, 2)
-      took: number; // which reel you took (-1 = still choosing)
-      tookAt: number;
-      flashWas: number; // the message that was on screen when it opened (put back afterwards)
-    },
     hinted: [] as string[], // which "how to use it" hints were already shown this game
     hintText: "",
     hintTime: 0,
@@ -2357,15 +1977,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   const playJump = () => beep(260, 640, 0.12, 0.045, "square");
   const playCoin = () => [988, 1319].forEach((f, i) => beep(f, f, 0.07, 0.05, "square", i * 0.06));
   // Some leaves are gold coins (same spot = always the same answer). Never in the Void or in words.
-  const isCoin = (l: Leaf): boolean => {
-    if (l.coin !== undefined) return l.coin; // set by hand in a level, or remembered by the MAGNET prize
-    return (
-      !l.small &&
+  const isCoin = (l: Leaf) =>
+    l.coin === true ||
+    (!l.small &&
       !state.current.inBonus &&
       !state.current.levelMode &&
-      hash(Math.floor(l.x) * 7 + Math.floor(l.y) * 13) < COIN_CHANCE + COIN_LUCK_STEP * state.current.perks.coinLuck
-    );
-  };
+      hash(Math.floor(l.x) * 7 + Math.floor(l.y) * 13) < COIN_CHANCE);
   const playLeaf = () => {
     beep(988, 988, 0.05, 0.045);
     beep(1319, 1319, 0.1, 0.045, "square", 0.05);
@@ -2719,34 +2336,18 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   // Gets harder at 12k, 15k and 20k: faster monsters, and more of them
   const hardness = () => {
     const sc = state.current.score;
-    if (sc >= 20000) return Math.min(HARD_MAX, 1.6 + Math.floor((sc - 20000) / 10000) * HARD_STEP); // 30k: 1.8, 40k: 2 ...
+    if (sc >= 20000) return 1.6;
     if (sc >= 15000) return 1.35;
     if (sc >= 12000) return 1.15;
     return 1;
   };
-
-  // ---------- STASH SPIN: what the prizes change ----------
-  // (all of these give the normal numbers in the levels: a level never has prizes)
-  // how many prizes you hold (curses don't count: they bring their own trouble)
-  const perkTotal = () => PERKS.reduce((n, p) => n + (p.curse ? 0 : state.current.perks[p.id as PerkId]), 0);
-  // More prizes = more monsters (on top of the 12k / 15k / 20k steps above)
-  const perkPressure = () => 1 + Math.min(PERK_ENEMY_CAP, PERK_ENEMY_STEP * perkTotal());
-  const bossHpBonus = () => Math.min(PERK_BOSS_HP_CAP, Math.floor(perkTotal() * PERK_BOSS_HP));
-  const sipMax = () => JET_SIP_SECONDS * state.current.perks.jetSip;
-  const runSpeed = () => RUN * (1 + SPEED_STEP * state.current.perks.speed);
-  const maxLives = () => (state.current.levelMode ? MAX_LIVES : RUN_LIVES + state.current.perks.heart);
-  const fireAmmo = () => FIRE_AMMO + STASH_AMMO_STEP * state.current.perks.stash;
-  const iceAmmo = () => ICE_AMMO + STASH_AMMO_STEP * state.current.perks.stash;
-  const spikeAmmo = () => SPIKE_AMMO + state.current.perks.stash;
-  const fireTimeMax = () => FIRE_TIME + STASH_TIME_STEP * state.current.perks.stash;
-  const boxShots = () => 3 + state.current.perks.stash; // shots from one stash box in a boss arena
 
   const addWalker = (i: number, ground: number, progress: number) => {
     state.current.enemies.push({
       kind: "walker",
       x: i * T,
       y: ground * T - 14,
-      vx: -(28 + progress * 24) * Math.min(HARD_SPEED_MAX, hardness()),
+      vx: -(28 + progress * 24) * hardness(),
       vy: 0,
       baseY: 0,
       phase: 0,
@@ -2768,7 +2369,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       kind: "flyer",
       x: i * T,
       y: baseY,
-      vx: -(30 + progress * 22) * Math.min(HARD_SPEED_MAX, hardness()),
+      vx: -(30 + progress * 22) * hardness(),
       vy: 0,
       baseY,
       phase: Math.random() * Math.PI * 2,
@@ -2785,8 +2386,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const len = 3 + Math.floor(Math.random() * 3);
     const row = g - 3;
     const twoFloors = g >= 7 && Math.random() < (zone === 1 ? 0.6 : 0.35);
-    // LEAF LUCK (a spin prize) makes the ? stash boxes show up more often
-    const bonusAt = Math.random() < 0.15 + LEAF_LUCK_STEP * s.perks.leafLuck ? 1 + Math.floor(Math.random() * (len - 2)) : -1;
+    const bonusAt = Math.random() < 0.15 ? 1 + Math.floor(Math.random() * (len - 2)) : -1;
     for (let k = 0; k < len; k++) {
       const upper = twoFloors && k >= 1 && k < len - 1 ? row - 3 : -1;
       if (k === bonusAt) s.cols.push(makeCol(g, zone, { bonus: row, block2: upper }));
@@ -2794,8 +2394,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       const top = upper >= 0 ? upper : row;
       // Very rarely a heart instead of a leaf
       if (Math.random() < 0.02) {
-        // (the GREED curse: no new hearts)
-        if (!s.perks.greed) s.hearts.push({ x: (i0 + k) * T + 1, y: (top - 1) * T + 2, taken: false });
+        s.hearts.push({ x: (i0 + k) * T + 1, y: (top - 1) * T + 2, taken: false });
       } else if (Math.random() < (upper >= 0 ? 0.8 : 0.5)) {
         s.leaves.push({ x: (i0 + k) * T + 1, y: (top - 1) * T + 1, taken: false });
       }
@@ -2858,8 +2457,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (s.genFlat > 0) {
         s.genFlat -= 1;
         s.cols.push(makeCol(s.genGround, zone));
-        // every spin prize you hold adds monsters, and the SWARM curse adds a lot more
-        const more = Math.min(MONSTER_MAX, hardness() * perkPressure() * (s.perks.swarm ? SWARM_MONSTERS : 1));
+        const more = hardness();
         if (s.genFlat > 1 && zone !== Z_CLOUDS && Math.random() < (0.05 + progress * 0.09 + (zone === 1 ? 0.03 : 0)) * more) {
           if (progress > 0.02 && Math.random() < EYE_PERCENT) addEye(i, s.genGround, progress);
           else addWalker(i, s.genGround, progress);
@@ -2870,7 +2468,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         continue;
       }
 
-      // The troll's arena: a flat screen-wide floor with a ? stash box at each end (they refill during the fight)
+      // The troll's arena: a flat screen-wide floor with two bonus blocks (they refill during the fight)
       if (s.bossState === "none" && s.score >= BOSS_EVERY * (s.bossCount + 1) - 300) {
         s.bossState = "placed";
         s.genGround = 8;
@@ -2878,10 +2476,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         s.bossCol = s.cols.length;
         for (let k = 0; k < BOSS_ARENA; k++) {
           const c = makeCol(8, zoneOf(s.cols.length));
-          // (TOMBFELL's arena is a bare floor: his shield eats every shot, so no stash boxes. He hangs his own vines.)
-          const bare = bossKindAt(s.bossCount) === "tombfell";
-          if (!bare && (k === 2 || k === 18)) c.bonus = 5;
-          if (!bare && (k === 7 || k === 8)) c.block = 4;
+          if (k === 4 || k === 11) c.bonus = 5;
+          if (k === 7 || k === 8) c.block = 4;
           s.cols.push(c);
         }
         s.genFlat = 4;
@@ -3233,20 +2829,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     s.bossCount = 0;
     s.boss = null;
     s.bossRefill = 0;
-    // spin prizes only last one run
-    s.perks = noPerks();
-    s.shield = 0;
-    s.sipFuel = 0;
-    s.freeJumped = false;
-    s.reviveUsed = false;
-    s.pet = null;
-    s.wax = false;
-    s.waxWait = 0;
-    s.waxT = 0;
-    s.bonusSeen = 0;
-    s.spin = null;
-    s.spinQueue = [];
-    s.spinWait = 0;
     s.zoneMarks = [{ score: 0, zone: 0 }];
     // reset the score first: the level builder looks at it (the old score made the troll appear right away)
     s.score = 0;
@@ -3266,7 +2848,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     s.score = 0;
     s.farthest = 0;
     s.bonus = 0;
-    s.lives = RUN_LIVES; // (a level sets its own 2 hearts right after this)
+    s.lives = START_LIVES;
     s.invuln = 0;
     s.runTime = 0;
     s.testRun = false;
@@ -3302,7 +2884,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       s.eggOpen = false;
       s.zoneShown = tz;
       s.zoneMarks = [{ score: 0, zone: tz % ZONE_NAMES.length }];
-      s.lives = RUN_LIVES;
+      s.lives = MAX_LIVES;
       s.testRun = true;
       s.flash = 3;
       s.flashText = `TEST: ${ZONE_NAMES[tz]}`;
@@ -3317,15 +2899,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       s.onGround = false;
       s.coyote = 0;
       s.airJumped = false;
-      s.freeJumped = false;
       playJump();
-    } else if (s.perks.airJump > 0 && !s.freeJumped) {
-      // AIR JUMP (a spin prize): one free extra jump every time you're in the air.
-      // (A turquoise leaf or a boss fight still gives you one more on top of it.)
-      s.freeJumped = true;
-      s.vy = JUMP * 0.92;
-      burst(s.x + SPRITE_W / 2, s.y + SPRITE_H, 12, TURQ, 50);
-      playDoubleJump();
     } else if ((s.doubleJumps > 0 || (s.bossState === "fight" && !(s.kboss && s.kboss.kind === "horned"))) && !s.airJumped) {
       // Double jump (turquoise leaf): one extra jump per time in the air. Free during a boss fight
       // (except the horned warrior in Level 3: there you only get the ones you have).
@@ -3352,8 +2926,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   };
 
   const popup = (x: number, y: number, text: string) => {
-    // WAX MODE: grams count double, so "+100" pops up as "+200" (coins, hearts and shots stay as they are)
-    if (state.current.wax && !/ (COIN|COINS|LIFE|SHOTS)/.test(text)) text = text.replace(/^\+(\d+)/, (_m, n) => `+${Number(n) * 2}`);
     state.current.popups.push({ x, y, text, life: 0.9 });
   };
 
@@ -3400,14 +2972,13 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       }
       burst(cx + 2, cy + 2, 10, SPIKE, 50);
       playSpike();
-      petShoot(s.facing * PET_SHOT_SPEED, 0); // your dog shoots along
       if (s.ammo <= 0) {
         s.power = "none";
         s.fireTime = 0;
       }
       return;
     }
-    if (s.fireballs.filter((f) => !f.pet).length >= 2) return; // (the dog's shots don't count)
+    if (s.fireballs.length >= 2) return;
     const ice = s.power === "ice";
     s.ammo -= 1;
     s.fireballs.push({
@@ -3420,7 +2991,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     });
     if (ice) playIce();
     else playFireball();
-    petShoot(s.facing * PET_SHOT_SPEED, 0); // your dog shoots along
     if (s.ammo <= 0) {
       s.power = "none";
       s.fireTime = 0;
@@ -3495,7 +3065,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     s.inBonus = true;
     s.cols = room.cols;
     s.leaves = room.leaves;
-    s.hearts = s.perks.greed ? [] : room.hearts; // (the GREED curse: no hearts down here either)
+    s.hearts = room.hearts;
     s.enemies = [];
     s.powerups = [];
     s.fireballs = [];
@@ -3548,15 +3118,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       e.alive = false;
       e.squash = 0;
     }
-    // The bosses take turns: the green troll, the purple giant, TOMBFELL, the troll again ...
-    const next = bossKindAt(s.bossCount);
-    if (next === "tombfell") {
-      startRunTombfell();
-      return;
-    }
-    const kind: "troll" | "giant" = next;
-    // (the troll takes more hits every time round, and both get tougher with every spin prize you hold)
-    const hp = (kind === "giant" ? GIANT_HP : BOSS_HP_START + bossRound() * 2 * BOSS_HP_STEP) + bossHpBonus();
+    // Every other one is the bigger, tougher giant instead of the regular troll
+    const kind: "troll" | "giant" = s.bossCount % 2 === 1 ? "giant" : "troll";
+    const hp = kind === "giant" ? GIANT_HP : BOSS_HP_START + s.bossCount * BOSS_HP_STEP;
     const bh = kind === "giant" ? GIANT_H : TR_H;
     s.boss = { x: s.cam + W - 50, y: 8 * T - bh, vx: 0, vy: 0, hp, maxHp: hp, hit: 0, jumpTimer: 2.2, facing: -1, dead: 0, kind, dazed: 0 };
     // Freeze and let the player pick a spell
@@ -3567,10 +3131,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     bossIntro(kind, "choose"); // his card first, then you pick your spell
   };
 
-  // Which lap of the three bosses you're on: 0 = the first troll / giant / TOMBFELL, 1 = the second time round ...
-  const bossRound = () => Math.floor(state.current.bossCount / RUN_BOSSES.length);
-  // How fast this troll is (every time round they're faster)
-  const bossSpeed = () => 1 + BOSS_SPEED_STEP * 2 * bossRound();
+  // How fast this troll is (each next one is faster)
+  const bossSpeed = () => 1 + BOSS_SPEED_STEP * state.current.bossCount;
 
   // Picked a spell: you get it with a couple more shots than he needs, and free double jumps
   // ---------- Pink Levels ----------
@@ -3582,7 +3144,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     newGame();
     const s = state.current;
     s.levelMode = true;
-    s.lives = START_LIVES; // levels keep their own hearts: start with 2, collect up to 4
     s.level = n;
     s.levelTime = 0;
     s.eggCols = [];
@@ -3835,63 +3396,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     }
   };
 
-  // TOMBFELL in PINK RUN INFINITE (the boss at 15k): the quick version. He stands on the ground behind his
-  // shield while cats drop in. Jump on a cat, kick the ball into him, 3 times.
-  const startRunTombfell = () => {
-    const s = state.current;
-    s.tboss = {
-      x: s.cam + W - TOMB_W - 12,
-      y: -TOMB_H,
-      hp: RUN_TOMB_HP,
-      maxHp: RUN_TOMB_HP,
-      part: 2,
-      hit: 0,
-      dead: 0,
-      facing: -1,
-      busy: 0,
-      cast: 1.8,
-      bump: 0,
-      wallN: 0,
-      side: 1,
-      doves: [],
-      cats: [],
-      bear: null,
-      fallen: false,
-      short: true,
-    };
-    paintVines();
-    heldRef.current = { left: false, right: false, up: false };
-    touchRef.current = 0;
-    s.vx = 0;
-    bossIntro("tombfell", "running"); // his card first, then the fight
-    s.flash = 3;
-    s.flashText = "JUMP ON A CAT, THEN KICK IT AT HIM!";
-    s.hinted = s.hinted.filter((h) => h !== "bossjump");
-    showHint("bossjump", "FREE DOUBLE JUMPS HERE!");
-    s.hintTime = 4;
-    playPowerUp();
-  };
-
-  // You beat a boss in PINK RUN INFINITE (troll, giant or TOMBFELL): points, the BOSS SPIN, and after
-  // the one at 20k the wax moment.
-  const runBossBeaten = (kind: "troll" | "giant" | "tombfell") => {
-    const s = state.current;
-    s.bossCount += 1; // the next one comes 5k later
-    unlockOutfit("ghost");
-    const pts = kind === "giant" ? PTS_GIANT : kind === "tombfell" ? PTS_TOMB : PTS_BOSS;
-    s.bonus += pts;
-    s.flash = 2.5;
-    s.flashText = `${kind.toUpperCase()} DOWN! +${pts * (s.wax ? 2 : 1)}`;
-    // leftover shots stay, but back to normal rules
-    if (s.power === "fire") s.fireTime = Math.min(s.fireTime, fireTimeMax());
-    s.ammo = Math.min(s.ammo, fireAmmo());
-    // BOSS SPIN: a bonus turn on the prize machine, with the rarer prizes
-    s.spinQueue.push(true);
-    s.spinWait = Math.max(s.spinWait, SPIN_BOSS_DELAY);
-    // the boss at 20,000 grams: time for some wax (once per run, and it comes before the spin)
-    if (!s.wax && s.bossCount * BOSS_EVERY >= WAX_AT) s.waxWait = WAX_DELAY;
-  };
-
   // The camera reached TOMBFELL's arena: lock the screen and bring him in
   const startTombfell = () => {
     const s = state.current;
@@ -4025,7 +3529,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       return;
     }
     popup(cx, tb.y - 10, `${tb.hp} LEFT`);
-    const part = tb.short ? 2 : tb.hp > 2 * TOMB_PART_HP ? 1 : tb.hp > TOMB_PART_HP ? 2 : 3; // (the quick run fight stays on the cats)
+    const part = tb.hp > 2 * TOMB_PART_HP ? 1 : tb.hp > TOMB_PART_HP ? 2 : 3;
     if (part !== tb.part && part !== 1) startTombPart(part);
     else if (tb.part === 1) {
       scareDoves(tb);
@@ -4171,7 +3675,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const kind: "fire" | "ice" | "spike" = choice === 2 && s.spells.includes("spike") ? "spike" : choice === 1 ? "ice" : "fire";
     s.bossSpell = kind;
     s.power = kind;
-    s.ammo = s.tboss ? TOMB_AMMO : s.kboss ? HORNED_AMMO : s.boss ? BOSS_START_SHOTS : (s.lboss ? s.lboss.maxHp : 10) + BOSS_SPARE_SHOTS;
+    s.ammo = s.tboss ? TOMB_AMMO : s.kboss ? HORNED_AMMO : (s.boss ? s.boss.maxHp : s.lboss ? s.lboss.maxHp : 10) + BOSS_SPARE_SHOTS;
     if (s.kboss) s.doubleJumps = 1; // the horned warrior fight: just one double jump (the ? boxes give more)
     s.fireTime = kind === "fire" ? 999 : 0; // no timer in a boss fight
     s.mode = "running";
@@ -4185,11 +3689,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       ? s.lboss.kind === "snowman"
         ? "SHOOT THE EVIL SNOWMAN!"
         : "SHOOT THE EVIL LEAF!"
-      : bossRound() === 0
+      : s.bossCount === 0
         ? `FIGHT THE ${bossLabel}!`
-        : `${bossLabel} #${bossRound() + 1}!`;
+        : `${bossLabel} #${s.bossCount + 1}!`;
     s.hinted = s.hinted.filter((h) => h !== "bossjump");
-    showHint("bossjump", s.kboss ? "1 DOUBLE JUMP! MORE IN THE STASH BOXES" : s.boss ? "FREE DOUBLE JUMPS! JUMP OVER HIM" : "FREE DOUBLE JUMPS HERE!");
+    showHint("bossjump", s.kboss ? "1 DOUBLE JUMP! MORE IN THE STASH BOXES" : "FREE DOUBLE JUMPS HERE!");
     s.hintTime = 4;
     playPowerUp();
   };
@@ -4310,242 +3814,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     }
   };
 
-  // ---------- The wax moment ----------
-
-  // A soft "shhh" (the torch, the pull, the exhale). from / to = how bright it sounds at the start and the end.
-  const playNoise = (time: number, volume: number, from: number, to: number, delay = 0) => {
-    if (mutedRef.current || !sfxOnRef.current || sfxVolRef.current <= 0) return;
-    const ac = getAudio();
-    if (!ac) return;
-    try {
-      const now = ac.currentTime + delay;
-      const buffer = ac.createBuffer(1, Math.max(1, Math.floor(ac.sampleRate * time)), ac.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-      const noise = ac.createBufferSource();
-      noise.buffer = buffer;
-      const filter = ac.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(from, now);
-      filter.frequency.exponentialRampToValueAtTime(to, now + time);
-      const g = ac.createGain();
-      g.gain.setValueAtTime(0.0001, ac.currentTime);
-      g.gain.setValueAtTime(0.0001, now);
-      g.gain.exponentialRampToValueAtTime(volume * sfxVolRef.current, now + time * 0.2);
-      g.gain.exponentialRampToValueAtTime(0.0005, now + time);
-      noise.connect(filter).connect(g).connect(ac.destination);
-      noise.start(now);
-      noise.stop(now + time + 0.05);
-    } catch {}
-  };
-
-  // Freezes the run on the wax bong hit
-  const openWax = () => {
-    const s = state.current;
-    s.mode = "wax";
-    s.waxT = 0;
-    // the sounds, all lined up now: the torch, the bubbling pull, the exhale, a little jingle
-    playNoise(0.8, 0.035, 6000, 3000, WAX_T_HEAT);
-    const bubbles = Math.floor((WAX_T_EXHALE - WAX_T_HIT) / 0.075);
-    for (let i = 0; i < bubbles; i++) {
-      const f = rand(90, 230);
-      beep(f, f * 1.7, 0.05, 0.05, "sine", WAX_T_HIT + i * 0.075 + rand(0, 0.03));
-    }
-    playNoise(WAX_T_EXHALE - WAX_T_HIT, 0.02, 500, 900, WAX_T_HIT);
-    playNoise(2.2, 0.08, 1800, 350, WAX_T_EXHALE);
-    [392, 494, 587, 784].forEach((f, i) => beep(f, f, 0.14, 0.045, "triangle", WAX_T_EXHALE + 1.4 + i * 0.12));
-  };
-
-  // Back to the run, in WAX MODE
-  const closeWax = () => {
-    const s = state.current;
-    s.wax = true;
-    s.waxAt = s.t;
-    s.bonusSeen = s.bonus; // only grams from now on count double
-    s.mode = "running";
-    s.invuln = Math.max(s.invuln, 1.2);
-    s.flash = 3;
-    s.flashText = "WAX MODE! GRAMS COUNT DOUBLE";
-    if (s.spinQueue.length > 0) s.spinWait = 1.6; // the boss spin is still waiting
-  };
-
-  // ---------- STASH SPIN: the prize machine ----------
-
-  // Picks what the three reels land on. Prizes you already have 3 times are left out.
-  const rollSpin = (boss: boolean): ReelId[] => {
-    const s = state.current;
-    const w = (p: PerkDef) => (boss ? p.bossWeight : p.weight);
-    const pickFrom = (list: PerkDef[]) => {
-      let r = Math.random() * list.reduce((sum, p) => sum + w(p), 0);
-      for (const p of list) {
-        r -= w(p);
-        if (r <= 0) return p;
-      }
-      return list[list.length - 1];
-    };
-    // (SECOND WIND is gone for good once it has saved you)
-    // (and a prize with bossFrom stops showing up on normal spins once you hold that many)
-    const open = PERKS.filter(
-      (p) =>
-        s.perks[p.id as PerkId] < perkMax(p) &&
-        !(p.id === "revive" && s.reviveUsed) &&
-        !(p.bossFrom !== undefined && !boss && s.perks[p.id as PerkId] >= p.bossFrom)
-    );
-    // JACKPOT: all three the same (only with a prize that still has room for both stacks, never a curse)
-    const room = open.filter((p) => !p.curse && s.perks[p.id as PerkId] <= perkMax(p) - 2 && (p.bossFrom === undefined || boss));
-    if (room.length > 0 && Math.random() < (boss ? SPIN_JACKPOT_BOSS : SPIN_JACKPOT)) {
-      const p = pickFrom(room);
-      return [p.id, p.id, p.id];
-    }
-    // otherwise three different prizes (a brownie fills the gap when there aren't three left)
-    const left = [...open];
-    const out: ReelId[] = [];
-    while (out.length < 3 && left.length > 0) {
-      const p = pickFrom(left);
-      out.push(p.id);
-      left.splice(left.indexOf(p), 1);
-    }
-    while (out.length < 3) out.push("snack");
-    return out;
-  };
-
-  // Freezes the run and starts the reels
-  // (forced = the test key: these three prizes instead of random ones)
-  const openSpin = (boss: boolean, forced?: ReelId[]) => {
-    const s = state.current;
-    const reels = forced ?? rollSpin(boss);
-    const jackpot = reels[0] === reels[1] && reels[1] === reels[2];
-    const all: ReelId[] = PERKS.map((p) => p.id);
-    // the icons that roll past before each reel lands ([0] is the one it lands on)
-    const strips = reels.map((id, r) => {
-      const strip: ReelId[] = [id];
-      const len = 10 + r * 4;
-      while (strip.length < len) {
-        const next = all[Math.floor(Math.random() * all.length)];
-        if (next !== strip[strip.length - 1]) strip.push(next);
-      }
-      return strip;
-    });
-    const stops = [...SPIN_REEL_STOPS];
-    if (jackpot) stops[2] += 0.7; // two the same already... the last reel takes its time
-    s.spin = { boss, reels, strips, stops, t: 0, landed: 0, tick: 0, jackpot, pick: 1, took: -1, tookAt: 0, flashWas: s.flash };
-    s.mode = "spin";
-    beep(240, 90, 0.18, 0.06, "square"); // the lever
-  };
-
-  // How far reel r still has to roll (in icons). 0 = it has landed.
-  const reelLeft = (r: number) => {
-    const sp = state.current.spin;
-    if (!sp || sp.t >= sp.stops[r]) return 0;
-    const k = 1 - sp.t / sp.stops[r];
-    return (sp.strips[r].length - 2) * k * k;
-  };
-
-  // The reels have stopped and the short "hands off" moment is over
-  const spinCanPick = () => {
-    const sp = state.current.spin;
-    return !!sp && sp.took < 0 && sp.t >= sp.stops[2] + SPIN_LOCK;
-  };
-
-  const spinMove = (dir: number) => {
-    const sp = state.current.spin;
-    if (!sp || !spinCanPick() || sp.jackpot) return;
-    sp.pick = (sp.pick + dir + 3) % 3;
-    beep(520, 520, 0.04, 0.04, "square");
-  };
-
-  // Gives you a prize (times = 2 on a jackpot, boss = it came out of the gold BOSS SPIN)
-  const applyPerk = (id: ReelId, times: number, boss: boolean) => {
-    const s = state.current;
-    for (let i = 0; i < times; i++) {
-      if (id === "snack") {
-        s.lives = Math.min(maxLives(), s.lives + 1);
-        continue;
-      }
-      const d = perkDef(id);
-      const most = !boss && d.bossFrom !== undefined ? Math.min(d.bossFrom, perkMax(d)) : perkMax(d);
-      if (s.perks[id] >= most) break;
-      s.perks[id] += 1;
-      if (id === "heart") s.lives = Math.min(maxLives(), s.lives + 1);
-      if (id === "shield") s.shield = s.perks.shield; // the bubble is up straight away
-      if (id === "jetSip") {
-        s.sipFuel = sipMax(); // a full sip straight away
-        showHint("sip", touchPadRef.current ? "HOLD A IN THE AIR TO FLY" : "HOLD JUMP IN THE AIR TO FLY");
-      }
-      if (id === "airJump") showHint("airjump", "JUMP AGAIN IN THE AIR!");
-      if (id === "pet" && !s.pet) s.pet = newPet();
-    }
-  };
-
-  const spinTake = () => {
-    const s = state.current;
-    const sp = s.spin;
-    if (!sp || !spinCanPick()) return;
-    sp.took = sp.jackpot ? 1 : sp.pick;
-    sp.tookAt = sp.t;
-    applyPerk(sp.reels[sp.took], sp.jackpot ? 2 : 1, sp.boss);
-    playPowerUp();
-  };
-
-  // Back to the run
-  const closeSpin = () => {
-    const s = state.current;
-    const sp = s.spin;
-    s.spin = null;
-    s.mode = "running";
-    s.invuln = Math.max(s.invuln, 1.2); // a moment to find your feet again
-    if (sp) {
-      s.flash = sp.flashWas;
-      if (sp.took >= 0) {
-        const d = perkDef(sp.reels[sp.took]);
-        popup(s.x + SPRITE_W / 2, s.y - 8, sp.jackpot ? `${d.name} X2!` : `${d.name}!`);
-        burst(s.x + SPRITE_W / 2, s.y + SPRITE_H / 2, 18, sp.boss ? ["#ffd700", "#fff3a0", "#ffffff"] : [PINK, "#ff5fe0", "#ffffff"], 70);
-      }
-    }
-    if (s.spinQueue.length > 0) s.spinWait = 0.8; // another spin is waiting (a zone spin and a boss spin together)
-  };
-
-  // Runs while the machine is open (the rest of the game stands still)
-  const updateSpin = (dt: number) => {
-    const s = state.current;
-    const sp = s.spin;
-    if (!sp) {
-      s.mode = "running";
-      return;
-    }
-    const before = sp.t;
-    sp.t += dt;
-    // ticking while the reels turn
-    if (sp.landed < 3) {
-      sp.tick -= dt;
-      if (sp.tick <= 0) {
-        sp.tick = 0.09;
-        beep(620 + sp.landed * 90, 600 + sp.landed * 90, 0.02, 0.018, "square");
-      }
-    }
-    for (let r = 0; r < 3; r++) {
-      if (before < sp.stops[r] && sp.t >= sp.stops[r]) {
-        sp.landed = r + 1;
-        beep(300 + r * 90, 200 + r * 60, 0.09, 0.06, "square"); // clack
-        if (r === 2 && sp.jackpot) [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => beep(f, f * 1.01, 0.09, 0.055, "square", 0.1 + i * 0.07));
-      }
-    }
-    if (sp.took >= 0 && sp.t - sp.tookAt > SPIN_TAKE_TIME) closeSpin();
-  };
-
   const hurt = (pit = false) => {
     const s = state.current;
     const inFight = s.bossState === "fight";
-    if (!pit && s.shield > 0) {
-      // SHIELD (a spin prize): the bubble takes the hit and pops. Falling in a pit still costs a heart.
-      s.shield -= 1;
-      s.invuln = 1.5;
-      s.shake = 0.15;
-      burst(s.x + SPRITE_W / 2, s.y + SPRITE_H / 2, 22, SHIELD_COLORS, 80);
-      popup(s.x + SPRITE_W / 2, s.y - 8, "SHIELD!");
-      beep(1200, 300, 0.18, 0.06, "triangle");
-      return;
-    }
     if (hasFire() && !pit && !inFight) {
       // Getting hit while you have fire or ice only takes the power away
       burst(s.x + SPRITE_W / 2, s.y + 8, 16, powerSparks(s.power), 60);
@@ -4567,14 +3838,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     s.shake = 0.3;
     burst(s.x + SPRITE_W / 2, s.y + SPRITE_H / 2, 34, BOOM, 100);
     playHurt();
-    if (s.lives <= 0 && s.perks.revive > 0 && !s.reviveUsed) {
-      // SECOND WIND (a spin prize): instead of dying you get back up, once per run
-      s.reviveUsed = true;
-      s.lives = Math.min(maxLives(), REVIVE_LIVES);
-      s.flash = 3.4;
-      s.flashText = "SECOND WIND!";
-      [392, 523, 659, 784, 1047].forEach((f, i) => beep(f, f * 1.01, 0.1, 0.055, "triangle", 0.25 + i * 0.08));
-    }
     if (s.lives <= 0) {
       s.mode = "dying";
       s.deadAt = s.t;
@@ -4699,17 +3962,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   const press = () => {
     const s = state.current;
     getAudio(); // browsers only allow sound after a click, so wake it up here
-    if (s.mode === "wax") {
-      // the wax moment: OK / jump skips the rest once the hit is done
-      if (!okRepeatRef.current && s.waxT >= WAX_T_EXHALE) closeWax();
-      return;
-    }
-    if (s.mode === "spin") {
-      // the prize machine: OK / jump takes the highlighted prize.
-      // (A key that was simply still held down from before doesn't count, it has to be a fresh press.)
-      if (!okRepeatRef.current) spinTake();
-      return;
-    }
     if (s.mode === "shop") {
       shopPick();
       return;
@@ -4877,164 +4129,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     playPowerAppear();
   };
 
-  // Picking up a leaf or a gold coin (you, or your dog fetching it for you)
-  const collectLeaf = (l: Leaf) => {
-    const s = state.current;
-    l.taken = true;
-    if (isCoin(l)) {
-      const n = s.perks.greed ? GREED_COINS : 1; // the GREED curse: coins count double
-      addCoins(n);
-      popup(l.x + 7, l.y - 4, n > 1 ? `+${n} COINS` : "+1 COIN");
-      burst(l.x + 7, l.y + 7, 10, ["#ffd700", "#fff3a0", "#b8860b"], 50);
-      playCoin();
-      return;
-    }
-    s.bonus += PTS_LEAF;
-    burst(l.x + 7, l.y + 7, 8, [GREEN, DARK_GREEN, "#ffffff"], 45);
-    playLeaf();
-  };
-
-  // ---------- The bichon ----------
-  const newPet = () => {
-    const s = state.current;
-    return {
-      x: s.x + (SPRITE_W - PET_W) / 2 - s.facing * 22,
-      y: s.y + SPRITE_H - PET_H,
-      facing: s.facing,
-      trail: [{ x: s.x - s.facing * 22, y: s.y }],
-      still: 0,
-      auto: PET_AUTO,
-      fetch: null as Leaf | null,
-      fetchCool: 0,
-      moving: false,
-    };
-  };
-
-  // One little shot from the dog
-  const petShoot = (vx: number, vy: number) => {
-    const s = state.current;
-    const p = s.pet;
-    if (!p) return;
-    s.fireballs.push({ x: p.x + PET_W / 2 - 2, y: p.y + 4, vx, vy, life: PET_SHOT_LIFE, ice: false, pet: true });
-    beep(1500, 2100, 0.05, 0.03, "square"); // yip
-  };
-
-  // The top of whatever is right under the dog (ground, a brick, a thin line). null = nothing there (a pit)
-  const petFloor = (px: number, feet: number) => {
-    const c = colAt(Math.floor(px / T));
-    const tops = oneWayTopsAt(px);
-    if (c.ground >= 0) tops.push(c.ground * T);
-    let best = Infinity;
-    for (const top of tops) if (top >= feet - 3 && top < best) best = top;
-    return best === Infinity ? null : best;
-  };
-
-  const updatePet = (dt: number) => {
-    const s = state.current;
-    const p = s.pet;
-    if (!p) return;
-    const lvl = s.perks.pet;
-    // lost you (a pipe, a fall): pop back to your side
-    const homeX = s.x + (SPRITE_W - PET_W) / 2 - s.facing * 22;
-    const homeY = s.y + SPRITE_H - PET_H;
-    if (Math.abs(p.x - homeX) > 150 || Math.abs(p.y - homeY) > 130) {
-      p.x = homeX;
-      p.y = homeY;
-      p.trail = [{ x: s.x - s.facing * 22, y: s.y }];
-      p.fetch = null;
-    }
-    // remember where you've just been: the dog runs along that path, a little behind you
-    const last = p.trail[p.trail.length - 1];
-    if (!last || Math.hypot(s.x - last.x, s.y - last.y) >= 3) {
-      p.trail.push({ x: s.x, y: s.y });
-      if (p.trail.length > PET_TRAIL) p.trail.shift();
-      p.still = 0;
-    } else {
-      p.still += dt;
-    }
-    const xBefore = p.x;
-
-    // LEVEL 3: spots a leaf (or coin) nearby and runs to fetch it
-    if (p.fetchCool > 0) p.fetchCool -= dt;
-    if (p.fetch && (lvl < 3 || p.fetch.taken || !s.leaves.includes(p.fetch))) p.fetch = null;
-    if (lvl >= 3 && !p.fetch && p.fetchCool <= 0) {
-      let bestD = PET_FETCH_RANGE;
-      for (const l of s.leaves) {
-        if (l.taken || l.x < s.cam - 8 || l.x > s.cam + W) continue;
-        const half = l.small ? 4 : 7;
-        const d = Math.hypot(l.x + half - (p.x + PET_W / 2), l.y + half - (p.y + PET_H / 2));
-        if (d < bestD) {
-          bestD = d;
-          p.fetch = l;
-        }
-      }
-    }
-    if (p.fetch) {
-      const half = p.fetch.small ? 4 : 7;
-      const dx = p.fetch.x + half - (p.x + PET_W / 2);
-      const dy = p.fetch.y + half - (p.y + PET_H / 2);
-      const d = Math.hypot(dx, dy);
-      if (d < 6) {
-        collectLeaf(p.fetch);
-        p.fetch = null;
-        p.fetchCool = 0.25;
-      } else {
-        const step = Math.min(d, PET_FETCH_SPEED * dt);
-        p.x += (dx / d) * step;
-        p.y += (dy / d) * step;
-      }
-    } else {
-      // follow you: head for the oldest spot on your path
-      const tp = p.trail[0];
-      const k = Math.min(1, dt * 12);
-      p.x += (tp.x + (SPRITE_W - PET_W) / 2 - p.x) * k;
-      if (p.still > 0.12) {
-        // you stopped: it drops onto whatever is under it
-        const floor = petFloor(p.x + PET_W / 2, p.y + PET_H);
-        if (floor !== null) p.y = Math.min(floor - PET_H, p.y + 260 * dt);
-      } else {
-        p.y += (tp.y + SPRITE_H - PET_H - p.y) * k;
-      }
-    }
-    const moved = p.x - xBefore;
-    p.moving = Math.abs(moved) > 0.2;
-    if (p.moving) p.facing = moved > 0 ? 1 : -1;
-    else if (p.still > 0.3) p.facing = s.facing;
-
-    // LEVEL 2: every few seconds it shoots by itself at a monster that's close
-    if (lvl >= 2) {
-      p.auto -= dt;
-      if (p.auto <= 0) {
-        let target: Enemy | null = null;
-        let bestD = PET_AUTO_RANGE;
-        for (const e of s.enemies) {
-          if (!e.alive || e.kind === "bong" || e.x < s.cam || e.x > s.cam + W) continue;
-          const d = Math.hypot(e.x + 7 - (p.x + PET_W / 2), e.y + 7 - (p.y + 6));
-          if (d < bestD) {
-            bestD = d;
-            target = e;
-          }
-        }
-        if (target) {
-          const dx = target.x + 7 - (p.x + PET_W / 2);
-          const dy = target.y + 5 - (p.y + 6);
-          const d = Math.max(1, Math.hypot(dx, dy));
-          p.facing = dx >= 0 ? 1 : -1;
-          petShoot((dx / d) * PET_SHOT_SPEED, (dy / d) * PET_SHOT_SPEED);
-          p.auto = PET_AUTO;
-        }
-      }
-    }
-  };
-
-  const drawPet = (ctx: CanvasRenderingContext2D, cam: number) => {
-    const s = state.current;
-    const p = s.pet;
-    if (!p) return;
-    const frame = p.moving && s.mode === "running" ? Math.floor(s.t * 10) % 2 : 0;
-    drawPixels(ctx, (p.facing < 0 ? BICHON_LEFT : BICHON)[frame], Math.round(p.x - cam), Math.round(p.y), BICHON_COLORS, 1);
-  };
-
   const KILL_STREAK_WINDOW = 1.2; // seconds you have to chain the next stomp
   const killEnemy = (e: Enemy, points: number) => {
     const s = state.current;
@@ -5044,7 +4138,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     s.killStreakTimer = KILL_STREAK_WINDOW;
     // 2 = DOUBLE, 3 = TRIPLE, 4 = QUADRA, 5+ = PENTAKILL. Points get multiplied by the streak (max x5).
     const streak = Math.min(s.killStreak, 5);
-    const finalPoints = points * streak * (s.perks.swarm ? SWARM_PAY : 1); // (the SWARM curse: kills pay double)
+    const finalPoints = points * streak;
     const names = ["", "", "DOUBLE KILL!", "TRIPLE KILL!", "QUADRA KILL!", "PENTAKILL!"];
     s.bonus += finalPoints;
     popup(e.x + 7, e.y - 4, streak >= 2 ? `+${finalPoints} ${names[streak]}` : `+${finalPoints}`);
@@ -5128,16 +4222,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (wheelRef.current.timer <= 0) wheelRef.current.dir = 0;
     }
 
-    if (s.mode === "spin") {
-      updateSpin(dt); // the prize machine: everything else stands still
-      return;
-    }
-    if (s.mode === "wax") {
-      // the wax moment: everything else stands still
-      s.waxT += dt;
-      if (s.waxT >= WAX_T_END) closeWax();
-      return;
-    }
     if (s.mode === "dying") {
       if (s.t - s.deadAt > 3) finishDeath();
       return;
@@ -5211,7 +4295,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     if (want === 0) want = wheelRef.current.dir;
     if (want !== 0) s.facing = want;
 
-    const target = want * runSpeed(); // (faster with the SPEED prize)
+    const target = want * RUN;
     if (s.knockT > 0) {
       s.knockT -= dt; // thrown off by WARLORD: no steering for a moment
     } else {
@@ -5221,15 +4305,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     s.vy = Math.min(420, s.vy + GRAVITY * dt);
 
     // Jetpack: hold jump to fly, but only while there's fuel. Land to refuel.
-    const holdingUp = heldRef.current.up || touchUpRef.current;
-    const wantsFly = s.jetpack && holdingUp;
-    // JETPACK SIP (a spin prize): a small tank that only refills in a new zone. It kicks in when you keep
-    // holding jump in the air, once you've stopped rising, so an ordinary jump doesn't waste any of it.
-    const sipFly = !s.jetpack && s.sipFuel > 0 && holdingUp && !s.onGround && (s.vy >= 0 || s.flying);
-    s.flying = (wantsFly && s.jetFuel > 0) || sipFly;
+    const wantsFly = s.jetpack && (heldRef.current.up || touchUpRef.current);
+    s.flying = wantsFly && s.jetFuel > 0;
     if (s.flying) {
-      if (sipFly) s.sipFuel = Math.max(0, s.sipFuel - dt);
-      else s.jetFuel = Math.max(0, s.jetFuel - dt);
+      s.jetFuel = Math.max(0, s.jetFuel - dt);
       s.vy = Math.max(JET_MAX_UP, s.vy - JET_THRUST * dt);
       if (Math.random() < 0.7) {
         s.particles.push({
@@ -5241,7 +4320,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           life: rand(0.15, 0.3),
         });
       }
-      if (sipFly ? s.sipFuel <= 0 : s.jetFuel <= 0) popup(s.x + SPRITE_W / 2, s.y - 6, "OUT OF GAS!");
+      if (s.jetFuel <= 0) popup(s.x + SPRITE_W / 2, s.y - 6, "OUT OF GAS!");
     } else if (s.jetpack && s.onGround) {
       s.jetFuel = Math.min(JET_FUEL_MAX, s.jetFuel + dt * JET_REFUEL_RATE);
     }
@@ -5312,7 +4391,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     if (s.onGround) {
       s.coyote = 0.09;
       s.airJumped = false;
-      s.freeJumped = false;
     }
     else if (s.coyote > 0) s.coyote -= dt;
 
@@ -5353,15 +4431,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     if (Math.abs(s.camY - desiredCamY) < 0.05) s.camY = desiredCamY;
 
     // Score: distance + bonus
-    const tilesBefore = Math.floor(s.farthest / T);
     if (!s.inBonus) s.farthest = Math.max(s.farthest, s.x);
-    if (s.wax) {
-      // WAX MODE: every gram counts double. Whatever you picked up or beat since the last frame is added
-      // once more, and so is the distance you just covered.
-      if (s.bonus > s.bonusSeen) s.bonus += s.bonus - s.bonusSeen;
-      s.bonus += Math.floor(s.farthest / T) - tilesBefore;
-    }
-    s.bonusSeen = s.bonus;
     s.score = Math.floor(s.farthest / T) + s.bonus;
 
     // Picking up the secret jetpack
@@ -5423,38 +4493,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         s.zoneMarks.push({ score: s.score, zone: zoneIndex % ZONE_NAMES.length });
         s.flash = 2;
         s.flashText = `ZONE ${zoneIndex + 1}: ${ZONE_NAMES[zoneIndex % ZONE_NAMES.length]}`;
-        // SHIELD: the bubble comes back in every new zone
-        if (s.shield < s.perks.shield) {
-          s.shield = s.perks.shield;
-          popup(s.x + SPRITE_W / 2, s.y - 8, "SHIELD BACK!");
-          beep(500, 1100, 0.12, 0.04, "triangle");
-        }
-        // JETPACK SIP: a fresh sip in every new zone
-        if (s.sipFuel < sipMax()) {
-          s.sipFuel = sipMax();
-          popup(s.x + SPRITE_W / 2, s.y - 20, "JETPACK FULL!");
-        }
-        // STASH SPIN after every second zone
-        if (zoneIndex % SPIN_EVERY_ZONES === 0) {
-          s.spinQueue.push(false);
-          s.spinWait = Math.max(s.spinWait, 0.3);
-        }
-      }
-      // The wax moment comes first (right after the 20k boss), the boss spin after it.
-      // A spin is waiting: it opens once you're standing on the ground (never in the Void or during a boss fight)
-      if (s.waxWait > 0) {
-        s.waxWait -= dt;
-        if (s.waxWait <= 0) {
-          s.waxWait = 0;
-          openWax();
-          return;
-        }
-      } else if (s.spinQueue.length > 0 && s.bossState !== "fight") {
-        s.spinWait -= dt;
-        if (s.spinWait <= 0 && (s.onGround || s.spinWait < -2.5)) {
-          openSpin(s.spinQueue.shift() === true);
-          return;
-        }
       }
     }
 
@@ -5491,27 +4529,27 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         if (s.bossState === "fight" && pu.kind !== "double") {
           // in the arena the blocks top up your spell
           s.power = pu.kind;
-          s.ammo += boxShots(); // 3 (more with the BIGGER STASH prize)
+          s.ammo += 3;
           if (pu.kind === "fire") s.fireTime = 999;
           if (s.kboss && s.kboss.kind === "horned") {
             s.doubleJumps = Math.max(s.doubleJumps, 1);
             popup(pu.x + 7, pu.y - 4, "+3 SHOTS +1 JUMP");
-          } else popup(pu.x + 7, pu.y - 4, `+${boxShots()} SHOTS`);
+          } else popup(pu.x + 7, pu.y - 4, "+3 SHOTS");
         } else if (pu.kind === "fire") {
           s.power = "fire";
-          s.ammo = fireAmmo();
-          s.fireTime = fireTimeMax();
+          s.ammo = FIRE_AMMO;
+          s.fireTime = FIRE_TIME;
           popup(pu.x + 7, pu.y - 4, "FIRE!");
           showHint("shoot", "PRESS S TO SHOOT");
         } else if (pu.kind === "ice") {
           s.power = "ice";
-          s.ammo = iceAmmo();
+          s.ammo = ICE_AMMO;
           s.fireTime = 0;
           popup(pu.x + 7, pu.y - 4, "ICE!");
           showHint("shoot", "PRESS S TO SHOOT");
         } else if (pu.kind === "spike") {
           s.power = "spike";
-          s.ammo = spikeAmmo();
+          s.ammo = SPIKE_AMMO;
           s.fireTime = 0;
           popup(pu.x + 7, pu.y - 4, "SPIKES!");
           showHint("shoot", "PRESS S TO SHOOT");
@@ -5547,9 +4585,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     // Fireballs bounce along the ground and burn monsters
     for (const f of s.fireballs) {
       f.life -= dt;
-      if (!f.ice && !f.spike && !f.pet) f.vy = Math.min(300, f.vy + 900 * dt);
+      if (!f.ice && !f.spike) f.vy = Math.min(300, f.vy + 900 * dt);
       f.x += f.vx * dt;
-      if (f.spike || f.pet) f.y += f.vy * dt; // spikes (and the dog's shots) fly dead straight, whichever way they were thrown
+      if (f.spike) f.y += f.vy * dt; // spikes fly dead straight, whichever way they were thrown
       if (solidAt(f.x + (f.vx > 0 ? 4 : 0), f.y + 2)) {
         f.life = 0;
         burst(f.x, f.y, f.spike ? 3 : 6, shotSparks(f), 40);
@@ -5560,10 +4598,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         if (Math.random() < 0.4) {
           s.particles.push({ x: f.x + 1, y: f.y + 1, vx: 0, vy: 0, color: SPIKE[Math.floor(Math.random() * 3)], life: 0.15 });
         }
-        if (f.y < -40) f.life = 0;
-      } else if (f.pet) {
-        // the dog's shot: a tiny white trail
-        if (Math.random() < 0.4) s.particles.push({ x: f.x + 1, y: f.y + 1, vx: 0, vy: 0, color: PET_SPARKS[Math.floor(Math.random() * 3)], life: 0.12 });
         if (f.y < -40) f.life = 0;
       } else if (f.ice) {
         // little frost trail
@@ -5583,11 +4617,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         if (f.x + 4 > e.x && f.x < e.x + enemyW(e) && f.y + 4 > e.y && f.y < e.y + enemyH(e)) {
           if (e.kind === "bear") hitBear(e); // a bear takes two
           else killEnemy(e, e.kind === "flyer" ? PTS_FLYER : PTS_WALKER);
-          // PIERCING SHOTS (a spin prize): your shot carries on through one more monster per level
-          if (!f.pet && (f.pierced ?? 0) < s.perks.pierce) {
-            f.pierced = (f.pierced ?? 0) + 1;
-            continue;
-          }
           f.life = 0;
           break;
         }
@@ -5603,9 +4632,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         const bh1 = tbGiant ? GIANT_HH : TR_HH;
         if (f.x + 4 > bx1 && f.x < bx1 + bw1 && f.y + 4 > by1 && f.y < by1 + bh1) {
           f.life = 0;
-          if (f.pet) {
-            burst(f.x, f.y, 4, PET_SPARKS, 30); // the dog's shots are too small to hurt him
-          } else if (!spent) {
+          if (!spent) {
             if (f.spike) s.spikeHitVolley = f.volley ?? -1;
             hitBoss(shotSparks(f));
           }
@@ -6367,7 +5394,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     // ---------- LEVEL 4: TOMBFELL ----------
     if (s.woodsGlitch > 0) s.woodsGlitch -= dt;
     const tomb = s.tboss;
-    if (tomb) {
+    if (s.levelMode && tomb) {
       const tFloor = 8 * T;
       const pcx = hx() + HB_W / 2;
       if (tomb.hit > 0) tomb.hit -= dt;
@@ -6380,14 +5407,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         if (tomb.dead <= 0) {
           s.tboss = null;
           s.bossState = "none"; // the screen scrolls again
-          if (s.levelMode) {
-            s.flash = 2.5;
-            s.flashText = "TOMBFELL IS DOWN! GO HIT THE BONG";
-            if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
-            s.ammo = Math.min(s.ammo, 5);
-          } else {
-            runBossBeaten("tombfell"); // the infinite run: points, the boss spin, on you go
-          }
+          s.flash = 2.5;
+          s.flashText = "TOMBFELL IS DOWN! GO HIT THE BONG";
+          if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
+          s.ammo = Math.min(s.ammo, 5);
         }
       } else {
         tomb.facing = pcx < tomb.x + TOMB_W / 2 ? -1 : 1;
@@ -6717,12 +5740,20 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (b.dead > 0) {
         b.dead -= dt;
         b.y += 30 * dt;
-        if (Math.random() < 0.5) burst(b.x + rand(6, bw - 6), b.y + rand(10, bh), 2, isGiant ? ["#c68bff", "#8a4fc0", "#ffffff"] : [LIGHT_GREEN, GREEN, "#ffffff"], 40);
+        if (Math.random() < 0.5) burst(b.x + rand(6, bw - 6), b.y + rand(10, bh), 2, [LIGHT_GREEN, GREEN, "#ffffff"], 40);
         if (b.dead <= 0) {
           const kind = b.kind;
           s.boss = null;
           s.bossState = "none";
-          runBossBeaten(kind);
+          s.bossCount += 1; // the next one comes 10k later, faster and tougher
+          unlockOutfit("ghost");
+          const pts = kind === "giant" ? PTS_GIANT : PTS_BOSS;
+          s.bonus += pts;
+          s.flash = 2.5;
+          s.flashText = `${kind === "giant" ? "GIANT" : "TROLL"} DOWN! +${pts}`;
+          // leftover shots stay, but back to normal rules
+          if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
+          s.ammo = Math.min(s.ammo, 5);
         }
       } else if (b.dazed > 0) {
         // Down but not out: he just lies there while you line up the finishing stomp
@@ -6792,9 +5823,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           }
         }
       }
-      // The two stash boxes in the arena refill every few seconds
+      // The two bonus blocks in the arena refill every few seconds
       s.bossRefill += dt;
-      if (s.bossRefill > BOSS_BOX_REFILL) {
+      if (s.bossRefill > 10) {
         s.bossRefill = 0;
         for (let k = 0; k < BOSS_ARENA; k++) {
           const c = colAt(s.bossCol + k);
@@ -6806,34 +5837,22 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       }
     }
 
-    updatePet(dt); // the bichon (does nothing until you've won it)
-
-    // MAGNET (a spin prize): leaves and coins close to you fly to you
-    const magnetRange = MAGNET_RANGE[Math.min(s.perks.magnet, MAGNET_RANGE.length - 1)];
-    if (magnetRange > 0) {
-      const mx = hx() + HB_W / 2;
-      const my = hy() + HB_H / 2;
-      for (const l of s.leaves) {
-        if (l.taken) continue;
-        const half = l.small ? 4 : 7;
-        const dx = mx - (l.x + half);
-        const dy = my - (l.y + half);
-        const dist = Math.hypot(dx, dy);
-        if (dist > magnetRange || dist < 1) continue;
-        // a coin is a coin because of the spot it sits on, so remember what it is before it moves
-        if (l.coin === undefined) l.coin = isCoin(l);
-        const step = Math.min(dist, MAGNET_PULL * dt);
-        l.x += (dx / dist) * step;
-        l.y += (dy / dist) * step;
-      }
-    }
-
     // Weed leaves: points. Gold coins: money for outfits.
     for (const l of s.leaves) {
       if (l.taken) continue;
       const size = l.small ? 8 : 14;
       if (hx() + HB_W > l.x && hx() < l.x + size && hy() + HB_H > l.y && hy() < l.y + size) {
-        collectLeaf(l);
+        l.taken = true;
+        if (isCoin(l)) {
+          addCoins(1);
+          popup(l.x + 7, l.y - 4, "+1 COIN");
+          burst(l.x + 7, l.y + 7, 10, ["#ffd700", "#fff3a0", "#b8860b"], 50);
+          playCoin();
+          continue;
+        }
+        s.bonus += PTS_LEAF;
+        burst(l.x + 7, l.y + 7, 8, [GREEN, DARK_GREEN, "#ffffff"], 45);
+        playLeaf();
       }
     }
     s.leaves = s.leaves.filter((l) => !l.taken && (s.inBonus || l.x > s.cam - 40)); // the Void keeps everything, you can walk back
@@ -6843,7 +5862,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (h.taken) continue;
       if (hx() + HB_W > h.x && hx() < h.x + 14 && hy() + HB_H > h.y && hy() < h.y + 12) {
         h.taken = true;
-        if (s.lives < maxLives()) {
+        if (s.lives < MAX_LIVES) {
           s.lives += 1;
           popup(h.x + 7, h.y - 4, "+1 LIFE");
         } else {
@@ -8774,28 +7793,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const tx = x1 + 3;
     ctx.fillStyle = INK;
     ctx.fillRect(tx - 1, y - 5, 9, 8);
-    const nextBoss = bossKindAt(s.bossCount); // green troll, purple giant, TOMBFELL (dark blue, pointy hat)
-    const giantNext = nextBoss === "giant";
-    ctx.fillStyle = s.bossState === "fight" && Math.floor(s.t * 6) % 2 === 0 ? "#ffffff" : giantNext ? "#8a4fc0" : nextBoss === "tombfell" ? "#3a1d8a" : "#6aa84f";
+    ctx.fillStyle = s.bossState === "fight" && Math.floor(s.t * 6) % 2 === 0 ? "#ffffff" : "#6aa84f";
     ctx.fillRect(tx, y - 4, 7, 6);
-    if (nextBoss === "tombfell") {
-      // his hat
-      ctx.fillStyle = INK;
-      ctx.fillRect(tx - 1, y - 6, 9, 2);
-      ctx.fillRect(tx + 1, y - 8, 5, 2);
-      ctx.fillRect(tx + 2, y - 10, 3, 2);
-      ctx.fillStyle = "#3cf0ff";
-      ctx.fillRect(tx + 3, y - 8, 1, 1);
-    }
-    if (giantNext) {
-      // his horns
-      ctx.fillStyle = INK;
-      ctx.fillRect(tx - 2, y - 8, 3, 4);
-      ctx.fillRect(tx + 6, y - 8, 3, 4);
-      ctx.fillStyle = "#f3e9c8";
-      ctx.fillRect(tx - 1, y - 7, 1, 3);
-      ctx.fillRect(tx + 7, y - 7, 1, 3);
-    }
     ctx.fillStyle = "#c81428";
     ctx.fillRect(tx + 1, y - 3, 1, 1);
     ctx.fillRect(tx + 4, y - 3, 1, 1);
@@ -8816,11 +7815,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     ctx.fillText("PICK YOUR SPELL", W / 2, 14);
     ctx.fillStyle = "#ffc800";
     const need = b ? b.maxHp : s.lboss ? s.lboss.maxHp : s.kboss ? s.kboss.maxHp : 0;
-    const shots = s.kboss ? HORNED_AMMO : b ? BOSS_START_SHOTS : need + BOSS_SPARE_SHOTS;
+    const shots = s.kboss ? HORNED_AMMO : need + BOSS_SPARE_SHOTS;
     ctx.fillText(
       s.tboss
         ? `${TOMB_AMMO} SHOTS. THEY ONLY WORK ONCE HE'S OFF THE BEAR`
-        : s.kboss || b
+        : s.kboss
           ? `${shots} SHOTS, IT TAKES ${need}. USE THE STASH BOXES`
           : `${shots} SHOTS, IT TAKES ${need}`,
       W / 2,
@@ -8896,313 +7895,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     if (Math.floor(s.t * 2) % 2 === 0) {
       ctx.fillStyle = "#ffffff";
       ctx.fillText("< > PICK, OK TO FIGHT", W / 2, H - 20);
-    }
-  };
-
-  // ---------- The wax moment: drawing ----------
-  const drawWax = (ctx: CanvasRenderingContext2D) => {
-    const s = state.current;
-    const t = s.waxT;
-    ctx.fillStyle = "rgba(22, 12, 29, 0.9)";
-    ctx.fillRect(0, 0, W, H);
-    ctx.font = `8px ${fontFamily}`;
-    ctx.textBaseline = "top";
-    // the two lines get typed out
-    const typed = (text: string, from: number, y: number, color: string) => {
-      const n = Math.max(0, Math.min(text.length, Math.floor((t - from) / 0.045)));
-      if (n <= 0) return;
-      ctx.textAlign = "left";
-      const x = Math.round(W / 2 - ctx.measureText(text).width / 2);
-      ctx.fillStyle = INK;
-      ctx.fillText(text.slice(0, n), x + 1, y + 1);
-      ctx.fillStyle = color;
-      ctx.fillText(text.slice(0, n), x, y);
-    };
-    // the rig: the level bong, big, with a glass banger on the side
-    const sc = 5;
-    const rx = Math.round(W / 2 - 25);
-    const ry = 42;
-    drawPixels(ctx, BONG, rx, ry, BONG_COLORS, sc);
-    const bowlX = rx + 8 * sc;
-    const bowlY = ry + 7 * sc;
-    const heating = t >= WAX_T_HEAT && t < WAX_T_HIT;
-    // the dab: amber wax in the banger (it glows while the torch is on it)
-    ctx.fillStyle = heating ? "#ffe08a" : t >= WAX_T_HIT ? "#b8860b" : "#ffb03c";
-    ctx.fillRect(bowlX, bowlY, sc, sc);
-    if (heating) {
-      // the torch: a grey can and a blue flame that licks the banger
-      ctx.fillStyle = INK;
-      ctx.fillRect(bowlX + 26, bowlY - 6, 24, 16);
-      ctx.fillStyle = "#9b8fa6";
-      ctx.fillRect(bowlX + 28, bowlY - 4, 20, 12);
-      ctx.fillStyle = "#5a4a6a";
-      ctx.fillRect(bowlX + 22, bowlY, 6, 4);
-      const lick = Math.floor(t * 4) % 2; // a slow flicker
-      ctx.fillStyle = "#1d4fa8";
-      ctx.fillRect(bowlX + 6 - lick * 2, bowlY, 16 + lick * 2, 4);
-      ctx.fillStyle = "#4aa3ff";
-      ctx.fillRect(bowlX + 9 - lick * 2, bowlY + 1, 13 + lick * 2, 2);
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(bowlX + 16, bowlY + 1, 6, 2);
-    }
-    if (t >= WAX_T_HIT) {
-      // the pull: bubbles in the water, the neck fills with milky smoke (it clears again on the exhale)
-      const fill = t < WAX_T_EXHALE ? Math.min(1, (t - WAX_T_HIT) / 1.4) : Math.max(0, 1 - (t - WAX_T_EXHALE) / 0.7);
-      const h = Math.round(7 * sc * fill);
-      ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
-      ctx.fillRect(rx + 4 * sc, ry + 8 * sc - h, 2 * sc, h);
-      if (t < WAX_T_EXHALE) {
-        for (let i = 0; i < 7; i++) {
-          const up = (t * 46 + i * 11) % 24;
-          ctx.fillStyle = i % 2 === 0 ? "#ffffff" : "#bfe3ff";
-          ctx.fillRect(rx + (2 + ((i * 37) % 6)) * sc + 1, Math.round(ry + 13 * sc - up), 3, 3);
-        }
-      }
-    }
-    if (t >= WAX_T_EXHALE) {
-      // the exhale: soft square puffs rolling up and out of the neck
-      for (let i = 0; i < 18; i++) {
-        const age = t - WAX_T_EXHALE - i * 0.1;
-        if (age <= 0 || age > 2.8) continue;
-        const drift = (((i * 53) % 7) - 3) * 10;
-        const px = rx + 5 * sc + drift * age;
-        const py = ry - 2 - age * (14 + (i % 4) * 6);
-        const r = 3 + age * 6;
-        ctx.fillStyle = `rgba(255, 255, 255, ${Math.max(0, 0.75 - age * 0.27).toFixed(3)})`;
-        ctx.fillRect(Math.round(px - r), Math.round(py - r / 2), Math.round(r * 2), Math.round(r));
-        ctx.fillRect(Math.round(px - r / 2), Math.round(py - r), Math.round(r), Math.round(r * 2));
-        ctx.fillRect(Math.round(px - r * 0.8), Math.round(py - r * 0.8), Math.round(r * 1.6), Math.round(r * 1.6));
-      }
-    }
-    // the words go on top of the smoke so you can always read them
-    typed(WAX_LINE_1, 0.2, 10, "#ffffff");
-    typed(WAX_LINE_2, WAX_T_LINE2, 23, "#ffc800");
-    if (t >= WAX_T_EXHALE) {
-      typed(WAX_LINE_3, WAX_T_EXHALE + 0.6, 127, "#ff5fe0");
-      if (t >= WAX_T_EXHALE + 2 && Math.floor(s.t * 2) % 2 === 0) {
-        ctx.textAlign = "center";
-        ctx.fillStyle = "#ffffff";
-        ctx.fillText(touchPadRef.current ? "A = KEEP GOING" : "JUMP = KEEP GOING", W / 2, 143);
-      }
-    }
-    ctx.textAlign = "center";
-  };
-
-  // ---------- STASH SPIN: drawing ----------
-
-  // The little prize icons at the bottom left while you run: one per prize you hold, pink dots = how many times
-  const drawPerkHud = (ctx: CanvasRenderingContext2D) => {
-    const s = state.current;
-    let x = 8;
-    const y = H - 31;
-    for (const p of PERKS) {
-      const n = s.perks[p.id as PerkId];
-      if (!n) continue;
-      ctx.fillStyle = INK;
-      ctx.fillRect(x, y, 13, 17);
-      ctx.fillStyle = p.curse ? "#f7b0b8" : SCREEN; // curses sit on red
-      ctx.fillRect(x + 1, y + 1, 11, 11);
-      // the icon fades while it's used up: the shield until the next zone, SECOND WIND for good
-      if ((p.id === "shield" && s.shield <= 0) || (p.id === "revive" && s.reviveUsed)) ctx.globalAlpha = 0.3;
-      drawPixels(ctx, p.art, x + 2, y + 2, p.colors, 1);
-      ctx.globalAlpha = 1;
-      for (let i = 0; i < perkMax(p); i++) {
-        ctx.fillStyle = i < n ? (p.curse ? "#ff5a64" : "#ff5fe0") : "#4a3d55";
-        ctx.fillRect(x + 1 + i * 4, y + 13, 3, 3);
-      }
-      x += 15;
-    }
-  };
-
-  // SHIELD: the bubble around you (one little orb circling it for every hit it can still take)
-  const drawShieldBubble = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
-    const s = state.current;
-    const cx = x + SPRITE_W / 2;
-    const cy = y + SPRITE_H / 2 + 1;
-    const rx = 15;
-    const ry = 21;
-    ctx.fillStyle = "rgba(159, 232, 255, 0.14)";
-    ctx.fillRect(cx - rx + 4, cy - ry + 4, rx * 2 - 8, ry * 2 - 8);
-    for (let i = 0; i < 40; i++) {
-      const a = (i / 40) * Math.PI * 2;
-      const shine = a > Math.PI * 1.05 && a < Math.PI * 1.45; // top left
-      ctx.fillStyle = shine ? "#ffffff" : i % 2 === 0 ? "#9fe8ff" : "#4aa3ff";
-      ctx.fillRect(Math.round(cx + Math.cos(a) * rx), Math.round(cy + Math.sin(a) * ry), 1, 1);
-    }
-    for (let k = 0; k < s.shield; k++) {
-      const a = s.t * 2.2 + (k / Math.max(1, s.shield)) * Math.PI * 2;
-      const ox = Math.round(cx + Math.cos(a) * rx);
-      const oy = Math.round(cy + Math.sin(a) * ry);
-      ctx.fillStyle = "#1d4fa8";
-      ctx.fillRect(ox - 2, oy - 2, 4, 4);
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(ox - 1, oy - 1, 2, 2);
-    }
-  };
-
-  // The machine: a purple cabinet with three reel windows (gold for the BOSS SPIN)
-  const drawSpin = (ctx: CanvasRenderingContext2D) => {
-    const s = state.current;
-    const sp = s.spin;
-    if (!sp) return;
-    const trim = sp.boss ? "#ffd700" : PINK;
-    const trimDark = sp.boss ? "#8a6400" : DARK_PINK;
-    const trimLight = sp.boss ? "#fff3a0" : "#ff5fe0";
-    const allLanded = sp.landed >= 3;
-    const ready = spinCanPick();
-    const slow = Math.floor(s.t * 2) % 2 === 0; // slow blink, twice a second
-
-    ctx.fillStyle = "rgba(22, 12, 29, 0.8)";
-    ctx.fillRect(0, 0, W, H);
-    ctx.font = `8px ${fontFamily}`;
-    ctx.textBaseline = "top";
-    ctx.textAlign = "center";
-
-    // the lever on the right: it gets pulled when the machine opens
-    const pull = sp.t < 0.2 ? sp.t / 0.2 : Math.max(0, 1 - (sp.t - 0.2) / 0.5);
-    const ballY = 30 + Math.round(pull * 30);
-    ctx.fillStyle = INK;
-    ctx.fillRect(296, 64, 9, 14);
-    ctx.fillStyle = trimDark;
-    ctx.fillRect(297, 66, 6, 10);
-    ctx.fillStyle = INK;
-    ctx.fillRect(300, ballY + 4, 4, 68 - ballY - 4);
-    ctx.fillStyle = "#9b8fa6";
-    ctx.fillRect(301, ballY + 4, 2, 68 - ballY - 4);
-    ctx.fillStyle = INK;
-    ctx.fillRect(297, ballY - 1, 10, 10);
-    ctx.fillStyle = trim;
-    ctx.fillRect(298, ballY, 8, 8);
-    ctx.fillStyle = trimLight;
-    ctx.fillRect(299, ballY + 1, 3, 3);
-
-    // the cabinet
-    ctx.fillStyle = INK;
-    ctx.fillRect(40, 5, 256, 150);
-    ctx.fillStyle = "#2a1640";
-    ctx.fillRect(42, 7, 252, 146);
-    ctx.fillStyle = "#3d2260";
-    ctx.fillRect(42, 7, 252, 2);
-    ctx.fillRect(42, 7, 2, 146);
-    // the sign on top, with a row of little lights that take turns
-    ctx.fillStyle = trim;
-    ctx.fillRect(42, 7, 252, 17);
-    ctx.fillStyle = trimDark;
-    ctx.fillRect(42, 22, 252, 2);
-    const chase = Math.floor(s.t * 3);
-    for (let i = 0; i < 31; i++) {
-      ctx.fillStyle = (i + chase) % 3 === 0 ? "#ffffff" : trimDark;
-      ctx.fillRect(46 + i * 8, 9, 2, 2);
-    }
-    drawPixels(ctx, LEAF, 50, 14, { G: trimDark, D: trimDark }, 1);
-    drawPixels(ctx, LEAF, 279, 14, { G: trimDark, D: trimDark }, 1);
-    const title = sp.boss ? "BOSS STASH SPIN" : "STASH SPIN";
-    ctx.fillStyle = trimDark;
-    ctx.fillText(title, W / 2 + 1, 14);
-    ctx.fillStyle = sp.boss ? INK : "#ffffff";
-    ctx.fillText(title, W / 2, 13);
-
-    // the three reels
-    for (let r = 0; r < 3; r++) {
-      const wx = SPIN_WIN.x + r * SPIN_WIN.step;
-      const wy = SPIN_WIN.y;
-      const landed = sp.t >= sp.stops[r];
-      const picked = allLanded && (sp.jackpot || (sp.took >= 0 ? sp.took === r : sp.pick === r));
-      // frame
-      ctx.fillStyle = INK;
-      ctx.fillRect(wx - 4, wy - 4, SPIN_WIN.w + 8, SPIN_WIN.h + 8);
-      ctx.fillStyle = picked ? (sp.took >= 0 ? "#ffffff" : Math.floor(s.t * 4) % 2 === 0 ? trim : trimLight) : "#5a4a6a";
-      ctx.fillRect(wx - 3, wy - 3, SPIN_WIN.w + 6, SPIN_WIN.h + 6);
-      ctx.fillStyle = INK;
-      ctx.fillRect(wx - 1, wy - 1, SPIN_WIN.w + 2, SPIN_WIN.h + 2);
-      // the window (the same pale green as the game's screen)
-      ctx.fillStyle = SCREEN;
-      ctx.fillRect(wx, wy, SPIN_WIN.w, SPIN_WIN.h);
-      ctx.fillStyle = landed && perkDef(sp.reels[r]).curse ? "#e0303a" : HILLS; // a curse has red edges
-      ctx.fillRect(wx, wy, SPIN_WIN.w, 5);
-      ctx.fillRect(wx, wy + SPIN_WIN.h - 5, SPIN_WIN.w, 5);
-      // the icons rolling down
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(wx, wy, SPIN_WIN.w, SPIN_WIN.h);
-      ctx.clip();
-      const left = reelLeft(r);
-      const base = Math.floor(left);
-      const thud = landed && sp.t - sp.stops[r] < 0.1 ? 2 : 0; // a tiny bounce when it lands
-      for (const k of [base, base + 1]) {
-        const id = sp.strips[r][k];
-        if (!id) continue;
-        const d = perkDef(id);
-        drawPixels(ctx, d.art, wx + 12, wy + 4 + thud + Math.round((k - left) * SPIN_WIN.h), d.colors, 4);
-      }
-      ctx.restore();
-      // the two little pointers that mark the middle of the window
-      ctx.fillStyle = trimDark;
-      ctx.fillRect(wx, wy + 20, 3, 4);
-      ctx.fillRect(wx + SPIN_WIN.w - 3, wy + 20, 3, 4);
-      // prizes you didn't take go dark
-      if (sp.took >= 0 && !picked) {
-        ctx.fillStyle = "rgba(22, 12, 29, 0.65)";
-        ctx.fillRect(wx, wy, SPIN_WIN.w, SPIN_WIN.h);
-      }
-      // the arrow above the one you're on
-      if (picked && sp.took < 0 && ready) {
-        const ax = wx + SPIN_WIN.w / 2;
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(ax - 3, wy - 9 + (slow ? 0 : 1), 6, 2);
-        ctx.fillRect(ax - 2, wy - 7 + (slow ? 0 : 1), 4, 1);
-        ctx.fillRect(ax - 1, wy - 6 + (slow ? 0 : 1), 2, 1);
-      }
-      // under each reel: how many of that prize you have (the new ones blink)
-      if (landed && sp.reels[r] !== "snack") {
-        const id = sp.reels[r] as PerkId;
-        const have = s.perks[id];
-        const gain = sp.took >= 0 ? 0 : sp.jackpot ? 2 : 1;
-        const most = perkMax(perkDef(id));
-        for (let i = 0; i < most; i++) {
-          const px = wx + SPIN_WIN.w / 2 - (most * 12 - 4) / 2 + i * 12;
-          ctx.fillStyle = INK;
-          ctx.fillRect(px - 1, wy + SPIN_WIN.h + 6, 10, 5);
-          ctx.fillStyle = i < have ? LIGHT_GREEN : i < have + gain && slow ? "#ffffff" : "#4a3d55";
-          ctx.fillRect(px, wy + SPIN_WIN.h + 7, 8, 3);
-        }
-      }
-    }
-
-    // the text panel under the reels
-    ctx.fillStyle = INK;
-    ctx.fillRect(48, 94, 240, 41);
-    ctx.fillStyle = "#160c1d";
-    ctx.fillRect(49, 95, 238, 39);
-    if (!allLanded) {
-      ctx.fillStyle = "#9b8fa6";
-      ctx.fillText(sp.boss ? "BOSS DOWN! RARE PRIZES INSIDE" : "KEEP 1 OF THE 3 PRIZES", W / 2, 103);
-      ctx.fillText("STACK A PRIZE UP TO 3 TIMES", W / 2, 117);
-    } else {
-      const shown = sp.jackpot ? 1 : sp.took >= 0 ? sp.took : sp.pick;
-      const d = perkDef(sp.reels[shown]);
-      const have = d.id === "snack" ? 0 : s.perks[d.id as PerkId];
-      let head = d.name;
-      if (sp.took >= 0) head = sp.jackpot ? `GOT ${d.name} X2!` : `GOT ${d.name}!`;
-      else if (sp.jackpot) head = `JACKPOT! ${d.name} X2`;
-      else if (d.curse) head = `CURSE: ${d.name}`;
-      else if (d.id !== "snack" && perkMax(d) === 1) head = `${d.name}  RARE!`;
-      else if (d.id !== "snack") head = `${d.name}  LV ${have + 1}/${perkMax(d)}`;
-      // (the bichon has a different line for each level)
-      const level = Math.max(0, sp.took >= 0 ? have - 1 : have);
-      const info = d.infoAt ? d.infoAt[Math.min(level, d.infoAt.length - 1)] : d.info;
-      ctx.fillStyle = d.curse ? "#ff5a64" : sp.jackpot && !slow ? "#ffffff" : "#ffc800";
-      ctx.fillText(head, W / 2, 99);
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(info[0], W / 2, 111);
-      ctx.fillText(info[1], W / 2, 122);
-    }
-
-    // what to press
-    if (ready && slow) {
-      ctx.fillStyle = "#ffffff";
-      const ok = touchPadRef.current ? "A = TAKE IT" : "JUMP = TAKE IT";
-      ctx.fillText(sp.jackpot ? ok : `< > CHOOSE   ${ok}`, W / 2, 141);
     }
   };
 
@@ -9331,7 +8023,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         const spin = Math.abs(Math.cos(s.t * 4 + l.x));
         const cw = Math.max(2, Math.round(12 * spin));
         const cx = Math.round(l.x - cam + 7 - cw / 2);
-        const cy = Math.round(l.y) + 1 + Math.round(Math.sin(s.t * 4 + l.x) * 2);
+        const cy = l.y + 1 + Math.round(Math.sin(s.t * 4 + l.x) * 2);
         ctx.fillStyle = "#6b4a00";
         ctx.fillRect(cx - 1, cy, cw + 2, 12);
         ctx.fillRect(cx, cy - 1, cw, 14);
@@ -9456,14 +8148,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     for (const f of s.fireballs) {
       const x = Math.round(f.x - cam);
       const y = Math.round(f.y);
-      if (f.pet) {
-        // the dog's little shot
-        ctx.fillStyle = "#ff5fc8";
-        ctx.fillRect(x, y, 4, 4);
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(x + 1, y + 1, 2, 2);
-        continue;
-      }
       if (f.spike) {
         // a purple spike with a short tail pointing back to where it came from
         ctx.fillStyle = "#5a1a8a";
@@ -9711,7 +8395,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         const lx = bx + 2 + k * (isGiant ? 16 : 13);
         const rise = (s.t * 14 + k * 5) % 10;
         for (let j = 0; j < 7; j++) {
-          ctx.fillStyle = isGiant ? (j % 2 === 0 ? "#c68bff" : "#6a2a9a") : j % 2 === 0 ? "#7fc24a" : "#4e8f2a";
+          ctx.fillStyle = j % 2 === 0 ? "#7fc24a" : "#4e8f2a";
           ctx.fillRect(Math.round(lx + Math.sin(s.t * 7 + j * 0.9 + k) * 2), Math.round(by + 4 - rise - j * 2), 1, 2);
         }
       }
@@ -9719,24 +8403,21 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         (b.hit > 0 && Math.floor(s.t * 20) % 2 === 0) ||
         (b.dead > 0 && Math.floor(s.t * 14) % 2 === 0) ||
         (b.dazed > 0 && Math.floor(s.t * 10) % 2 === 0);
-      const look = isGiant ? GIANT_COLORS : TROLL_COLORS; // the giant is purple
-      const colors = flash ? Object.fromEntries(Object.keys(look).map((k) => [k, "#ffffff"])) : look;
-      const hornsUp = isGiant ? GIANT_HORN_ROWS * scale : 0; // his horns stick out above his head
-      if (isGiant) drawPixels(ctx, b.facing > 0 ? GIANT_ROWS_RIGHT : GIANT_ROWS, bx, by - hornsUp, colors, scale);
-      else drawPixels(ctx, b.facing > 0 ? TROLL_RIGHT : TROLL, bx, by, colors, scale);
+      const colors = flash ? Object.fromEntries(Object.keys(TROLL_COLORS).map((k) => [k, "#ffffff"])) : TROLL_COLORS;
+      drawPixels(ctx, b.facing > 0 ? TROLL_RIGHT : TROLL, bx, by, colors, scale);
       // little health bar over his head
       if (b.dead <= 0 && b.dazed <= 0) {
         const barW = isGiant ? 46 : 30;
         ctx.fillStyle = INK;
-        ctx.fillRect(bx + (isGiant ? 9 : 6), by - 7 - hornsUp, barW + 2, 4);
+        ctx.fillRect(bx + (isGiant ? 9 : 6), by - 7, barW + 2, 4);
         ctx.fillStyle = "#9b8fa6";
-        ctx.fillRect(bx + (isGiant ? 10 : 7), by - 6 - hornsUp, barW, 2);
+        ctx.fillRect(bx + (isGiant ? 10 : 7), by - 6, barW, 2);
         ctx.fillStyle = LIGHT_GREEN;
-        ctx.fillRect(bx + (isGiant ? 10 : 7), by - 6 - hornsUp, Math.round((barW * Math.max(0, b.hp)) / b.maxHp), 2);
+        ctx.fillRect(bx + (isGiant ? 10 : 7), by - 6, Math.round((barW * Math.max(0, b.hp)) / b.maxHp), 2);
       }
       // a drip hanging off his tongue now and then
       if (!flash && b.dazed <= 0 && Math.floor(s.t * 3) % 2 === 0) {
-        ctx.fillStyle = look.T;
+        ctx.fillStyle = TROLL_COLORS.T;
         const tx = b.facing > 0 ? bx + bw - 12 : bx + 6;
         ctx.fillRect(tx, by + (isGiant ? 39 : 26), 6, 2);
       }
@@ -10096,8 +8777,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
     // You
     const blinking = s.invuln > 0 && Math.floor(s.t * 12) % 2 === 0;
-    const showYou = ["select", "ready", "running", "pipe", "golden", "choose", "paused", "spin", "wax"].includes(s.mode);
-    if (s.pet && s.mode !== "select") drawPet(ctx, cam); // the bichon, just behind you
+    const showYou = ["select", "ready", "running", "pipe", "golden", "choose", "paused"].includes(s.mode);
     if (showYou && !blinking) {
       const previewOutfit = s.mode === "select" ? OUTFITS[s.selectIndex].id : s.outfit;
       const levelOutfit = s.levelMode ? LEVELS[s.level - 1]?.outfit : undefined;
@@ -10137,7 +8817,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           ctx.clip();
         }
         // Jetpack on your back
-        if (s.jetpack || s.sipFuel > 0) {
+        if (s.jetpack) {
           const bx = s.facing > 0 ? x + 2 : x + SPRITE_W - 7;
           const by = y + 13;
           drawPixels(ctx, JET_SMALL, bx, by, { K: INK, P: PINK, p: DARK_PINK, W: "#ffffff", g: "#78788a" }, 1);
@@ -10180,9 +8860,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       }
     }
 
-    // SHIELD prize: the bubble around you while it can still take a hit
-    if (s.shield > 0 && showYou && s.mode !== "select") drawShieldBubble(ctx, Math.round(s.x - cam), Math.round(s.y));
-
     for (const p of s.particles) {
       ctx.fillStyle = p.color;
       ctx.fillRect(Math.round(p.x - cam), Math.round(p.y), 2, 2);
@@ -10206,21 +8883,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       }
     }
 
-    // WAX MODE: the colours slowly breathe brighter, then darker (one breath every few seconds, never a flash)
-    if (s.wax && !s.levelMode && s.mode !== "select") {
-      const breath = Math.sin(((s.t - s.waxAt) * Math.PI * 2) / WAX_PULSE_SECONDS);
-      ctx.save();
-      if (breath > 0) {
-        ctx.globalCompositeOperation = "lighter";
-        ctx.fillStyle = `rgba(255, 150, 230, ${(WAX_PULSE_BRIGHT * breath).toFixed(3)})`;
-      } else {
-        ctx.globalCompositeOperation = "multiply";
-        ctx.fillStyle = `rgba(60, 20, 90, ${(WAX_PULSE_DARK * -breath).toFixed(3)})`;
-      }
-      ctx.fillRect(0, 0, W, H);
-      ctx.restore();
-    }
-
     // Point popups
     ctx.font = `8px ${fontFamily}`;
     ctx.textBaseline = "top";
@@ -10241,15 +8903,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     ctx.fillStyle = hudInk;
     ctx.textAlign = "left";
     ctx.fillText(s.levelMode ? fmtTime(s.levelTime * 1000) : pad(s.score), 22, 6);
-    if (s.wax && !s.levelMode) {
-      // WAX MODE: a gold X2 right behind your grams
-      const x2 = 22 + Math.round(ctx.measureText(pad(s.score)).width) + 5;
-      ctx.fillStyle = INK;
-      ctx.fillText("X2", x2 + 1, 7);
-      ctx.fillStyle = "#ffc800";
-      ctx.fillText("X2", x2, 6);
-      ctx.fillStyle = hudInk;
-    }
     ctx.textAlign = "right";
     if (s.levelMode) {
       const best = s.levelBest[String(s.level)];
@@ -10267,10 +8920,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     ctx.fillStyle = hudInk;
     ctx.fillText(`${s.coins}`, W - 6, 16);
 
-    // Hearts = lives (levels: up to 4. Infinite run: 3, or 4 with the EXTRA HEART prize)
-    const heartStep = Math.min(16, Math.floor(64 / (maxLives() - 1)));
-    for (let i = 0; i < maxLives(); i++) {
-      const x = W / 2 - 34 + i * heartStep;
+    // Hearts = lives (max 4)
+    for (let i = 0; i < MAX_LIVES; i++) {
+      const x = W / 2 - 34 + i * 16;
       drawPixels(ctx, HEART, x + 1, 5, { P: INK }, 1);
       drawPixels(ctx, HEART, x, 4, { P: i < s.lives ? PINK : "#9b8fa6" }, 1);
     }
@@ -10303,8 +8955,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       const bx = Math.round(W / 2 - bw / 2);
       const sec = bw / 3;
       const filled = Math.round((bw * Math.max(0, tbar.hp)) / tbar.maxHp);
-      // left to right: bear, cats, doves (the quick fight in the infinite run is cats only: all yellow)
-      const partColors = tbar.short ? ["#ffe14a", "#ffe14a", "#ffe14a"] : ["#ff8f40", "#ffe14a", "#ff7ad9"];
+      const partColors = ["#ff8f40", "#ffe14a", "#ff7ad9"]; // left to right: bear, cats, doves
       ctx.fillStyle = INK;
       ctx.fillRect(bx - 2, 25, bw + 4, 12);
       ctx.fillStyle = "#3a2a3a";
@@ -10373,7 +9024,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       const label = b.kind === "giant" ? "GIANT" : "TROLL";
       ctx.fillStyle = hudInk;
       ctx.textAlign = "left";
-      ctx.fillText(bossRound() === 0 ? label : `${label} ${bossRound() + 1}`, W / 2 - 60, 25);
+      ctx.fillText(s.bossCount === 0 ? label : `${label} ${s.bossCount + 1}`, W / 2 - 60, 25);
       const bw = 72;
       const bx = W / 2 + 6;
       ctx.fillStyle = INK;
@@ -10392,9 +9043,9 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       }
     }
     // Jetpack: a little icon + fuel bar under the score while you have it
-    if (s.jetpack || s.perks.jetSip > 0) {
+    if (s.jetpack) {
       drawPixels(ctx, JETPACK, 22, 16, { K: hudInk, P: PINK, p: DARK_PINK, W: "#ffffff", g: "#78788a" }, 1);
-      const fuelFrac = s.jetpack ? s.jetFuel / JET_FUEL_MAX : s.sipFuel / Math.max(1, sipMax()); // (the JETPACK SIP prize has its own small tank)
+      const fuelFrac = s.jetFuel / JET_FUEL_MAX;
       const fbx = 38;
       const fby = 20;
       const fbw = 40;
@@ -10406,7 +9057,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       ctx.fillRect(fbx, fby, Math.round(fbw * fuelFrac), 4);
     }
     if (hasFire() && s.power === "fire" && s.bossState !== "fight") {
-      const left = Math.min(1, s.fireTime / fireTimeMax());
+      const left = s.fireTime / FIRE_TIME;
       const low = s.fireTime < 4;
       const barOn = !low || Math.floor(s.t * 8) % 2 === 0;
       ctx.fillStyle = INK;
@@ -10416,7 +9067,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         ctx.fillRect(9, H - 11, Math.max(0, Math.round((W - 18) * left)), 2);
       }
     }
-    if (!s.levelMode) drawPerkHud(ctx); // the spin prizes you hold (infinite run only)
     } // end of the select-mode HUD gate
 
     if (s.mode !== "ready" && s.mode !== "select") drawProgress(ctx);
@@ -10463,8 +9113,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
     if (s.mode === "choose") drawSpellPick(ctx);
     if (s.mode === "bossIntro") drawBossIntro(ctx);
-    if (s.mode === "spin") drawSpin(ctx);
-    if (s.mode === "wax") drawWax(ctx);
     // Lore sign you're standing next to
     if (s.levelMode && s.mode === "running" && s.flash <= 0) {
       const near = s.signs.find((sg) => Math.abs(sg.x + 8 - (s.x + SPRITE_W / 2)) < 36);
@@ -10624,8 +9272,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       const k = e.key;
       const mode = state.current.mode;
-      // Space / Enter reach the game through the page (as OK). Remember if this one is just the key being held down.
-      if (k === " " || k === "Enter") okRepeatRef.current = e.repeat;
       // Esc (or P) pauses / unpauses
       if (k === "Escape" || k === "p" || k === "P") {
         const st = state.current;
@@ -10681,29 +9327,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         if (k === "ArrowRight" || k === "d" || k === "D") state.current.selectIndex = (state.current.selectIndex + 1) % OUTFITS.length;
         return;
       }
-      // The wax moment: jump (or OK) skips the rest once the hit is done
-      if (mode === "wax") {
-        if (!e.repeat && (k === "ArrowUp" || k === "w" || k === "W")) {
-          okRepeatRef.current = false;
-          press();
-        }
-        return;
-      }
-      // The prize machine: left / right to choose, jump (or OK) to take it
-      if (mode === "spin") {
-        const goLeft = k === "ArrowLeft" || k === "a" || k === "A";
-        const goRight = k === "ArrowRight" || k === "d" || k === "D";
-        const goUp = k === "ArrowUp" || k === "w" || k === "W";
-        // keep track of what you're holding, so you carry on walking the moment the run continues
-        if (goLeft) heldRef.current.left = true;
-        if (goRight) heldRef.current.right = true;
-        if (goUp || k === " ") heldRef.current.up = true;
-        if (e.repeat) return; // a key that's just being held down doesn't count
-        if (goLeft) spinMove(-1);
-        if (goRight) spinMove(1);
-        if (goUp) spinTake();
-        return;
-      }
       // Picking a spell before a boss fight
       if (mode === "choose") {
         const options = state.current.spells.includes("spike") ? 3 : 2;
@@ -10725,34 +9348,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (k === "ArrowDown" || k === "s" || k === "S") down();
       if (k === "f" || k === "F" || k === "x" || k === "X") shoot();
       if (k === "m" || k === "M") toggleSfx();
-      // Test shortcuts (only on your own computer, never on the real site): while running in the infinite run,
-      // 9 opens a STASH SPIN right now, 0 opens a BOSS SPIN, 8 opens a spin that shows the prizes in order,
-      // 7 starts the wax moment, 6 brings the next boss.
-      // A run where you used one of them never goes on the scoreboard.
-      if ((k === "9" || k === "0") && mode === "running" && !state.current.levelMode && localTesting()) {
-        state.current.testRun = true;
-        state.current.spinQueue.push(k === "0");
-        state.current.spinWait = 0;
-      }
-      // 7 = the wax moment right now. 6 = jump your grams to just before the next boss (he shows up a screen later).
-      if ((k === "7" || k === "6") && mode === "running" && !state.current.levelMode && !state.current.inBonus && localTesting()) {
-        const st = state.current;
-        st.testRun = true;
-        if (k === "7" && !st.wax) st.waxWait = 0.01;
-        if (k === "6" && st.bossState === "none") {
-          st.bonus += Math.max(0, BOSS_EVERY * (st.bossCount + 1) - 250 - st.score);
-          st.bonusSeen = st.bonus; // (so WAX MODE doesn't double the jump)
-        }
-      }
-      // 8 = a test spin that walks through every prize in order, three at a time, so you can get a specific one
-      if (k === "8" && mode === "running" && !state.current.levelMode && localTesting()) {
-        const st = state.current;
-        const ids = PERKS.map((p) => p.id);
-        const i = st.testSpin % ids.length;
-        st.testSpin = (i + 3) % ids.length;
-        st.testRun = true;
-        openSpin(false, [ids[i], ids[(i + 1) % ids.length], ids[(i + 2) % ids.length]]);
-      }
       if (k === "-" || k === "_") setSfxVolume((sfxOnRef.current ? sfxVolRef.current : 0) - 0.1);
       if (k === "=" || k === "+") setSfxVolume((sfxOnRef.current ? sfxVolRef.current : 0) + 0.1);
     };
@@ -10779,7 +9374,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (!d || d.btn !== "a") return;
       if (d.down) {
         heldRef.current.up = true;
-        okRepeatRef.current = false; // a finger on the button is always a fresh press
         press();
       } else {
         heldRef.current.up = false;
@@ -10897,15 +9491,6 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
             }
             return;
           }
-          if (mode === "spin") {
-            // the prize machine: tap a reel to highlight it, tap the highlighted one again to take it
-            const sp = state.current.spin;
-            if (!sp || cy < SPIN_WIN.y - 6 || cy > SPIN_WIN.y + SPIN_WIN.h + 14) return;
-            const r = Math.max(0, Math.min(2, Math.floor((cx - (SPIN_WIN.x - 7)) / SPIN_WIN.step)));
-            if (sp.jackpot || sp.pick === r) spinTake();
-            else spinMove(r - sp.pick);
-            return;
-          }
           if (mode === "choose") {
             state.current.spellChoice = state.current.spells.includes("spike")
               ? Math.max(0, Math.min(2, Math.floor((cx - 48) / 80)))
@@ -10986,7 +9571,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           }}
         >
           <div style={{ fontSize: "clamp(10px, 3vw, 15px)", color: "#ffd700" }}>YOU FOUND THE GOLDEN LEAF!</div>
-          <div style={{ fontSize: "clamp(8px, 2.2vw, 11px)", color: "#ffd700" }}>+{PTS_GOLD * (state.current.wax ? 2 : 1)} GRAMS</div>
+          <div style={{ fontSize: "clamp(8px, 2.2vw, 11px)", color: "#ffd700" }}>+{PTS_GOLD} GRAMS</div>
           <div style={{ fontSize: "clamp(8px, 2.2vw, 11px)", lineHeight: 1.6 }}>
             SECRET TRACK: STUTTERS REMIX
             <br />
