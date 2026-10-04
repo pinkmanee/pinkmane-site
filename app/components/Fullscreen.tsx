@@ -42,8 +42,55 @@ function addAppTags() {
   meta("apple-mobile-web-app-capable", "yes");
   meta("mobile-web-app-capable", "yes");
   meta("apple-mobile-web-app-title", APP_NAME);
-  meta("apple-mobile-web-app-status-bar-style", "black");
+  // "black-translucent" = the page goes right up under the status bar, so there is NO reserved black strip at the top. (The old "black"
+  // one reserved a strip that could get stuck there after you turn the phone sideways.) A shortcut keeps the style it was made with:
+  // delete the old one from your Home Screen and add it again to get this.
+  meta("apple-mobile-web-app-status-bar-style", "black-translucent");
   meta("theme-color", "#d63cc8");
+}
+
+// When the game runs from the Home Screen: lock the page to the real screen. The page was sized with "100dvh", and in a Home Screen app
+// that number can be stale right after turning the phone, which left the page taller than the screen (a black strip you had to
+// swipe away). A locked page that is simply "the whole screen" can't get stuck like that.
+const STANDALONE_CSS = `
+  html.pm-standalone, html.pm-standalone body { position: fixed; inset: 0; width: 100%; height: 100%; overflow: hidden !important; overscroll-behavior: none; }
+  html.pm-standalone main { height: 100% !important; min-height: 0 !important; overflow-x: hidden; overflow-y: auto; box-sizing: border-box; -webkit-overflow-scrolling: touch; }
+  @media (orientation: portrait) { html.pm-standalone main { padding-top: env(safe-area-inset-top); } }
+`;
+function applyStandaloneFix() {
+  const root = document.documentElement;
+  root.classList.add("pm-standalone");
+  if (!document.getElementById("pm-standalone-css")) {
+    const st = document.createElement("style");
+    st.id = "pm-standalone-css";
+    st.textContent = STANDALONE_CSS;
+    document.head.appendChild(st);
+  }
+  // go edge to edge (under the status bar and the notch): the page already pads itself with env(safe-area-inset-*)
+  const vp = document.querySelector('meta[name="viewport"]');
+  if (vp) {
+    const c = vp.getAttribute("content") || "";
+    if (!/viewport-fit/.test(c)) vp.setAttribute("content", (c ? c + ", " : "width=device-width, initial-scale=1, ") + "viewport-fit=cover");
+  } else {
+    const m = document.createElement("meta");
+    m.name = "viewport";
+    m.content = "width=device-width, initial-scale=1, viewport-fit=cover";
+    document.head.appendChild(m);
+  }
+  // after turning the phone iOS can leave things the old size until you scroll: put the page back by hand, a few times
+  let timers: number[] = [];
+  const settle = () => window.scrollTo(0, 0);
+  const onTurn = () => {
+    timers.forEach((t) => window.clearTimeout(t));
+    timers = [50, 250, 700].map((ms) => window.setTimeout(settle, ms));
+  };
+  window.addEventListener("orientationchange", onTurn);
+  window.addEventListener("resize", onTurn);
+  return () => {
+    timers.forEach((t) => window.clearTimeout(t));
+    window.removeEventListener("orientationchange", onTurn);
+    window.removeEventListener("resize", onTurn);
+  };
 }
 
 export function useFullscreen() {
@@ -59,9 +106,11 @@ export function useFullscreen() {
     const ua = navigator.userAgent;
     setIsIOS(/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1));
     const nav = navigator as Navigator & { standalone?: boolean };
-    setIsStandalone(
-      nav.standalone === true || window.matchMedia("(display-mode: standalone)").matches || window.matchMedia("(display-mode: fullscreen)").matches
-    );
+    const standalone =
+      nav.standalone === true || window.matchMedia("(display-mode: standalone)").matches || window.matchMedia("(display-mode: fullscreen)").matches;
+    setIsStandalone(standalone);
+    // (only on a phone or tablet: someone who installs the site as an app on a computer is left exactly as before)
+    const undoStandalone = standalone && (navigator.maxTouchPoints > 0 || /iPhone|iPad|iPod/.test(ua)) ? applyStandaloneFix() : undefined;
     const onChange = () => setIsFullscreen(!!(d.fullscreenElement || d.webkitFullscreenElement));
     onChange();
     d.addEventListener("fullscreenchange", onChange);
@@ -70,6 +119,7 @@ export function useFullscreen() {
     return () => {
       d.removeEventListener("fullscreenchange", onChange);
       d.removeEventListener("webkitfullscreenchange", onChange);
+      undoStandalone?.();
     };
   }, []);
 

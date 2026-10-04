@@ -1417,6 +1417,14 @@ const PAINTED_BGS: Record<number, { src: string; sky: string; parallax: number }
 const FIELD_WIGGLE_BASE = 0.5; // pixels of sway while music plays, even between beats
 const FIELD_WIGGLE_KICK = 2.6; // extra pixels on each beat (it settles back before the next one)
 const FIELD_WIGGLE_RIPPLE = 0.11; // how tight the ripple is going down the picture (bigger = more waves)
+const FIELD_WIGGLE_STRENGTH = 0.8; // ONE dial for the whole wiggle: 1 = the original strength, 0.8 = 20% less, 0 = no wiggle at all
+const FIELD_WIGGLE_STRIP_PHONE = 4; // how tall each wiggling strip is on phones and tablets (bigger = fewer, cheaper draw calls: easier on a phone)
+const FIELD_WIGGLE_STRIP_DESKTOP = 2; // ...and on a computer (finer, so the ripple looks smoother)
+// Crash notes (phones and tablets only): the game remembers if the last run ended without a proper exit (the phone closed the page, for
+// example) and shows which zone and how long in, for a few seconds when you open it again. CRASH_NOTE = false switches that off.
+const CRASH_NOTE = true;
+const SESSION_KEY = "pinksuper-session";
+const ERROR_KEY = "pinksuper-last-error";
 const WEEDLAND_BG_PARALLAX = 0.3; // how fast it scrolls compared to the level (smaller = farther away)
 const WL_SKY_TOP = "#c8f5b0";
 const WL_SKY_BOTTOM = "#78cf6e";
@@ -2261,6 +2269,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   const keepImgsRef = useRef<Record<string, HTMLImageElement>>({}); // Level 3 backdrop pictures
   // your painted zone backgrounds (PAINTED_BGS), each with a copy at exactly the game's size so every wiggle strip is a plain copy
   const paintedBgRef = useRef<Record<number, { img: HTMLImageElement; cache: HTMLCanvasElement | null }>>({});
+  const paintedBrokenRef = useRef(false); // true if drawing a painted background ever threw: then the drawn backgrounds are used for good
   const weedBgRef = useRef<HTMLImageElement | null>(null); // your own Weedland background (public/game/weedland-bg.png)
   const levelMusicRef = useRef<HTMLAudioElement | null>(null); // Level 3 song
   const levelMusicOnRef = useRef(false); // told the page to pause its own music
@@ -2446,6 +2455,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     waxTest: false, // started with the localhost 7 key: doesn't use up the once-per-run rip
     waxTrip: 0, // seconds left of the wobble + colours after the rip (0 = not on)
     bgWiggle: 0, // 0 -> 1: how much the painted background is wiggling to the music (it eases in and out when music starts/stops)
+    crashNote: "", // shown for a few seconds when the last run ended unexpectedly
+    crashNoteT: 0,
     waxHue: 0, // where the colours have got to in their turn (it slows down as the effect fades)
     petSkin: "classic" as OutfitId, // the skin BOBO is wearing
     petSkins: [] as OutfitId[], // the BOBO skins you bought
@@ -8192,8 +8203,33 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     }
   };
 
-  // A painted zone background (PAINTED_BGS), wiggling to the beat. Returns false if that zone has none or its picture isn't there.
+  // Writes an error down (so a crash can be traced) instead of letting it freeze the game. At most one every 2 seconds.
+  const recordGameError = (err: unknown, where: string) => {
+    console.error("[pinkmane]", where, err);
+    try {
+      const s = state.current;
+      const prev = JSON.parse(localStorage.getItem(ERROR_KEY) || "null");
+      if (prev && Date.now() - prev.at < 2000) return;
+      const e = err as { message?: string; stack?: string };
+      localStorage.setItem(ERROR_KEY, JSON.stringify({ where, message: String(e?.message ?? err).slice(0, 200), stack: String(e?.stack ?? "").slice(0, 400), zone: s.zoneShown + 1, mode: s.mode, at: Date.now() }));
+    } catch {}
+  };
+
+  // The painted background, safely: if anything about drawing it ever goes wrong (a phone's browser being fussy), the drawn background
+  // takes over for the rest of the session instead of the game crashing.
   const drawPaintedBackground = (ctx: CanvasRenderingContext2D, zone: number): boolean => {
+    if (paintedBrokenRef.current) return false;
+    try {
+      return paintBackgroundInner(ctx, zone);
+    } catch (err) {
+      paintedBrokenRef.current = true;
+      recordGameError(err, "painted background");
+      return false;
+    }
+  };
+
+  // A painted zone background (PAINTED_BGS), wiggling to the beat. Returns false if that zone has none or its picture isn't there.
+  const paintBackgroundInner = (ctx: CanvasRenderingContext2D, zone: number): boolean => {
     const def = PAINTED_BGS[zone];
     const entry = paintedBgRef.current[zone];
     if (!def || !entry) return false;
@@ -8202,17 +8238,23 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const s = state.current;
     // the picture shrunk to the game's height once, so every strip below is a quick 1:1 copy
     const tw = Math.max(1, Math.round(H * (im.naturalWidth / im.naturalHeight)));
-    let cache = entry.cache;
-    if (!cache || cache.width !== tw) {
-      cache = document.createElement("canvas");
-      cache.width = tw;
-      cache.height = H;
-      const cc = cache.getContext("2d");
-      if (!cc) return false;
-      cc.imageSmoothingEnabled = true;
-      cc.imageSmoothingQuality = "high";
-      cc.drawImage(im, 0, 0, tw, H);
-      entry.cache = cache;
+    // A picture that's already exactly the game's height (the ones made for the game are) is copied from directly: that's the lightest
+    // thing for a phone. Any other size is shrunk once into a small copy first.
+    let source: CanvasImageSource = im;
+    if (im.naturalHeight !== H) {
+      let cache = entry.cache;
+      if (!cache || cache.width !== tw) {
+        cache = document.createElement("canvas");
+        cache.width = tw;
+        cache.height = H;
+        const cc = cache.getContext("2d");
+        if (!cc) return false;
+        cc.imageSmoothingEnabled = true;
+        cc.imageSmoothingQuality = "high";
+        cc.drawImage(im, 0, 0, tw, H);
+        entry.cache = cache;
+      }
+      source = cache;
     }
     ctx.fillStyle = def.sky;
     ctx.fillRect(-4, -1200, W + 8, H + 1400); // (covers the screen when the camera scrolls up)
@@ -8220,8 +8262,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const beat = beatPropRef.current?.current;
     const kick = beat && Number.isFinite(beat.kick) ? Math.max(0, beat.kick) : 0;
     const sway = beat && Number.isFinite(beat.sway) ? beat.sway : 0;
-    const amp = (FIELD_WIGGLE_BASE + FIELD_WIGGLE_KICK * kick) * s.bgWiggle;
-    const strip = amp > 0.25 ? 2 : H; // (still: one copy. Wiggling: a thin strip at a time, each pushed sideways a little differently)
+    const amp = (FIELD_WIGGLE_BASE + FIELD_WIGGLE_KICK * kick) * s.bgWiggle * FIELD_WIGGLE_STRENGTH;
+    const strip = amp > 0.25 ? (touchPadRef.current ? FIELD_WIGGLE_STRIP_PHONE : FIELD_WIGGLE_STRIP_DESKTOP) : H; // (still: one copy. Wiggling: a thin strip at a time, each pushed sideways a little differently)
     for (let y = 0; y < H; y += strip) {
       let dx = 0;
       if (strip < H) {
@@ -8232,7 +8274,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       let x = 0;
       while (x < W) {
         const w = Math.min(tw - sx, W - x);
-        ctx.drawImage(cache, sx, y, w, strip, x, y, w, strip);
+        ctx.drawImage(source, sx, y, w, strip, x, y, w, strip);
         x += w;
         sx = 0;
       }
@@ -12128,6 +12170,32 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     // Add ?perf=1 to the address to see a little frame-time meter in the corner (and long frames in the console).
     // "GAME" is how long the game's own code took. If a frame is long but GAME is small, the hiccup isn't the game
     // (it's the page behind it, the sound, or the graphics card).
+    // Did the last run end without a proper exit? (the phone closing the page leaves no trace, so we notice it by what's missing)
+    const trackCrashes = CRASH_NOTE && touchPadRef.current; // (only on a phone or tablet: a computer is left exactly as it was)
+    if (trackCrashes) {
+      try {
+        const prev = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+        if (prev && prev.running && Date.now() - prev.at < 3600000) {
+          state.current.crashNote = `THE LAST RUN ENDED UNEXPECTEDLY: ZONE ${prev.zone}, ${prev.sec}S`;
+          state.current.crashNoteT = 9;
+        }
+      } catch {}
+    }
+    const writeSession = (running: boolean) => {
+      if (!trackCrashes) return;
+      try {
+        const cur = state.current;
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ running, zone: cur.zoneShown + 1, sec: Math.round(cur.t), at: Date.now() }));
+      } catch {}
+    };
+    const endSession = () => writeSession(false); // (leaving the game, or the app going to the background, is not a crash)
+    const onHide = () => {
+      if (document.visibilityState === "hidden") endSession();
+    };
+    window.addEventListener("pagehide", endSession);
+    document.addEventListener("visibilitychange", onHide);
+    writeSession(true);
+    let beatFrames = 0;
     const perfOn = new URLSearchParams(window.location.search).get("perf") !== null;
     hitboxesRef.current = new URLSearchParams(window.location.search).get("hitboxes") !== null; // ?hitboxes=1 draws every enemy's danger zone (red) and stomp zone (green)
     const perfGaps: number[] = [];
@@ -12163,14 +12231,27 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       const dt = Math.min(0.033, gap / 1000);
       last = now;
       const t0 = perfOn ? performance.now() : 0;
-      update(dt);
-      draw(ctx);
-      syncLevelMusic();
+      try {
+        update(dt);
+        draw(ctx);
+        syncLevelMusic();
+      } catch (err) {
+        recordGameError(err, "game loop"); // (a hiccup in one frame is written down and the game carries on, it doesn't freeze)
+      }
+      const sn = state.current;
+      if (sn.crashNoteT > 0) {
+        sn.crashNoteT -= dt;
+        textBox(ctx, sn.crashNote, 148);
+      }
+      if (sn.mode === "running" && ++beatFrames % 90 === 0) writeSession(true); // (a heartbeat every second and a half while you play)
       if (perfOn) drawPerfMeter(ctx, gap, performance.now() - t0);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => {
+      window.removeEventListener("pagehide", endSession);
+      document.removeEventListener("visibilitychange", onHide);
+      endSession();
       cancelAnimationFrame(raf);
       window.removeEventListener("keydown", keyDown);
       window.removeEventListener("keyup", keyUp);
