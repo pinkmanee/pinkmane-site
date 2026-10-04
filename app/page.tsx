@@ -12,7 +12,7 @@ import HexGame from "./components/HexGame";
 import MazeGame from "./components/MazeGame";
 import SuperGame from "./components/SuperGame";
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
-import { trace, useTraceSetup, TraceOverlay } from "./components/Trace";
+import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -729,6 +729,10 @@ export default function Home() {
   const [tpAOn, setTpAOn] = useState(false);
   const [tpBOn, setTpBOn] = useState(false);
   const fsc = useFullscreen(); // FULL SCREEN (see components/Fullscreen.tsx)
+  // True while the phone game covers the screen. The iPod behind it can't be seen then, so its beat-driven visuals aren't redrawn
+  // (that was wasted work on a phone, every frame).
+  const phoneGameRef = useRef(false);
+  phoneGameRef.current = handheld && isTouch;
   // The phone flight recorder (components/Trace.tsx): on for phones and tablets only. Add ?trace=1 to the address to see its report on screen.
   const showTrace = useTraceSetup(isTouch);
   useEffect(() => {
@@ -737,6 +741,23 @@ export default function Home() {
   useEffect(() => {
     trace("layout", `touch=${isTouch} handheld=${handheld}`);
   }, [isTouch, handheld]);
+  // The page's own heartbeat for the flight recorder: how long it's been open and what the music is doing
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!traceActive()) return;
+      const a = songRef.current;
+      writePageBeat({
+        up: Math.round(performance.now() / 1000),
+        song: trackRef.current,
+        pos: a ? Math.round(a.currentTime) : -1,
+        dur: a && Number.isFinite(a.duration) ? Math.round(a.duration) : -1,
+        paused: a ? a.paused : true,
+        muted: a ? a.muted : false,
+        where: playing ? `playing ${activeGame}` : "menu",
+      });
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [playing, activeGame]);
   useEffect(() => {
     const forced = new URLSearchParams(window.location.search).get("touch") !== null;
     const mq = window.matchMedia("(pointer: coarse)");
@@ -827,6 +848,7 @@ export default function Home() {
     if (!audio) return;
     const list = tracksRef.current;
     const idx = (i + list.length) % list.length;
+    trace("song", `#${idx} ${list[idx].file}`);
     trackRef.current = idx;
     setTrackIndex(idx);
     audio.src = list[idx].file;
@@ -1335,7 +1357,9 @@ export default function Home() {
         analyser = node;
         bins = new Uint8Array(node.frequencyBinCount);
         hookedTo = audio;
+        trace("bass-hook", "ok");
       } catch {
+        trace("bass-hook", "failed");
         giveUp = true;
       } finally {
         hooking = false;
@@ -1354,6 +1378,7 @@ export default function Home() {
       return sum / ((hi - lo + 1) * 255);
     };
     const put = (name: string, value: string) => {
+      if (phoneGameRef.current) return; // (the phone game is covering the iPod: nothing to redraw behind it)
       if (shown[name] !== value) {
         shown[name] = value;
         el.style.setProperty(name, value);
@@ -1483,7 +1508,10 @@ export default function Home() {
     } catch {}
     audio.volume = startVolume;
     setVolume(startVolume);
-    const onEnded = () => loadAndPlay(trackRef.current + 1);
+    const onEnded = () => {
+      trace("song-ended", `#${trackRef.current}`);
+      loadAndPlay(trackRef.current + 1);
+    };
     const onPlay = () => setIsPaused(false);
     const onPause = () => setIsPaused(true);
     const onPlaying = () => {
@@ -1492,6 +1520,7 @@ export default function Home() {
     // If a song file is missing, skip it (but don't loop forever)
     const onError = () => {
       if (errorCountRef.current < tracksRef.current.length) {
+        trace("song-error", `#${trackRef.current}`);
         errorCountRef.current += 1;
         loadAndPlay(trackRef.current + 1);
       }

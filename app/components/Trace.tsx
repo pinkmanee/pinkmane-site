@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 const RING_KEY = "pinksuper-trace";
 const ON_KEY = "pinksuper-trace-on";
 const SESSION_KEY = "pinksuper-session"; // the game's heartbeat (see SuperGame.tsx)
+const PAGE_KEY = "pinksuper-pagebeat"; // the page's heartbeat: how long it's been open and what the music is doing
 const RING_MAX = 16;
 
 export type TraceEvent = { t: number; k: string; d?: string };
@@ -34,6 +35,17 @@ export function trace(k: string, d?: string) {
     arr.push({ t: Date.now(), k, d: d ? d.slice(0, 90) : undefined });
     while (arr.length > RING_MAX) arr.shift();
     localStorage.setItem(RING_KEY, JSON.stringify(arr));
+  } catch {}
+}
+
+// Is the recorder on? (so callers can skip work when it isn't)
+export const traceActive = () => typeof window !== "undefined" && isOn();
+
+// The page's own heartbeat (one line that gets overwritten every second)
+export function writePageBeat(info: Record<string, unknown>) {
+  if (typeof window === "undefined" || !isOn()) return;
+  try {
+    localStorage.setItem(PAGE_KEY, JSON.stringify({ ...info, at: Date.now() }));
   } catch {}
 }
 
@@ -107,7 +119,14 @@ export function TraceOverlay() {
   for (const e of readTrace()) lines.push(`${ago(e.t).padStart(6)} ago  ${e.k}${e.d ? " " + e.d : ""}`);
   try {
     const b = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
-    if (b) lines.push(`LAST HEARTBEAT ${ago(b.at)} ago: ${b.running ? "RUNNING" : "ended properly"}, zone ${b.zone}, ${b.sec}s, column ${b.col ?? "?"}, ${b.mode ?? "?"}, lives ${b.lives ?? "?"}, score ${b.score ?? "?"}`);
+    if (b) {
+      lines.push(`GAME ${ago(b.at)} ago: ${b.running ? "RUNNING" : "ended properly"}, zone ${b.zone}, ${b.sec}s, column ${b.col ?? "?"}, ${b.mode ?? "?"}, lives ${b.lives ?? "?"}, score ${b.score ?? "?"}`);
+      if (b.fps !== undefined) lines.push(`     frames ${b.fps}ms avg, ${b.worst}ms worst | sounds made ${b.snd} | enemies ${b.ent}, particles ${b.parts}, columns ${b.ncols}`);
+    }
+  } catch {}
+  try {
+    const p = JSON.parse(localStorage.getItem(PAGE_KEY) || "null");
+    if (p) lines.push(`PAGE ${ago(p.at)} ago: open ${p.up}s, song #${p.song} at ${p.pos}/${p.dur}s ${p.paused ? "PAUSED" : "playing"}${p.muted ? " MUTED" : ""}, ${p.where}`);
   } catch {}
   return (
     <pre

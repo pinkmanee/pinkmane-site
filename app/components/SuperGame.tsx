@@ -1424,6 +1424,9 @@ const FIELD_WIGGLE_STRIP_DESKTOP = 2; // ...and on a computer (finer, so the rip
 // Crash notes (phones and tablets only): the game remembers if the last run ended without a proper exit (the phone closed the page, for
 // example) and shows which zone and how long in, for a few seconds when you open it again. CRASH_NOTE = false switches that off.
 const CRASH_NOTE = true;
+// Sounds: every beep / whoosh makes a few small audio objects. They now let go of themselves when the sound ends (a phone's browser is bad
+// at cleaning those up on its own). On phones and tablets no more than this many sounds can play at the same moment.
+const MAX_VOICES = 16;
 const SESSION_KEY = "pinksuper-session";
 const ERROR_KEY = "pinksuper-last-error";
 const WEEDLAND_BG_PARALLAX = 0.3; // how fast it scrolls compared to the level (smaller = farther away)
@@ -2270,6 +2273,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   const keepImgsRef = useRef<Record<string, HTMLImageElement>>({}); // Level 3 backdrop pictures
   // your painted zone backgrounds (PAINTED_BGS), each with a copy at exactly the game's size so every wiggle strip is a plain copy
   const paintedBgRef = useRef<Record<number, { img: HTMLImageElement; cache: HTMLCanvasElement | null }>>({});
+  const voicesRef = useRef(0); // sounds playing right now
+  const soundsMadeRef = useRef(0); // sounds made since the game opened (for the flight recorder)
   const paintedBrokenRef = useRef(false); // true if drawing a painted background ever threw: then the drawn backgrounds are used for good
   const weedBgRef = useRef<HTMLImageElement | null>(null); // your own Weedland background (public/game/weedland-bg.png)
   const levelMusicRef = useRef<HTMLAudioElement | null>(null); // Level 3 song
@@ -2561,6 +2566,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     volume *= sfxVolRef.current;
     const ac = getAudio();
     if (!ac) return;
+    if (touchPadRef.current && voicesRef.current >= MAX_VOICES) return; // (phones: too many at once, skip this one. A computer has no limit.)
     const now = ac.currentTime + delay;
     const osc = ac.createOscillator();
     osc.type = type;
@@ -2573,6 +2579,20 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     osc.connect(g).connect(ac.destination);
     osc.start(now);
     osc.stop(now + time + 0.04);
+    voicesRef.current++;
+    soundsMadeRef.current++;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      voicesRef.current = Math.max(0, voicesRef.current - 1);
+      try {
+        osc.disconnect();
+        g.disconnect();
+      } catch {}
+    };
+    osc.onended = release;
+    window.setTimeout(release, (delay + time + 0.3) * 1000); // (in case the browser never says the sound ended, e.g. its sound engine was suspended)
   };
 
   const playJump = () => beep(260, 640, 0.12, 0.045, "square");
@@ -4771,6 +4791,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     if (mutedRef.current || !sfxOnRef.current || sfxVolRef.current <= 0) return;
     const ac = getAudio();
     if (!ac) return;
+    if (touchPadRef.current && voicesRef.current >= MAX_VOICES) return;
     try {
       const now = ac.currentTime + delay;
       // One 4-second buffer of noise is made once and reused (making a fresh one for every sound filled
@@ -4797,6 +4818,21 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       noise.connect(filter).connect(g).connect(ac.destination);
       noise.start(now, startAt);
       noise.stop(now + time + 0.05);
+      voicesRef.current++;
+      soundsMadeRef.current++;
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        voicesRef.current = Math.max(0, voicesRef.current - 1);
+        try {
+          noise.disconnect();
+          filter.disconnect();
+          g.disconnect();
+        } catch {}
+      };
+      noise.onended = release;
+      window.setTimeout(release, (delay + time + 0.35) * 1000);
     } catch {}
   };
 
@@ -12187,14 +12223,35 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         }
       } catch {}
     }
+    let gapSum = 0; // how long frames take (reset at every heartbeat): a phone that's struggling shows up here before it fails
+    let gapN = 0;
+    let gapMax = 0;
     const writeSession = (running: boolean) => {
       if (!trackCrashes) return;
       try {
         const cur = state.current;
         localStorage.setItem(
           SESSION_KEY,
-          JSON.stringify({ running, zone: cur.zoneShown + 1, sec: Math.round(cur.t), at: Date.now(), mode: cur.mode, col: Math.floor(cur.x / T), lives: cur.lives, score: Math.floor(cur.score) })
+          JSON.stringify({
+            running,
+            zone: cur.zoneShown + 1,
+            sec: Math.round(cur.t),
+            at: Date.now(),
+            mode: cur.mode,
+            col: Math.floor(cur.x / T),
+            lives: cur.lives,
+            score: Math.floor(cur.score),
+            fps: gapN ? Math.round(gapSum / gapN) : 0, // average ms per frame
+            worst: Math.round(gapMax), // slowest frame in ms
+            snd: soundsMadeRef.current,
+            ent: cur.enemies.length,
+            parts: cur.particles.length,
+            ncols: cur.cols.length,
+          })
         );
+        gapSum = 0;
+        gapN = 0;
+        gapMax = 0;
       } catch {}
     };
     const endSession = () => writeSession(false); // (leaving the game, or the app going to the background, is not a crash)
@@ -12237,6 +12294,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     let last = performance.now();
     const loop = (now: number) => {
       const gap = now - last; // milliseconds since the last frame
+      if (gap > 0 && gap < 5000) {
+        gapSum += gap;
+        gapN++;
+        gapMax = Math.max(gapMax, gap);
+      }
       const dt = Math.min(0.033, gap / 1000);
       last = now;
       const t0 = perfOn ? performance.now() : 0;
