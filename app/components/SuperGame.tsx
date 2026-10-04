@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { trace } from "./Trace"; // the phone flight recorder: writes down what happened before a crash (does nothing on a computer)
 
 type Props = {
   // Goes up by 1 every time the player presses OK / Enter / Space (= jump)
@@ -4632,6 +4633,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const s = state.current;
     if (s.mode !== "running") return;
     s.mode = "paused";
+    trace("pause");
     s.pauseChoice = 0;
     heldRef.current = { left: false, right: false, up: false };
     touchRef.current = 0;
@@ -4642,12 +4644,14 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const s = state.current;
     if (s.mode !== "paused") return;
     s.mode = "running";
+    trace("resume-game");
     if (s.stuttersOn) stuttersRef.current?.play().catch(() => {});
   };
   // Leaves the game the same way the handheld's own Back button does.
   // (It waits one tiny moment first: when you pick HOME with Enter / OK, the page isn't listening
   // for keys at that exact instant, so the "leave" used to get lost and nothing happened.)
   const goHome = () => {
+    trace("game-HOME", "chosen in the pause menu");
     window.setTimeout(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace" }));
     }, 0);
@@ -5129,6 +5133,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
   const finishDeath = () => {
     const s = state.current;
+    trace("death", `zone ${s.zoneShown + 1} score ${Math.floor(s.score)}`);
     if (s.levelMode) {
       // no scoreboard for a lost level, just try again
       s.mode = "levelSelect";
@@ -6104,6 +6109,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       const zoneIndex = Math.floor(Math.floor(s.x / T) / ZONE_LEN);
       if (zoneIndex > s.zoneShown) {
         s.zoneShown = zoneIndex;
+        trace("zone", `${zoneIndex + 1} ${ZONE_NAMES[zoneIndex % ZONE_NAMES.length]} x=${Math.round(s.x)}`);
         s.zoneMarks.push({ score: s.score, zone: zoneIndex % ZONE_NAMES.length });
         s.flash = 2;
         s.flashText = `ZONE ${zoneIndex + 1}: ${ZONE_NAMES[zoneIndex % ZONE_NAMES.length]}`;
@@ -12185,7 +12191,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       if (!trackCrashes) return;
       try {
         const cur = state.current;
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ running, zone: cur.zoneShown + 1, sec: Math.round(cur.t), at: Date.now() }));
+        localStorage.setItem(
+          SESSION_KEY,
+          JSON.stringify({ running, zone: cur.zoneShown + 1, sec: Math.round(cur.t), at: Date.now(), mode: cur.mode, col: Math.floor(cur.x / T), lives: cur.lives, score: Math.floor(cur.score) })
+        );
       } catch {}
     };
     const endSession = () => writeSession(false); // (leaving the game, or the app going to the background, is not a crash)

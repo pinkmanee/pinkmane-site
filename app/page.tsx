@@ -12,6 +12,7 @@ import HexGame from "./components/HexGame";
 import MazeGame from "./components/MazeGame";
 import SuperGame from "./components/SuperGame";
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
+import { trace, useTraceSetup, TraceOverlay } from "./components/Trace";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -728,6 +729,14 @@ export default function Home() {
   const [tpAOn, setTpAOn] = useState(false);
   const [tpBOn, setTpBOn] = useState(false);
   const fsc = useFullscreen(); // FULL SCREEN (see components/Fullscreen.tsx)
+  // The phone flight recorder (components/Trace.tsx): on for phones and tablets only. Add ?trace=1 to the address to see its report on screen.
+  const showTrace = useTraceSetup(isTouch);
+  useEffect(() => {
+    trace(playing ? "playing" : "stopped", activeGame);
+  }, [playing, activeGame]);
+  useEffect(() => {
+    trace("layout", `touch=${isTouch} handheld=${handheld}`);
+  }, [isTouch, handheld]);
   useEffect(() => {
     const forced = new URLSearchParams(window.location.search).get("touch") !== null;
     const mq = window.matchMedia("(pointer: coarse)");
@@ -964,6 +973,7 @@ export default function Home() {
 
   const goBack = () => {
     playSelectSound();
+    trace("goBack", `playing=${playing} menu=${menu}`);
     if (playing) {
       setPlaying(false);
       setMenu("games");
@@ -1213,7 +1223,10 @@ export default function Home() {
       if (!playing && (e.key === "w" || e.key === "W")) goUp();
       if (!playing && (e.key === "s" || e.key === "S")) goDown();
       if (e.key === "Enter") selectItem();
-      if (e.key === "Backspace") goBack();
+      if (e.key === "Backspace") {
+        trace("key", `Backspace trusted=${e.isTrusted}`); // trusted=false means the game sent it (its HOME choice), not a real key
+        goBack();
+      }
     };
 
     const handleWheel = (e: WheelEvent) => {
@@ -1714,6 +1727,7 @@ activeGame === "maze" ? (
   // HOME on the handheld: leave the game and go all the way back to the main menu
   const goHome = () => {
     playSelectSound();
+    trace("goHome", `playing=${playing}`);
     setPlaying(false);
     setMenu("main");
     setSelected(0);
@@ -3015,6 +3029,7 @@ activeGame === "maze" ? (
         </div>
       )}
 
+      {showTrace && <TraceOverlay />}
       {/* FULL SCREEN: a small corner button on the menus (phones + tablets), and the "how to" popup where the browser can't do it itself */}
       {isTouch && !handheld && fsc.show && (
         <FullscreenCornerButton onClick={fsc.toggle} isFullscreen={fsc.isFullscreen} className={pixelFont.className} />
