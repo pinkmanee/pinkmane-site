@@ -3,14 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Press_Start_2P } from "next/font/google";
-import JumpGame from "./components/JumpGame";
-import VortexGame from "./components/VortexGame";
-import SnakeGame from "./components/SnakeGame";
-import BirdGame from "./components/BirdGame";
-import HexGame from "./components/HexGame";
-import MazeGame from "./components/MazeGame";
-import SuperGame from "./components/SuperGame";
+import dynamic from "next/dynamic";
+import { Press_Start_2P, Silkscreen } from "next/font/google";
+// The games only download when someone actually opens one, so the iPod shows up much faster on the first visit
+const JumpGame = dynamic(() => import("./components/JumpGame"), { ssr: false });
+const VortexGame = dynamic(() => import("./components/VortexGame"), { ssr: false });
+const SnakeGame = dynamic(() => import("./components/SnakeGame"), { ssr: false });
+const BirdGame = dynamic(() => import("./components/BirdGame"), { ssr: false });
+const HexGame = dynamic(() => import("./components/HexGame"), { ssr: false });
+const MazeGame = dynamic(() => import("./components/MazeGame"), { ssr: false });
+const SuperGame = dynamic(() => import("./components/SuperGame"), { ssr: false });
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
 import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
 
@@ -18,6 +20,33 @@ const pixelFont = Press_Start_2P({
   weight: "400",
   subsets: ["latin"],
 });
+
+// Small blocky font for the "CONTROL VOLUME HERE!" tip (pixel letters with a hard shadow, Minecraft style)
+const tipFont = Silkscreen({
+  weight: "400",
+  subsets: ["latin"],
+});
+
+// VOLUME TIP: after the iPod boots up, a little "CONTROL VOLUME HERE!" with an arrow points at the
+// volume controls for this many seconds, then fades away. It also goes away as soon as you touch the slider or mute.
+const VOLUME_TIP_SECONDS = 4;
+
+// The tip's little pixel arrow, pointing right at the volume controls (pink with a dark shadow, like the logo)
+const TIP_ARROW = ["1....", "11...", "111..", "1111.", "111..", "11...", "1...."];
+const TipArrow = () => {
+  const px: { x: number; y: number }[] = [];
+  TIP_ARROW.forEach((row, y) => row.split("").forEach((c, x) => c === "1" && px.push({ x, y })));
+  return (
+    <svg viewBox="0 0 6 8" className="vol-tip-arrow" shapeRendering="crispEdges" aria-hidden="true">
+      {px.map((p, i) => (
+        <rect key={`s${i}`} x={p.x + 1} y={p.y + 1} width={1.02} height={1.02} fill="#4a1447" />
+      ))}
+      {px.map((p, i) => (
+        <rect key={`p${i}`} x={p.x} y={p.y} width={1.02} height={1.02} fill="#d63cc8" />
+      ))}
+    </svg>
+  );
+};
 
 const GLYPH_IMAGES = ["/glyphs/heart.gif", "/glyphs/sparkle.gif"];
 
@@ -131,6 +160,7 @@ const ITEM_ICONS: Record<string, string> = {
   TOPSHELF: "/icons/topshelf.gif",
   Extras: "/icons/extras.gif",
   Games: "/icons/games.gif",
+  "Mini Games": "/icons/games.gif",
   "Pink Run": "/icons/pinkrun.gif",
   "Pinkmane Void": "/icons/superpinkmane.gif",
   "Pink Hexagon": "/icons/pinkhex.gif",
@@ -704,6 +734,9 @@ export default function Home() {
   const errorCountRef = useRef(0);
 
   const [showBoot, setShowBoot] = useState(true);
+  // The "CONTROL VOLUME HERE!" tip: showing, and fading out
+  const [volTip, setVolTip] = useState(false);
+  const [volTipFade, setVolTipFade] = useState(false);
   const [bootFadeOut, setBootFadeOut] = useState(false);
   const [exiting, setExiting] = useState(false);
 
@@ -816,8 +849,9 @@ export default function Home() {
     music: ["SoundCloud", "Spotify", "Apple Music", "Bandcamp", "Back"],
     socials: ["Instagram", "Twitch", "Releases", "Back"],
     releases: ["TOPSHELF", "Back"],
-    games: [
-      "Pinkmane Void",
+    // Games: the main game first, the rest live one step deeper in Mini Games
+    games: ["Pinkmane Void", "Mini Games", "Back"],
+    minigames: [
       "Pink Hexagon",
       "Pink Maze",
       "Pink Vortex",
@@ -842,6 +876,14 @@ export default function Home() {
   }, []);
   const listStart = Math.max(0, Math.min(selected - 2, items.length - visibleRows));
   const visibleItems = items.slice(listStart, listStart + visibleRows);
+
+  // The small label next to a menu row (null = no label)
+  const rowTag = (item: string) => {
+    if (item === "Pinkmane Void") return "[ MAIN GAME ]";
+    if (item === "Mini Games") return `[${menus.minigames.length - 1} games]`;
+    if (menu === "minigames" && item !== "Back") return "[mini game]";
+    return null;
+  };
 
   const loadAndPlay = (i: number) => {
     const audio = songRef.current;
@@ -982,27 +1024,39 @@ export default function Home() {
   };
 
   const goUp = () => {
-    if (playing) return;
+    if (playing || exiting) return;
     playScrollSound();
     setSelected((prev) => (prev === 0 ? items.length - 1 : prev - 1));
   };
 
   const goDown = () => {
-    if (playing) return;
+    if (playing || exiting) return;
     playScrollSound();
     setSelected((prev) => (prev + 1) % items.length);
   };
 
   const goBack = () => {
+    if (exiting) return; // already powering off
     playSelectSound();
     trace("goBack", `playing=${playing} menu=${menu}`);
     if (playing) {
       setPlaying(false);
-      setMenu("games");
-      setSelected({ super: 0, hex: 1, maze: 2, vortex: 3, snake: 4, bird: 5, pinkrun: 6 }[activeGame]);
+      if (activeGame === "super") {
+        // Pinkmane Void is the first row in Games
+        setMenu("games");
+        setSelected(0);
+      } else {
+        setMenu("minigames");
+        setSelected({ hex: 0, maze: 1, vortex: 2, snake: 3, bird: 4, pinkrun: 5 }[activeGame]);
+      }
       return;
     }
-    // Games lives on the main menu now; Releases lives inside Socials
+    // Mini Games lives inside Games; Games lives on the main menu; Releases lives inside Socials
+    if (menu === "minigames") {
+      setMenu("games");
+      setSelected(1);
+      return;
+    }
     if (menu === "games") {
       setMenu("main");
       setSelected(3);
@@ -1018,6 +1072,7 @@ export default function Home() {
   };
 
   const navigateToShop = () => {
+    if (exiting) return; // already on the way, don't start a second trip
     playSelectSound();
     setExiting(true);
     setTimeout(() => {
@@ -1027,6 +1082,7 @@ export default function Home() {
 
   // pick = which row to open (when a row is tapped on a phone). Without it: the highlighted row.
   const selectItem = (pick?: unknown) => {
+    if (exiting) return; // powering off: ignore presses
     // Inside the game, OK means jump
     if (playing) {
       setJumpSignal((n) => n + 1);
@@ -1098,6 +1154,19 @@ export default function Home() {
     }
 
     if (menu === "games") {
+      if (item === "Pinkmane Void") {
+        spinRef.current = 0;
+        setActiveGame("super");
+        setPlaying(true);
+      }
+      if (item === "Mini Games") {
+        setMenu("minigames");
+        setSelected(0);
+      }
+      if (item === "Back") goBack();
+    }
+
+    if (menu === "minigames") {
       if (item === "Pink Run") {
         setActiveGame("pinkrun");
         setPlaying(true);
@@ -1124,11 +1193,6 @@ export default function Home() {
       if (item === "Pink Maze") {
         spinRef.current = 0;
         setActiveGame("maze");
-        setPlaying(true);
-      }
-      if (item === "Pinkmane Void") {
-        spinRef.current = 0;
-        setActiveGame("super");
         setPlaying(true);
       }
       if (item === "Back") goBack();
@@ -1170,6 +1234,7 @@ export default function Home() {
   };
 
   const toggleMute = () => {
+    setVolTipFade(true); // they found it: hide the volume tip
     setIsMuted((prev) => {
       const next = !prev;
       if (songRef.current) {
@@ -1188,6 +1253,21 @@ export default function Home() {
       clearTimeout(removeTimer);
     };
   }, []);
+
+  // Show the volume tip once the boot screen is gone, then fade it out after VOLUME_TIP_SECONDS
+  useEffect(() => {
+    if (showBoot) return;
+    setVolTip(true);
+    const fade = setTimeout(() => setVolTipFade(true), VOLUME_TIP_SECONDS * 1000);
+    return () => clearTimeout(fade);
+  }, [showBoot]);
+
+  // Fully remove it once it has faded
+  useEffect(() => {
+    if (!volTipFade) return;
+    const t = setTimeout(() => setVolTip(false), 500);
+    return () => clearTimeout(t);
+  }, [volTipFade]);
 
   // Glitch flicker whenever the menu screen changes
   useEffect(() => {
@@ -1645,6 +1725,7 @@ export default function Home() {
   };
 
   const changeVolume = (value: number) => {
+    setVolTipFade(true); // they found it: hide the volume tip
     setVolume(value);
     if (songRef.current) songRef.current.volume = value;
     window.dispatchEvent(new CustomEvent("pinkmane-level-control", { detail: { volume: value } }));
@@ -2063,6 +2144,17 @@ activeGame === "maze" ? (
         }}
       >
         <div className="top-controls">
+          {volTip && (
+            <div
+              className={`${tipFont.className} vol-tip ${volTipFade ? "vol-tip-fade" : ""}`}
+              aria-hidden="true"
+            >
+              {/* the long text on bigger screens, the short one on small phones */}
+              <span className="vol-tip-text vol-tip-long">CONTROL VOLUME HERE!</span>
+              <span className="vol-tip-text vol-tip-short">VOLUME HERE!</span>
+              <TipArrow />
+            </div>
+          )}
           <BatteryIcon />
           <VuBars active={!isMuted && !musicPaused} />
           <input
@@ -2158,6 +2250,8 @@ activeGame === "maze" ? (
                   : "PINK RUN"
                 : menu === "main"
                 ? "PINKMANE"
+                : menu === "minigames"
+                ? "MINI GAMES"
                 : menu.toUpperCase()}
             </h2>
           </div>
@@ -2263,7 +2357,7 @@ activeGame === "maze" ? (
                         : "none",
                   }}
                 >
-                  {menu === "games" && item !== "Back" ? (
+                  {rowTag(item) ? (
                     <span style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: "10px", rowGap: "1px", minWidth: 0 }}>
                       <span style={{ whiteSpace: "nowrap" }}>
                         {selected === index ? "> " : ""}
@@ -2273,7 +2367,7 @@ activeGame === "maze" ? (
                       </span>
                       {/* [ MAIN GAME ] for Pinkmane Void, [mini game] for all the others */}
                       <span style={{ fontSize: "0.55em", opacity: 0.85, whiteSpace: "nowrap" }}>
-                        {isMane ? "[ MAIN GAME ]" : "[mini game]"}
+                        {rowTag(item)}
                       </span>
                     </span>
                   ) : (
@@ -3461,6 +3555,83 @@ activeGame === "maze" ? (
           gap: 8px;
           color: rgba(0, 0, 0, 0.28);
           z-index: 2;
+        }
+
+        /* "CONTROL VOLUME HERE!" tip, to the left of the volume controls, with an arrow pointing at them */
+        .vol-tip {
+          position: absolute;
+          right: 100%;
+          top: 50%;
+          margin-right: 6px;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          white-space: nowrap;
+          pointer-events: none;
+          transform: translateY(-50%);
+          animation: volTipIn 0.3s ease-out;
+          transition: opacity 0.4s ease;
+        }
+
+        .vol-tip-fade {
+          opacity: 0;
+        }
+
+        .vol-tip-text {
+          color: #d63cc8;
+          font-size: 10px;
+          line-height: 1;
+          letter-spacing: 0.5px;
+          /* the Minecraft look: a hard dark shadow one pixel down-right */
+          text-shadow: 1px 1px 0 #4a1447;
+        }
+
+        .vol-tip-short {
+          display: none;
+        }
+
+        .vol-tip-arrow {
+          width: 8px;
+          height: 10px;
+          animation: volTipNudge 0.6s ease-in-out infinite;
+        }
+
+        @keyframes volTipIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+
+        /* the arrow pokes towards the volume controls */
+        @keyframes volTipNudge {
+          0%,
+          100% {
+            transform: translateX(0);
+          }
+          50% {
+            transform: translateX(3px);
+          }
+        }
+
+        /* Small phones: the short text, so it fits next to the controls */
+        @media (max-width: 420px) {
+          .vol-tip-long {
+            display: none;
+          }
+          .vol-tip-short {
+            display: inline;
+          }
+        }
+
+        /* Visitors who asked their device for less motion: no poking arrow */
+        @media (prefers-reduced-motion: reduce) {
+          .vol-tip,
+          .vol-tip-arrow {
+            animation: none;
+          }
         }
 
         /* ---------- PINKMANE handheld ---------- */

@@ -2,12 +2,22 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Press_Start_2P } from "next/font/google";
+import { Press_Start_2P, Silkscreen } from "next/font/google";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
   subsets: ["latin"],
 });
+
+// Small blocky font for the "CONTROL VOLUME HERE!" tip (white with a dark shadow, Minecraft style)
+const tipFont = Silkscreen({
+  weight: "400",
+  subsets: ["latin"],
+});
+
+// VOLUME TIP: after the shop boots up, a little "CONTROL VOLUME HERE!" with an arrow points at the
+// volume slider for this many seconds, then fades away. It also goes away as soon as you touch the slider or mute.
+const VOLUME_TIP_SECONDS = 4;
 
 // ---------- Background (same as the main page): 3 modes + the wiggle ----------
 // The mode you pick here is the same one the main page uses (they share the saved choice).
@@ -230,6 +240,23 @@ function LiquidBg({
 }
 
 
+// The tip's little pixel arrow, pointing right at the slider (white with a dark shadow)
+const TIP_ARROW = ["1....", "11...", "111..", "1111.", "111..", "11...", "1...."];
+const TipArrow = () => {
+  const px: { x: number; y: number }[] = [];
+  TIP_ARROW.forEach((row, y) => row.split("").forEach((c, x) => c === "1" && px.push({ x, y })));
+  return (
+    <svg viewBox="0 0 6 8" className="vol-tip-arrow" shapeRendering="crispEdges" aria-hidden="true">
+      {px.map((p, i) => (
+        <rect key={`s${i}`} x={p.x + 1} y={p.y + 1} width={1.02} height={1.02} fill="#3f3f3f" />
+      ))}
+      {px.map((p, i) => (
+        <rect key={`p${i}`} x={p.x} y={p.y} width={1.02} height={1.02} fill="#ffffff" />
+      ))}
+    </svg>
+  );
+};
+
 const ArrowIcon = ({ direction }: { direction: "up" | "down" | "left" | "right" }) => {
   const rotation = { up: 0, right: 90, down: 180, left: 270 }[direction];
   return (
@@ -304,6 +331,13 @@ const SegmentedBar = ({
 
 type MenuKey = "main" | "clothes";
 
+// Where the "FOLLOW ON IG" button on the COMING SOON screens goes
+const INSTAGRAM_URL = "https://www.instagram.com/pinkmanee/";
+const INSTAGRAM_HANDLE = "@pinkmanee";
+
+// The "EXIT SHOP?" question that pops up when you press Back on the shop's main menu
+const EXIT_OPTIONS = ["YES, EXIT", "NO, STAY"];
+
 // The keys you can use, drawn under the handheld (only on computers), same as the main page
 const KEY_LEGEND: [string[], string][] = [
   [["↑", "↓", "W", "S"], "move"],
@@ -317,6 +351,11 @@ export default function Shop() {
   const [menu, setMenu] = useState<MenuKey>("main");
   const [selected, setSelected] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
+  // Music volume (0 to 1). Shared with the main page: whatever you set on one page, the other one starts at.
+  const [volume, setVolume] = useState(0.5);
+  // The "CONTROL VOLUME HERE!" tip: showing, and fading out
+  const [volTip, setVolTip] = useState(false);
+  const [volTipFade, setVolTipFade] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   // PHONES + TABLETS: on a touch screen you can tap a row on the screen to open it (same as on the iPod page).
   // On a computer the screen doesn't react to clicks. To try it on your computer: http://localhost:3000/shop?touch=1
@@ -333,6 +372,9 @@ export default function Shop() {
   const [showBoot, setShowBoot] = useState(true);
   const [bootFadeOut, setBootFadeOut] = useState(false);
   const [exiting, setExiting] = useState(false);
+  // The "EXIT SHOP?" question is open, and which answer is highlighted (0 = yes, 1 = no)
+  const [confirmExit, setConfirmExit] = useState(false);
+  const [confirmSel, setConfirmSel] = useState(0);
 
   // Which background mode is picked (0, 1 or 2), remembered (shared with the main page)
   const [bgMode, setBgMode] = useState(0);
@@ -366,18 +408,48 @@ export default function Shop() {
     }
   };
 
+  // Turn the PSP off and go back to the iPod home page (the 3 second POWERING OFF screen)
+  const exitShop = () => {
+    if (exiting) return; // already powering off, don't start a second trip
+    setConfirmExit(false);
+    setExiting(true);
+    setTimeout(() => {
+      router.push("/");
+    }, 3000);
+  };
+
+  const openInstagram = () => {
+    window.open(INSTAGRAM_URL, "_blank");
+  };
+
   const goUp = () => {
+    if (exiting) return;
     playScrollSound();
+    if (confirmExit) {
+      setConfirmSel((prev) => (prev === 0 ? EXIT_OPTIONS.length - 1 : prev - 1));
+      return;
+    }
     setSelected((prev) => (prev === 0 ? items.length - 1 : prev - 1));
   };
 
   const goDown = () => {
+    if (exiting) return;
     playScrollSound();
+    if (confirmExit) {
+      setConfirmSel((prev) => (prev + 1) % EXIT_OPTIONS.length);
+      return;
+    }
     setSelected((prev) => (prev + 1) % items.length);
   };
 
   const goBack = () => {
+    if (exiting) return;
     playSelectSound();
+    // Back while the "EXIT SHOP?" question is open = stay in the shop
+    if (confirmExit) {
+      setConfirmExit(false);
+      return;
+    }
     if (activeCategory) {
       setActiveCategory(null);
       return;
@@ -387,28 +459,39 @@ export default function Shop() {
       setSelected(0);
       return;
     }
-    // On main menu, Back exits to the iPod home page
-    setExiting(true);
-    setTimeout(() => {
-      router.push("/");
-    }, 3000);
+    // On the main menu, Back asks "EXIT SHOP?" first, so nobody leaves by accident
+    setConfirmSel(0);
+    setConfirmExit(true);
   };
 
   // pick = which row to open (when a row is tapped on a phone). Without it: the highlighted row.
   const selectItem = (pick?: unknown) => {
-    if (activeCategory) return; // already on a placeholder screen
+    if (exiting) return;
     playSelectSound();
+
+    if (confirmExit) {
+      const answer = typeof pick === "number" ? pick : confirmSel;
+      if (answer === 0) exitShop();
+      else setConfirmExit(false);
+      return;
+    }
+
+    // On a COMING SOON screen, X / Enter opens Instagram
+    if (activeCategory) {
+      openInstagram();
+      return;
+    }
+
     const item = items[typeof pick === "number" ? pick : selected];
 
     if (menu === "main") {
-      if (item === "Clothes / Merch") {
+      if (item === "Merch") {
         setMenu("clothes");
         setSelected(0);
         return;
       }
       if (item === "Home") {
-        setExiting(true);
-        setTimeout(() => router.push("/"), 3000);
+        exitShop();
         return;
       }
       // Plugins / Serum Banks / iPods — no products yet
@@ -426,7 +509,22 @@ export default function Shop() {
     }
   };
 
+  // Hide the volume tip (fades out quickly)
+  const hideVolTip = () => {
+    setVolTipFade(true);
+  };
+
+  const changeVolume = (value: number) => {
+    hideVolTip();
+    setVolume(value);
+    if (songRef.current) songRef.current.volume = value;
+    try {
+      localStorage.setItem("pinkmane-volume", String(value));
+    } catch {}
+  };
+
   const toggleMute = () => {
+    hideVolTip();
     setIsMuted((prev) => {
       const next = !prev;
       if (songRef.current) {
@@ -457,6 +555,21 @@ export default function Shop() {
       localStorage.setItem("pinkmane-bgmode", String(i));
     } catch {}
   };
+
+  // Show the volume tip once the boot screen is gone, then fade it out after VOLUME_TIP_SECONDS
+  useEffect(() => {
+    if (showBoot) return;
+    setVolTip(true);
+    const fade = setTimeout(() => setVolTipFade(true), VOLUME_TIP_SECONDS * 1000);
+    return () => clearTimeout(fade);
+  }, [showBoot]);
+
+  // Fully remove it once it has faded
+  useEffect(() => {
+    if (!volTipFade) return;
+    const t = setTimeout(() => setVolTip(false), 500);
+    return () => clearTimeout(t);
+  }, [volTipFade]);
 
   useEffect(() => {
     const fadeTimer = setTimeout(() => setBootFadeOut(true), 1500);
@@ -490,7 +603,15 @@ export default function Shop() {
   useEffect(() => {
     songRef.current = new Audio("/sounds/shop-song.mp3");
     songRef.current.loop = true;
-    songRef.current.volume = 0.5;
+    // Start at the volume picked last time (on this page or the main page)
+    let startVolume = 0.5;
+    try {
+      const saved = localStorage.getItem("pinkmane-volume");
+      const value = Number(saved);
+      if (saved !== null && !Number.isNaN(value) && value >= 0 && value <= 1) startVolume = value;
+    } catch {}
+    songRef.current.volume = startVolume;
+    setVolume(startVolume);
 
     scrollSoundRef.current = new Audio("/sounds/scroll.mp3");
     selectSoundRef.current = new Audio("/sounds/select.mp3");
@@ -555,8 +676,9 @@ export default function Shop() {
         <LiquidBg sources={BG_MODES[bgMode].sources} beat={beatRef} active={true} focus={BG_MODES[bgMode].focus} />
       </div>
 
-      {/* Column: the 3 background mode buttons, the handheld, then the keys you can use */}
-      <div className="shop-col">
+      {/* Column: the 3 background mode buttons, the handheld, then the keys you can use.
+          When you leave the shop, the whole column shrinks and fades out together. */}
+      <div className={`shop-col ${exiting ? "shop-exit" : ""}`}>
         <div className={`bg-modes ${pixelFont.className}`} role="group" aria-label="Background mode">
           {BG_MODES.map((m, i) => (
             <button
@@ -572,7 +694,7 @@ export default function Shop() {
         </div>
 
         <div
-          className={`psp-shell ${exiting ? "psp-exit" : ""}`}
+          className="psp-shell"
           style={{
             background: "#26262a",
             width: "min(560px, 100%)",
@@ -583,14 +705,38 @@ export default function Shop() {
             border: "1px solid #3a3a40",
           }}
         >
-          <button
-            onClick={toggleMute}
-            onMouseDown={noFocus}
-            aria-label={isMuted ? "Unmute music" : "Mute music"}
-            className="psp-mute-btn"
-          >
-            <SpeakerIcon muted={isMuted} />
-          </button>
+          {/* Volume slider + mute button, top right of the handheld */}
+          <div className="psp-top-controls">
+            {volTip && (
+              <div
+                className={`${tipFont.className} vol-tip ${volTipFade ? "vol-tip-fade" : ""}`}
+                aria-hidden="true"
+              >
+                <span className="vol-tip-text">CONTROL VOLUME HERE!</span>
+                <TipArrow />
+              </div>
+            )}
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={volume}
+              aria-label="Music volume"
+              className="psp-volume"
+              onChange={(e) => changeVolume(Number(e.target.value))}
+              onPointerUp={(e) => e.currentTarget.blur()}
+              onTouchEnd={(e) => e.currentTarget.blur()}
+            />
+            <button
+              onClick={toggleMute}
+              onMouseDown={noFocus}
+              aria-label={isMuted ? "Unmute music" : "Mute music"}
+              className="psp-mute-btn"
+            >
+              <SpeakerIcon muted={isMuted} />
+            </button>
+          </div>
 
           <div
             className={`${pixelFont.className} psp-screen`}
@@ -624,7 +770,9 @@ export default function Shop() {
 
             <div className="psp-header">
               <h2 className="psp-title">
-                {activeCategory
+                {confirmExit
+                  ? "EXIT SHOP?"
+                  : activeCategory
                   ? activeCategory.toUpperCase()
                   : menu === "main"
                   ? "SHOP"
@@ -632,11 +780,43 @@ export default function Shop() {
               </h2>
             </div>
 
-            {activeCategory ? (
+            {confirmExit ? (
+              <div className="psp-list">
+                {EXIT_OPTIONS.map((option, index) => (
+                  <div
+                    key={option}
+                    className={`psp-item ${
+                      confirmSel === index ? "psp-item-active" : ""
+                    }`}
+                    onClick={
+                      isTouch
+                        ? () => {
+                            setConfirmSel(index);
+                            selectItem(index);
+                          }
+                        : undefined
+                    }
+                  >
+                    {confirmSel === index ? "> " : ""}
+                    {option}
+                  </div>
+                ))}
+              </div>
+            ) : activeCategory ? (
               <div className="psp-placeholder">
                 <div className="psp-placeholder-text">COMING SOON</div>
                 <div className="psp-placeholder-sub">
                   {activeCategory} drop pending
+                </div>
+                <button
+                  className={`${pixelFont.className} psp-ig-btn`}
+                  onClick={openInstagram}
+                  onMouseDown={noFocus}
+                >
+                  FOLLOW {INSTAGRAM_HANDLE} ON IG
+                </button>
+                <div className="psp-placeholder-sub">
+                  to know when it drops · X / ENTER to open
                 </div>
               </div>
             ) : (
@@ -877,28 +1057,122 @@ export default function Shop() {
           }
         }
 
-        .psp-shell {
+        /* Leaving the shop: the MODE buttons, the handheld and the key legend all shrink and fade out together */
+        .shop-col {
           transition: transform 0.4s ease, opacity 0.4s ease, filter 0.4s ease;
         }
 
-        .psp-exit {
+        .shop-exit {
           transform: scale(0.85);
           opacity: 0;
           filter: brightness(0.3);
+          pointer-events: none;
+        }
+
+        /* Volume slider + mute button, top right of the handheld */
+        .psp-top-controls {
+          position: absolute;
+          /* (the volume tip is placed against this box) */
+          top: 10px;
+          right: 16px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          z-index: 2;
+          color: rgba(255, 255, 255, 0.3);
+        }
+
+        /* "CONTROL VOLUME HERE!" tip, to the left of the slider, with an arrow pointing at it */
+        .vol-tip {
+          position: absolute;
+          right: 100%;
+          top: 50%;
+          margin-right: 6px;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          white-space: nowrap;
+          pointer-events: none;
+          transform: translateY(-50%);
+          animation: volTipIn 0.3s ease-out;
+          transition: opacity 0.4s ease;
+        }
+
+        .vol-tip-fade {
+          opacity: 0;
+        }
+
+        .vol-tip-text {
+          color: #ffffff;
+          font-size: 10px;
+          line-height: 1;
+          letter-spacing: 0.5px;
+          /* the Minecraft look: a hard dark grey shadow one pixel down-right */
+          text-shadow: 1px 1px 0 #3f3f3f;
+        }
+
+        .vol-tip-arrow {
+          width: 8px;
+          height: 10px;
+          animation: volTipNudge 0.6s ease-in-out infinite;
+        }
+
+        @keyframes volTipIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+
+        /* the arrow pokes towards the slider */
+        @keyframes volTipNudge {
+          0%,
+          100% {
+            transform: translateX(0);
+          }
+          50% {
+            transform: translateX(3px);
+          }
+        }
+
+        /* Small phones: slightly smaller text so it fits next to the slider */
+        @media (max-width: 380px) {
+          .vol-tip-text {
+            font-size: 8px;
+          }
+        }
+
+        /* Visitors who asked their device for less motion: no poking arrow */
+        @media (prefers-reduced-motion: reduce) {
+          .vol-tip,
+          .vol-tip-arrow {
+            animation: none;
+          }
+        }
+
+        .psp-volume {
+          width: 64px;
+          height: 12px;
+          margin: 0;
+          cursor: pointer;
+          accent-color: #ff5fae;
+          opacity: 0.75;
+        }
+
+        .psp-volume:hover {
+          opacity: 1;
         }
 
         .psp-mute-btn {
-          position: absolute;
-          top: 14px;
-          right: 18px;
           border: none;
           background: transparent;
-          color: rgba(255, 255, 255, 0.3);
+          color: inherit;
           cursor: pointer;
           padding: 4px;
           display: flex;
           align-items: center;
-          z-index: 2;
         }
 
         .psp-header {
@@ -971,6 +1245,26 @@ export default function Shop() {
         .psp-placeholder-sub {
           color: #8a8a90;
           font-size: clamp(8px, 2.6vw, 11px);
+        }
+
+        /* "FOLLOW ON IG" button on the COMING SOON screens: pink, gently pulsing so it gets noticed */
+        .psp-ig-btn {
+          margin-top: 6px;
+          border: none;
+          border-radius: 3px;
+          background: #ff5fae;
+          color: #0d0d10;
+          cursor: pointer;
+          padding: 9px 12px;
+          font-size: clamp(8px, 2.6vw, 11px);
+          letter-spacing: 1px;
+          line-height: 1.5;
+          animation: bootPulse 1.6s ease-in-out infinite;
+        }
+
+        .psp-ig-btn:hover,
+        .psp-ig-btn:active {
+          filter: brightness(1.15);
         }
 
         .screen-overlay {

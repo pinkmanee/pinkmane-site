@@ -634,7 +634,7 @@ const SHIELD_COLORS = ["#9fe8ff", "#bfe3ff", "#4aa3ff", "#ffffff"];
 
 const MY_GOATS = ["LIL PEEP", "YUNG LEAN", "GHOSTEMANE", "WARLORD COLOSSUS", "SMOKEDOPE2016", "DRIPPIN SO PRETTY"];
 // Second sign, further left behind the jetpack
-const SHOUT_OUTS = ["O1M4DE", "TOMBFELL", "LEOHWASFOUND", "STUTTERS", "SLITFACE", "SALADE", "LIL SAD K", "HELL JEXX"];
+const SHOUT_OUTS = ["O1M4DE", "TOMBFELL", "LEOHWASFOUND", "STUTTERS", "MARCZERO", "HELL JEXX"];
 
 // Points
 const PTS_LEAF = 10;
@@ -684,7 +684,8 @@ const LEVEL_ZONE = 30; // the "weed fantasy" look
 // zone = the look (LEVEL_ZONE = Weedland, LEVEL_SNOW = snowy mountains), boss = which boss waits in the arena,
 // outfit = a picture PINKMANE wears only in this level (leave it out to wear your own outfit)
 // music = songs that play through the whole level, one after another (mp3s in public/sounds/)
-type LevelDef = { name: string; map: string[]; signs: string[]; bossHp: number; zone?: number; boss?: "leaf" | "snowman"; outfit?: string; music?: LevelSong[] };
+// startSpin = the three prizes of a STASH SPIN that opens when you press OK to start (you keep one of them for the level)
+type LevelDef = { name: string; map: string[]; signs: string[]; bossHp: number; zone?: number; boss?: "leaf" | "snowman"; outfit?: string; music?: LevelSong[]; startSpin?: ReelId[] };
 const LEVEL_SNOW = 31; // the snowy mountain valley look
 const LEVEL_KEEP = 32; // LEVEL 3: Warlord's Keep (the dark cathedral with the wiggly drawings)
 // The songs for Level 3, played one after another (then back to the first).
@@ -693,6 +694,9 @@ const LEVEL_KEEP = 32; // LEVEL 3: Warlord's Keep (the dark cathedral with the w
 // missing just gets skipped.
 // The handheld's music buttons (play/pause, next, previous, volume) control these while you play.
 type LevelSong = { file: string; title: string; artist: string };
+// TRACKLIST: a level with its own songs shows their list on its start screen ("PRESS OK TO START"),
+// and keeps it up for this many seconds after you start (then it fades out). The song that's playing is highlighted.
+const TRACKLIST_SECONDS = 4;
 const KEEP_MUSIC: LevelSong[] = [
   { file: "/sounds/king-baldwin-iv.mp3", title: "KING BALDWIN IV", artist: "WARLORD COLOSSUS" },
   { file: "/sounds/stressin.mp3", title: "STRESSIN", artist: "WARLORD COLOSSUS" },
@@ -807,6 +811,8 @@ const ALL_LEVELS: LevelDef[] = [
     bossHp: 0, // not used here: TOMBFELL has his own fight (see LEVEL 4 below)
     zone: LEVEL_WOODS,
     music: WOODS_MUSIC,
+    // Level 4 is tough: pick a helper before you go. BOBO (level 1), MAGNET or a SHIELD bubble.
+    startSpin: ["pet", "magnet", "shield"],
     // Lore signs, in order (one per S on the map). Max ~40 characters per line, \n = new line.
     signs: [
       "WELCOME TO THE PAINTED WORLD",
@@ -817,21 +823,22 @@ const ALL_LEVELS: LevelDef[] = [
       "HE REPS BACKWOODWIZARDS",
       "TOMBFELL LOVES BIRDS AND CATS",
       "FIND TOMBFELL ON SOUNDCLOUD",
+      "HIS GREAT HORNED OWL GUARDS THE WAY.\nSTOMP IT RIGHT AFTER IT LANDS!",
       "YOU CAN'T JUMP ON A WIZARD.\nSEND HIS ANIMALS BACK AT HIM!",
       "YOU BEAT TOMBFELL!\nGO HIT THE BONG",
     ],
-    // w = cat, f = dove, b = black bear, T = TOMBFELL's arena
+    // w = cat, f = dove, b = black bear, O = the owl's arena, T = TOMBFELL's arena
     map: [
-      "............................................................................................................................................................................................................................................................................",
-      "............................................................................................................................................................................................................................................................................",
-      "............................................................................................................................................................................................................................................................................",
-      ".................................................f..................................H.................................f.....f........................................................f............................H.........................................................",
-      "....................C.........................f....LL..............................---....................C..............f......................L.................................f.....LLL.....C................---........................................................",
-      "...................=?=............................----..................................==...................w................................=?==.....................................-----................................................................................",
-      "........LLL............................LL..............................LLL.................................######......LLL..............................LL...............................................-----...........LLL................................LLL.............",
-      "...S..........S..........w........S.....................w.........S...........b.............w.......S......######...............b........S............w....w......b........S...............S.....w...b...............S..........T........................S.......B..........",
-      "##############################..#############################...################################..##################################...################################..#################################...###############################################################",
-      "##############################..#############################...################################..##################################...################################..#################################...###############################################################",
+      "...........................................................................................................................................................................................................................................................................................................",
+      "...........................................................................................................................................................................................................................................................................................................",
+      "...........................................................................................................................................................................................................................................................................................................",
+      ".................................................f..................................H.................................f.....f........................................................f............................H........................................................................................",
+      "....................C.........................f....LL..............................---....................C..............f......................L.................................f.....LLL.....C................---.......................................................................................",
+      "...................=?=............................----..................................==...................w................................=?==.....................................-----...............................................................................................................",
+      "........LLL............................LL..............................LLL.................................######......LLL..............................LL...............................................-----..........................................LLL................................LLL.............",
+      "...S..........S..........w........S.....................w.........S...........b.............w.......S......######...............b........S............w....w......b........S...............S.....w...b.................S.H.O........................S..........T........................S.......B..........",
+      "##############################..#############################...################################..##################################...################################..#################################...##############################################################################################",
+      "##############################..#############################...################################..##################################...################################..#################################...##############################################################################################",
     ],
   },
 ];
@@ -872,6 +879,274 @@ const KEEP_WINGS: Wing[] = [
   { name: "THE CRYPT", from: 151, tint: [70, 150, 220, 0.2] },
   { name: "THE THRONE ROOM", from: 312, tint: [235, 190, 60, 0.14] },
 ];
+// Each wing has its own backdrop, and it changes when you walk through a gate (past each mini boss):
+//   THE ARMORY      warm stone, weapon racks, shields, banners and torches (start -> HORNED WARRIOR)
+//   THE CRYPT       cold blue catacombs: skull niches, a coffin, cobwebs, mist and dripping water (-> SKELETON KNIGHT)
+//   THE THRONE ROOM your cathedral, now with long gold-trimmed banners and light falling in (-> WARLORD)
+// The new walls are drawn with code (no picture files): change the colours below to repaint them.
+const WING_TILE = 320; // the Armory and the Crypt walls repeat every 320px (two pillars per tile)
+const WING_BLEND = 12; // tiles it takes for one wing's backdrop to fade into the next
+const ARMORY_COLORS = { top: [18, 9, 8], bottom: [48, 20, 10], stone: "#2a1e1c", stoneLight: "#3b2a26", iron: "#15100e", rivet: "#6b5a50", wood: "#5a3a1e", woodDark: "#3a2412", blade: "#9aa3ad", bladeLight: "#d4dbe2", gold: "#c8a040", banner: "#6a1010", bannerDark: "#420808", metal: "#3a3d46", metalLight: "#6a707c" };
+const CRYPT_COLORS = { top: [5, 7, 14], bottom: [16, 28, 44], stone: "#1e2430", stoneLight: "#2b3342", niche: "#03050a", bone: "#b8b2a0", boneDark: "#7a7466", moss: "#2f4a3a", coffin: "#2a3040", coffinLight: "#3c4558" };
+const THRONE_BANNER = { red: "#7a0e16", redDark: "#4a060c", gold: "#d8b048", goldDark: "#8a6a20" };
+const rgb = (c: number[]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+// a dark top-to-bottom fade between two colours
+function paintFade(g: CanvasRenderingContext2D, top: number[], bottom: number[]) {
+  for (let y = 0; y < 128; y += 4) {
+    const k = y / 124;
+    g.fillStyle = rgb(top.map((v, i) => Math.round(v + (bottom[i] - v) * k)));
+    g.fillRect(0, y, WING_TILE, 4);
+  }
+}
+// a stone pillar with iron bands (armory) or moss (crypt)
+function paintPillar(g: CanvasRenderingContext2D, x: number, w: number, stone: string, light: string, band: string, dots: string) {
+  g.fillStyle = stone;
+  g.fillRect(x, 0, w, 128);
+  g.fillStyle = light;
+  g.fillRect(x + 2, 0, 3, 128);
+  g.fillStyle = "rgba(0, 0, 0, 0.35)";
+  g.fillRect(x + w - 3, 0, 3, 128);
+  for (let y = 18; y < 128; y += 26) {
+    g.fillStyle = band;
+    g.fillRect(x, y, w, 4);
+    g.fillStyle = dots;
+    for (let rx = x + 3; rx < x + w - 2; rx += 6) g.fillRect(rx, y + 1, 1, 1);
+  }
+}
+function paintArmory(g: CanvasRenderingContext2D) {
+  const c = ARMORY_COLORS;
+  paintFade(g, c.top, c.bottom);
+  // bricks
+  for (let row = 0; row < 16; row++) {
+    const y = row * 8;
+    const shift = row % 2 ? 8 : 0;
+    g.fillStyle = "rgba(0, 0, 0, 0.32)";
+    g.fillRect(0, y, WING_TILE, 1);
+    for (let x = -shift; x < WING_TILE; x += 16) {
+      g.fillRect(x, y, 1, 8);
+      const glow = hash(row * 41 + x * 0.37);
+      if (glow > 0.6) {
+        g.fillStyle = `rgba(255, 140, 60, ${((glow - 0.6) * 0.07).toFixed(3)})`;
+        g.fillRect(x + 1, y + 1, 15, 7);
+        g.fillStyle = "rgba(0, 0, 0, 0.32)";
+      }
+    }
+  }
+  // bay 1: a shield with crossed swords, and a weapon rack under it
+  const b1 = 22 + 69;
+  for (const dir of [-1, 1]) {
+    // the crossed swords behind the shield
+    for (let k = 0; k < 34; k++) {
+      const x = b1 + dir * (k - 17);
+      const y = 18 + k;
+      g.fillStyle = k < 4 ? c.gold : c.blade;
+      g.fillRect(Math.round(x), y, 2, 1);
+      if (k === 4) {
+        g.fillStyle = c.gold;
+        g.fillRect(Math.round(x) - 3, y, 8, 1);
+      }
+    }
+  }
+  g.fillStyle = c.gold;
+  g.beginPath();
+  g.arc(b1, 35, 13, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = c.banner;
+  g.beginPath();
+  g.arc(b1, 35, 11, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = c.bannerDark;
+  g.fillRect(b1 - 11, 35, 22, 1);
+  g.fillRect(b1, 24, 1, 22);
+  // two horns on the shield
+  g.fillStyle = "#e8dcc0";
+  for (let k = 0; k < 6; k++) {
+    g.fillRect(b1 - 6 + Math.round(k * 0.4), 34 - k, 2, 1);
+    g.fillRect(b1 + 5 - Math.round(k * 0.4), 34 - k, 2, 1);
+  }
+  // the rack
+  g.fillStyle = c.woodDark;
+  g.fillRect(b1 - 46, 62, 92, 4);
+  g.fillStyle = c.wood;
+  g.fillRect(b1 - 46, 62, 92, 2);
+  const weapons = ["sword", "spear", "axe", "sword", "mace", "spear"];
+  weapons.forEach((wpn, i) => {
+    const x = b1 - 40 + i * 16;
+    if (wpn === "sword") {
+      g.fillStyle = c.gold;
+      g.fillRect(x - 3, 66, 7, 1);
+      g.fillRect(x, 63, 1, 3);
+      g.fillStyle = c.blade;
+      g.fillRect(x - 1, 67, 3, 34);
+      g.fillStyle = c.bladeLight;
+      g.fillRect(x, 67, 1, 33);
+    } else if (wpn === "spear") {
+      g.fillStyle = c.wood;
+      g.fillRect(x, 50, 2, 60);
+      g.fillStyle = c.blade;
+      g.fillRect(x - 1, 44, 4, 6);
+      g.fillRect(x, 41, 2, 3);
+    } else if (wpn === "axe") {
+      g.fillStyle = c.wood;
+      g.fillRect(x, 60, 2, 44);
+      g.fillStyle = c.blade;
+      g.fillRect(x - 6, 64, 6, 10);
+      g.fillRect(x - 7, 66, 1, 6);
+      g.fillStyle = c.bladeLight;
+      g.fillRect(x - 6, 64, 1, 10);
+    } else {
+      g.fillStyle = c.wood;
+      g.fillRect(x, 66, 2, 36);
+      g.fillStyle = c.metal;
+      g.fillRect(x - 3, 98, 8, 8);
+      g.fillStyle = c.metalLight;
+      g.fillRect(x - 4, 101, 1, 2);
+      g.fillRect(x + 5, 101, 1, 2);
+      g.fillRect(x, 106, 2, 1);
+    }
+  });
+  // bay 2: a long red banner, and a suit of armour on a stand
+  const b2 = 182 + 69;
+  g.fillStyle = c.gold;
+  g.fillRect(b2 - 14, 4, 28, 2);
+  g.fillStyle = c.banner;
+  g.fillRect(b2 - 12, 6, 24, 58);
+  g.fillStyle = c.bannerDark;
+  g.fillRect(b2 - 12, 6, 3, 58);
+  g.fillRect(b2 + 9, 6, 3, 58);
+  for (let k = 0; k < 12; k++) {
+    // the V cut at the bottom
+    g.fillStyle = c.banner;
+    g.fillRect(b2 - 12 + k, 64, 1, 12 - k);
+    g.fillRect(b2 + 11 - k, 64, 1, 12 - k);
+  }
+  // a gold sword down the banner
+  g.fillStyle = c.gold;
+  g.fillRect(b2 - 1, 14, 2, 36);
+  g.fillRect(b2 - 6, 22, 12, 2);
+  g.fillRect(b2 - 2, 10, 4, 4);
+  // the armour stand (right of the banner)
+  const ax = b2 + 34;
+  g.fillStyle = c.woodDark;
+  g.fillRect(ax - 1, 74, 3, 54);
+  g.fillRect(ax - 8, 124, 17, 4);
+  g.fillStyle = c.metal;
+  g.fillRect(ax - 7, 56, 15, 4); // helmet
+  g.fillRect(ax - 6, 50, 13, 7);
+  g.fillRect(ax - 10, 62, 21, 20); // breastplate
+  g.fillRect(ax - 12, 62, 4, 12);
+  g.fillRect(ax + 9, 62, 4, 12);
+  g.fillStyle = c.metalLight;
+  g.fillRect(ax - 5, 51, 3, 2);
+  g.fillRect(ax - 8, 64, 2, 14);
+  g.fillStyle = "#0c0c10";
+  g.fillRect(ax - 4, 55, 9, 1); // the slit in the helmet
+  g.fillRect(ax, 64, 1, 16);
+  // an armour stand on the left of the banner too
+  const ax2 = b2 - 40;
+  g.fillStyle = c.woodDark;
+  g.fillRect(ax2 - 1, 78, 3, 50);
+  g.fillStyle = c.metal;
+  g.fillRect(ax2 - 6, 60, 13, 8);
+  g.fillRect(ax2 - 9, 68, 19, 18);
+  g.fillStyle = c.metalLight;
+  g.fillRect(ax2 - 4, 61, 3, 2);
+  g.fillStyle = "#0c0c10";
+  g.fillRect(ax2 - 4, 64, 9, 1);
+  // the pillars, last (they stand in front of the wall)
+  paintPillar(g, 0, 22, c.stone, c.stoneLight, c.iron, c.rivet);
+  paintPillar(g, 160, 22, c.stone, c.stoneLight, c.iron, c.rivet);
+  // a warm glow from the floor
+  const fl = g.createLinearGradient(0, 96, 0, 128);
+  fl.addColorStop(0, "rgba(255, 110, 30, 0)");
+  fl.addColorStop(1, "rgba(255, 110, 30, 0.2)");
+  g.fillStyle = fl;
+  g.fillRect(0, 96, WING_TILE, 32);
+}
+function paintCrypt(g: CanvasRenderingContext2D) {
+  const c = CRYPT_COLORS;
+  paintFade(g, c.top, c.bottom);
+  // the catacomb wall: rows of little arched niches, most of them holding a skull or some bones
+  for (let bay = 0; bay < 2; bay++) {
+    const x0 = 22 + bay * 160;
+    for (let row = 0; row < 5; row++) {
+      for (let k = 0; k < 8; k++) {
+        const nx = x0 + 4 + k * 17;
+        const ny = 8 + row * 20;
+        if (bay === 1 && k >= 3 && k <= 5 && row >= 2) continue; // room for the coffin
+        g.fillStyle = "rgba(160, 190, 230, 0.06)";
+        g.fillRect(nx - 1, ny - 1, 16, 15);
+        g.fillStyle = c.niche;
+        g.fillRect(nx, ny + 3, 14, 10);
+        g.fillRect(nx + 2, ny + 1, 10, 2);
+        g.fillRect(nx + 4, ny, 6, 1);
+        const what = hash(bay * 97 + row * 13 + k * 7);
+        if (what < 0.55) {
+          // a skull
+          g.fillStyle = c.bone;
+          g.fillRect(nx + 4, ny + 5, 6, 5);
+          g.fillRect(nx + 5, ny + 10, 4, 2);
+          g.fillStyle = c.niche;
+          g.fillRect(nx + 5, ny + 7, 1, 2);
+          g.fillRect(nx + 8, ny + 7, 1, 2);
+          g.fillStyle = c.boneDark;
+          g.fillRect(nx + 4, ny + 9, 6, 1);
+        } else if (what < 0.8) {
+          // bones
+          g.fillStyle = c.boneDark;
+          g.fillRect(nx + 2, ny + 10, 10, 2);
+          g.fillStyle = c.bone;
+          g.fillRect(nx + 2, ny + 8, 10, 2);
+          g.fillRect(nx + 1, ny + 7, 2, 2);
+          g.fillRect(nx + 11, ny + 7, 2, 2);
+        }
+      }
+    }
+  }
+  // a stone coffin standing up against the wall
+  const cx = 182 + 69;
+  g.fillStyle = c.coffin;
+  g.beginPath();
+  g.moveTo(cx - 8, 52);
+  g.lineTo(cx + 8, 52);
+  g.lineTo(cx + 13, 66);
+  g.lineTo(cx + 9, 128);
+  g.lineTo(cx - 9, 128);
+  g.lineTo(cx - 13, 66);
+  g.closePath();
+  g.fill();
+  g.fillStyle = c.coffinLight;
+  g.fillRect(cx - 1, 60, 2, 50); // a carved cross on the lid
+  g.fillRect(cx - 7, 72, 14, 2);
+  g.fillRect(cx - 11, 66, 1, 50);
+  // the pillars, with moss and cobwebs
+  for (const px of [0, 160]) {
+    paintPillar(g, px, 22, c.stone, c.stoneLight, "#141a24", "#3c4a5c");
+    for (let k = 0; k < 6; k++) {
+      g.fillStyle = c.moss;
+      g.fillRect(px + 2 + Math.floor(hash(px + k * 5) * 16), 30 + Math.floor(hash(px * 3 + k) * 90), 4, 3);
+    }
+    // cobwebs in the top corners next to the pillar
+    g.strokeStyle = "rgba(210, 225, 255, 0.28)";
+    g.lineWidth = 1;
+    for (const side of [1, -1]) {
+      const ox = side > 0 ? px + 22 : px;
+      for (let r = 6; r <= 18; r += 6) {
+        g.beginPath();
+        g.arc(ox, 0, r, side > 0 ? 0 : Math.PI / 2, side > 0 ? Math.PI / 2 : Math.PI);
+        g.stroke();
+      }
+      for (let a = 0; a <= 3; a++) {
+        const ang = (a / 3) * (Math.PI / 2);
+        g.beginPath();
+        g.moveTo(ox, 0);
+        g.lineTo(ox + side * Math.cos(ang) * 20, Math.sin(ang) * 20);
+        g.stroke();
+      }
+    }
+  }
+}
+
 const wingAt = (col: number) => {
   let w = 0;
   KEEP_WINGS.forEach((x, i) => {
@@ -893,7 +1168,7 @@ const TORCH_LIGHT = 76;
 const TORCH_EMBER = 14; // an unlit torch still glows a tiny bit, so you can find it
 // ---------- Medals ----------
 // Par times in seconds for each level: [gold, silver, bronze]. These are first guesses: change them once you know how fast people really are.
-const LEVEL_PAR: Record<number, [number, number, number]> = { 1: [60, 80, 110], 2: [60, 80, 110], 3: [150, 200, 280], 4: [80, 110, 150] };
+const LEVEL_PAR: Record<number, [number, number, number]> = { 1: [60, 80, 110], 2: [60, 80, 110], 3: [150, 200, 280], 4: [95, 125, 165] };
 const LEVEL_MEDALS_KEY = "pinksuper-medals"; // JSON { "3": { time: "gold" | "silver" | "bronze" | null, nohit: boolean } }
 type MedalTime = "gold" | "silver" | "bronze";
 const MEDAL_RANK: (MedalTime | null)[] = [null, "bronze", "silver", "gold"];
@@ -905,7 +1180,7 @@ const medalForTime = (level: number, ms: number): MedalTime | null => {
 };
 // How Level 3's WARLORD skin can be EARNED (you can still buy it in the shop): a gold medal or a no-hit run in Level 3
 const WARLORD_SKIN_LEVEL = 3;
-type KnightKind = "horned" | "skeleton" | "warlord";
+type KnightKind = "horned" | "skeleton" | "warlord" | "owl"; // owl = Level 4's GREAT HORNED OWL (before TOMBFELL)
 type Knight = {
   kind: KnightKind;
   x: number;
@@ -925,6 +1200,7 @@ type Knight = {
   reach: number; // horned: chain length
   waves: number; // warlord: sound waves still to fire in this blast
   p2?: boolean; // warlord: phase 2 has started (pillars + skeletons)
+  msg?: number; // owl: so the "WAIT TILL IT LANDS!" pop-up doesn't repeat every frame
 };
 // w/h = size on screen, scale = pixel size, foot = how far down his feet are, hb = his body (left..right),
 // top = top of his head (where you land on him)
@@ -932,8 +1208,9 @@ const KN_DIM: Record<KnightKind, { w: number; h: number; scale: number; foot: nu
   horned: { w: 48, h: 52, scale: 2, foot: 52, hb: [8, 40], top: 6 },
   skeleton: { w: 56, h: 66, scale: 2, foot: 58, hb: [18, 42], top: 10 },
   warlord: { w: 108, h: 102, scale: 3, foot: 102, hb: [30, 96], top: 8 },
+  owl: { w: 60, h: 36, scale: 2, foot: 36, hb: [14, 46], top: 6 },
 };
-const KN_NAMES: Record<KnightKind, string> = { horned: "HORNED WARRIOR", skeleton: "SKELETON KNIGHT", warlord: "WARLORD COLOSSUS" };
+const KN_NAMES: Record<KnightKind, string> = { horned: "HORNED WARRIOR", skeleton: "SKELETON KNIGHT", warlord: "WARLORD COLOSSUS", owl: "GREAT HORNED OWL" };
 // Warlord's giant sword: where his back hand holds it, and the angles of the swing (radians, 0 = pointing right)
 const WL_PIVOT = WARLORD_LOOK === "A" ? { x: 85, y: 81 } : { x: 88, y: 79 };
 const SW_IDLE = (-65 * Math.PI) / 180; // resting over his shoulder
@@ -998,6 +1275,7 @@ const WL_SWORD_COLORS: Record<string, string> = {"K": "#0c0c10", "W": "#eef2f6",
 // =====================================================================================
 // Map letters only this level uses:
 //   b  a BLACK BEAR: big and slow, takes two jumps on its back (the first one makes it angry and fast)
+//   O  the GREAT HORNED OWL's arena starts here (the mini boss before him: exactly one screen wide, keep it flat)
 //   T  TOMBFELL's arena starts here (exactly one screen wide, keep it flat)
 // In this level the w monsters are CATS (they crouch, then pounce at you) and the f monsters are
 // DOVES (every second one swoops down at your head).
@@ -1047,6 +1325,29 @@ const BEAR_HP = 2; // jumps on its back (or shots) it takes
 const BEAR_SPEED = 20;
 const BEAR_ANGRY_SPEED = 62; // after the first hit
 const PTS_BEAR = 300;
+// THE GREAT HORNED OWL: the mini boss right before TOMBFELL (the O on the map starts its arena,
+// exactly one screen wide, keep it flat). TOMBFELL loves birds, and this one guards his woods.
+// It hovers high up, following you. Its eyes flash red (your warning), then it SWOOPS down at
+// where you're standing and gets stuck on the ground for a moment: that's when you jump on it.
+// Stomping it while it's flying just bounces you off, and shots only knock feathers out.
+// At half health it gets angry: faster swoops, and every landing sends shockwaves along the floor (jump them).
+const OWL_HP = 4; // stomps to beat it
+const OWL_PERCH_Y = 14; // how high it hovers (pixels from the top of the screen)
+const OWL_HOVER_SPEED = 70; // how fast it drifts after you up there
+const OWL_WARN = 0.6; // seconds its eyes flash red before it swoops (angry: OWL_WARN_ANGRY)
+const OWL_WARN_ANGRY = 0.45;
+const OWL_SWOOP_SPEED = 230; // how fast it dives (you run at 100)
+const OWL_SWOOP_SPEED_ANGRY = 290;
+const OWL_STUCK = 1.5; // seconds it sits on the ground after a swoop (your time to stomp it)
+const OWL_STUCK_ANGRY = 1.0;
+const OWL_REST = [1.2, 2.0]; // seconds of hovering between swoops (random between these two)
+// The owl's pictures: sitting (after a swoop), and two wing flaps for flying. Looks straight at you.
+const OWL_SIT = ["..............................", "..............................", ".......KK............KK.......", ".......KBK..........KBK.......", ".......KBBKKKKKKKKKKBBK.......", ".......KBBBBBBBBBBBBBBK.......", ".......KBCCCCBBBBCCCCBK.......", ".......KCCYYKCBBCKYYCCK.......", ".......KCYYKKCOOCKKYYCK.......", ".......KBCCCCBOOBCCCCBK.......", ".......KBBBBBBOOBBBBBBK.......", "........KBCbCbCbCbCbBK........", "........KBbCbCbCbCbCBK........", "........KBCbCbCbCbCbBK........", ".........KBbCbCbCbCBK.........", "..........KBBBBBBBBK..........", "..........KTK....KTK..........", ".........KTKTK..KTKTK........."];
+const OWL_FLY = [["..............................", "......K................K......", ".....KBKK............KKBK.....", "....KbBKBK..........KBKBbK....", "...KBBbKBBKKKKKKKKKKBBKbBBK...", "..KBbBBKBBBBBBBBBBBBBBKBBbBK..", "..KbBBbKBCCCCBBBBCCCCBKbBBbK..", ".KBBbBBKCCYYKCBBCKYYCCKBBbBBK.", ".KBbBBbKCYYKKCOOCKKYYCKbBBbBK.", "..KbBBbKBCCCCBOOBCCCCBKbBBbK..", "...KBBbKBBBBBBOOBBBBBBKbBBK...", "........KBCbCbCbCbCbBK........", "........KBbCbCbCbCbCBK........", "........KBCbCbCbCbCbBK........", ".........KBbCbCbCbCBK.........", "..........KBBBBBBBBK..........", "..........KTK....KTK..........", ".........KTKTK..KTKTK........."], ["..............................", "..............................", ".......KK............KK.......", ".......KBK..........KBK.......", ".......KBBKKKKKKKKKKBBK.......", ".......KBBBBBBBBBBBBBBK.......", ".......KBCCCCBBBBCCCCBK.......", "......KKCCYYKCBBCKYYCCKK......", ".....KBKCYYKKCOOCKKYYCKBK.....", "....KbBKBCCCCBOOBCCCCBKBbK....", "...KBBbKBBBBBBOOBBBBBBKbBBK...", "..KBbBB.KBCbCbCbCbCbBK.BBbBK..", ".KbBBbB.KBbCbCbCbCbCBK.BbBBbK.", "KBBbBBb.KBCbCbCbCbCbBK.bBBbBBK", ".KBbBBb..KBbCbCbCbCBK..bBBbBK.", "..........KBBBBBBBBK..........", "..........KTK....KTK..........", ".........KTKTK..KTKTK........."]];
+const OWL_COLORS: Record<string, string> = { K: "#14101c", B: "#6b4a2e", b: "#8f6a40", C: "#e8d2a6", Y: "#ffc800", O: "#3a2a1a", T: "#e0a030" };
+const OWL_WARN_COLORS: Record<string, string> = { ...OWL_COLORS, Y: "#ff2a2a" }; // eyes red: it's about to swoop
+const OWL_FEATHERS = ["#6b4a2e", "#8f6a40", "#e8d2a6", "#ffffff"];
+
 // The colours of his glitch (his robe, his shield, the sparks)
 const GLITCH = ["#ff4fd8", "#3cf0ff", "#b6ff3c", "#ffb03c", "#7a5cff", "#ffffff"];
 // The "painted" sky: the colours of his cover art. Every repaint slides along this list.
@@ -1550,7 +1851,7 @@ const SHOP_ROW_H = 9;
 // weak = how you beat him, where = shown on the grey locked card.
 // color / sky / ground = the card's colours.
 // main: true = a MAIN BOSS: his card blinks and a light runs round its gold edge.
-type BossId = "troll" | "giant" | "leaf" | "snowman" | "horned" | "skeleton" | "runknight" | "warlord" | "tombfell"; // runknight = the red skeleton of the infinite run
+type BossId = "troll" | "giant" | "leaf" | "snowman" | "horned" | "skeleton" | "runknight" | "warlord" | "owl" | "tombfell"; // runknight = the red skeleton of the infinite run
 type BossCard = { id: BossId; main?: boolean; name: string; moves: string[]; weak: string; where: string; color: string; sky: string; ground: string };
 const ALL_BOSS_CARDS: BossCard[] = [
   { id: "troll", name: "TROLL", moves: ["CHASES YOU DOWN", "JUMPS AT YOU"], weak: "WEAK: YOUR SHOTS", where: "INFINITE RUN", color: "#8fce5a", sky: "#d7efbc", ground: "#2e9e3a" },
@@ -1561,10 +1862,13 @@ const ALL_BOSS_CARDS: BossCard[] = [
   { id: "skeleton", name: "SKELETON KNIGHT", moves: ["LONG SWORD SLASH", "ARMOUR EATS SHOTS"], weak: "WEAK: HEAD STOMP", where: "LEVEL 3", color: "#b9b2c8", sky: "#2a1a2e", ground: "#55505a" },
   { id: "runknight", name: "RED SKELETON", moves: ["LONG SWORD SLASH", "ARMOUR EATS SHOTS"], weak: "WEAK: HEAD STOMP", where: "INFINITE RUN", color: "#d0505a", sky: "#2a0d14", ground: "#55303a" },
   { id: "warlord", main: true, name: "WARLORD COLOSSUS", moves: ["GIANT SWORD SLAM", "FLOOR SHOCKWAVES", "EYE SOUND WAVES"], weak: "WEAK: HEAD STOMP", where: "LEVEL 3", color: "#d23a3a", sky: "#200a10", ground: "#55505a" },
+  { id: "owl", name: "GREAT HORNED OWL", moves: ["SWOOPS FROM ABOVE", "ANGRY: GROUND SHOCKWAVES"], weak: "WEAK: STOMP IT WHEN IT LANDS", where: "LEVEL 4", color: "#a8794a", sky: "#1b1464", ground: "#3f6b3a" },
   { id: "tombfell", main: true, name: "TOMBFELL", moves: TOMBFELL_LEVEL_SHOWN ? ["WALLS OF DOVES", "POUNCING CATS", "RIDES A GIANT BEAR"] : ["SPELL SHIELD EATS SHOTS", "POUNCING CATS"], weak: "WEAK: HIS OWN PETS", where: TOMBFELL_LEVEL_SHOWN ? "LEVEL 4" : "INFINITE RUN", color: "#b06ce0", sky: "#241446", ground: "#3f6b3a" },
 ];
 // The cards the game actually uses (without the three Level 3 bosses while WARLORD is hidden)
-const BOSS_CARDS: BossCard[] = ALL_BOSS_CARDS.filter((c) => WARLORD_SHOWN || !["horned", "skeleton", "warlord"].includes(c.id));
+const BOSS_CARDS: BossCard[] = ALL_BOSS_CARDS.filter(
+  (c) => (WARLORD_SHOWN || !["horned", "skeleton", "warlord"].includes(c.id)) && (TOMBFELL_LEVEL_SHOWN || c.id !== "owl")
+);
 const CARDS_KEY = "pinksuper-cards"; // JSON array of the boss cards you won
 const CARD_W = 164;
 const CARD_H = 148;
@@ -1578,6 +1882,7 @@ function bossArt(id: BossId): { rows: string[]; colors: Record<string, string>; 
   if (id === "skeleton") return { rows: KN_SKEL[0], colors: KN_SKEL_COLORS, scale: 2 };
   if (id === "runknight") return { rows: KN_SKEL[0], colors: KN_SKEL_RUN_COLORS, scale: 2 };
   if (id === "tombfell") return { rows: TOMB_WIZ, colors: TOMB_WIZ_COLORS, scale: 2 };
+  if (id === "owl") return { rows: OWL_SIT, colors: OWL_COLORS, scale: 2 };
   return { rows: WARLORD_ROWS[0], colors: WARLORD_ROW_COLORS, scale: 2 };
 }
 // Writes text centred on cx. If it's wider than maxW it gets squeezed until it fits,
@@ -2271,6 +2576,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   const stuttersRef = useRef<HTMLAudioElement | null>(null); // the secret Stutters remix
   if (stuttersRef.current) stuttersRef.current.muted = muted; // follows the iPod mute button
   const keepImgsRef = useRef<Record<string, HTMLImageElement>>({}); // Level 3 backdrop pictures
+  const wingTilesRef = useRef<Record<string, HTMLCanvasElement>>({}); // the Armory and Crypt walls (drawn once)
   // your painted zone backgrounds (PAINTED_BGS), each with a copy at exactly the game's size so every wiggle strip is a plain copy
   const paintedBgRef = useRef<Record<number, { img: HTMLImageElement; cache: HTMLCanvasElement | null }>>({});
   const voicesRef = useRef(0); // sounds playing right now
@@ -2325,6 +2631,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     levelBest: {} as Record<string, number>, // best time per level (ms), from this browser
     newBest: false,
     doneAt: 0,
+    trackUntil: 0, // the level's tracklist stays on screen until this moment (game clock)
     bong: null as null | { x: number; y: number },
     signs: [] as { x: number; text: string; r?: number }[],
     lboss: null as null | {
@@ -2499,6 +2806,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     medal: null as null | { time: MedalTime | null; nohit: boolean; newTime: boolean; newNoHit: boolean; skin: boolean }, // what you just earned
     spin: null as null | {
       boss: boolean; // the gold BOSS SPIN (rarer prizes)
+      title?: string; // a different name on top of the machine (the level start spin)
       reels: ReelId[]; // what each of the three reels lands on
       strips: ReelId[][]; // the icons that roll past on each reel before it lands
       stops: number[]; // when each reel stops (seconds)
@@ -3991,8 +4299,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           s.bossCol = c - 1;
           s.lbossState = "waiting";
         } else if (ch === "B") s.bong = { x: x - 2, y: (r + 1) * T - BONG_H };
-        else if (ch === "M" || ch === "K" || ch === "W") {
-          const kind: KnightKind = ch === "M" ? "horned" : ch === "K" ? "skeleton" : "warlord";
+        else if (ch === "M" || ch === "K" || ch === "W" || ch === "O") {
+          const kind: KnightKind = ch === "M" ? "horned" : ch === "K" ? "skeleton" : ch === "O" ? "owl" : "warlord";
           s.karenas.push({ col: c - 1, kind });
           if (kind === "warlord") s.kfinalCol = c - 1;
           if (s.karenas.length === 1) s.bossCol = c - 1; // first red mark on the progress line
@@ -4101,11 +4409,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       }
     }
     const d = KN_DIM[a.kind];
-    const hp = a.kind === "horned" ? HORNED_HP : a.kind === "skeleton" ? SKELETON_HP : WARLORD_HP;
+    const hp = a.kind === "horned" ? HORNED_HP : a.kind === "skeleton" ? SKELETON_HP : a.kind === "owl" ? OWL_HP : WARLORD_HP;
     s.kboss = {
       kind: a.kind,
       x: s.cam + W - d.w - 16,
-      y: 8 * T - d.foot,
+      y: a.kind === "owl" ? OWL_PERCH_Y : 8 * T - d.foot, // the owl starts up high
       vx: 0,
       vy: 0,
       hp,
@@ -4133,7 +4441,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     } else {
       bossIntro(a.kind, "running"); // his card first, then the fight
       s.flash = 2.4;
-      s.flashText = a.kind === "skeleton" ? "JUMP ON THE SKELETON KNIGHT!" : "WARLORD COLOSSUS! JUMP ON HIS HEAD!";
+      s.flashText =
+        a.kind === "skeleton"
+          ? "JUMP ON THE SKELETON KNIGHT!"
+          : a.kind === "owl"
+            ? "STOMP THE OWL RIGHT AFTER IT LANDS!"
+            : "WARLORD COLOSSUS! JUMP ON HIS HEAD!";
       s.hinted = s.hinted.filter((h) => h !== "bossjump");
       showHint("bossjump", "FREE DOUBLE JUMPS HERE!");
       s.hintTime = 4;
@@ -4936,7 +5249,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
   // Freezes the run and starts the reels
   // (forced = the test key: these three prizes instead of random ones)
-  const openSpin = (boss: boolean, forced?: ReelId[]) => {
+  const openSpin = (boss: boolean, forced?: ReelId[], title?: string) => {
     const s = state.current;
     const reels = forced ?? rollSpin(boss);
     const jackpot = reels[0] === reels[1] && reels[1] === reels[2];
@@ -4953,7 +5266,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     });
     const stops = [...SPIN_REEL_STOPS];
     if (jackpot) stops[2] += 0.7; // two the same already... the last reel takes its time
-    s.spin = { boss, reels, strips, stops, t: 0, landed: 0, tick: 0, jackpot, pick: 1, took: -1, tookAt: 0, flashWas: s.flash };
+    s.spin = { boss, title, reels, strips, stops, t: 0, landed: 0, tick: 0, jackpot, pick: 1, took: -1, tookAt: 0, flashWas: s.flash };
     s.mode = "spin";
     beep(240, 90, 0.18, 0.06, "square"); // the lever
   };
@@ -5020,6 +5333,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     s.spin = null;
     s.mode = "running";
     s.invuln = Math.max(s.invuln, 1.2); // a moment to find your feet again
+    if (s.levelMode && sp?.title) s.trackUntil = s.t + TRACKLIST_SECONDS; // after the level start spin: the tracklist again
     if (sp) {
       s.flash = sp.flashWas;
       if (sp.took >= 0) {
@@ -5439,6 +5753,10 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       }
     } else if (s.mode === "ready") {
       s.mode = "running";
+      if (s.levelMode) s.trackUntil = s.t + TRACKLIST_SECONDS; // the tracklist stays up a few more seconds
+      // a level with a start spin: pick your helper first (the tracklist comes back for a few seconds after)
+      const startSpin = s.levelMode ? LEVELS[s.level - 1]?.startSpin : undefined;
+      if (startSpin && startSpin.length === 3) openSpin(false, startSpin, "PICK A HELPER");
     } else if (s.mode === "running") {
       jump();
     } else if (s.mode === "entry") {
@@ -5858,7 +6176,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           // the knight backs off so you get a fair restart
           const kd = KN_DIM[s.kboss.kind];
           s.kboss.x = s.cam + W - kd.w - 16;
-          s.kboss.y = 8 * T - kd.foot;
+          s.kboss.y = s.kboss.kind === "owl" ? OWL_PERCH_Y : 8 * T - kd.foot;
           s.kboss.vx = 0;
           s.kboss.vy = 0;
           s.kboss.act = "walk";
@@ -6392,6 +6710,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
             burst(f.x, f.y, 6, ["#f0c030", "#ffffff"], 60);
             popup(f.x, f.y - 10, "BLOCKED!");
             playBump();
+          } else if (kf.kind === "owl") {
+            // shots only knock feathers out of the owl
+            f.life = 0;
+            burst(f.x, f.y, 8, OWL_FEATHERS, 60);
+            popup(f.x, f.y - 10, "FEATHERS!");
+            playBump();
           } else {
             f.life = 0;
             burst(f.x, f.y, 6, KNIGHT_DUST, 50);
@@ -6894,7 +7218,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         // falling apart
         kn.dead -= dt;
         kn.y += 26 * dt;
-        if (Math.random() < 0.7) burst(kn.x + rand(10, d.w - 10), kn.y + rand(10, d.foot), 2, KNIGHT_DUST, 50);
+        if (Math.random() < 0.7) burst(kn.x + rand(10, d.w - 10), kn.y + rand(10, d.foot), 2, kn.kind === "owl" ? OWL_FEATHERS : KNIGHT_DUST, 50);
         if (kn.dead <= 0) {
           s.kboss = null;
           s.bossState = "none"; // the screen scrolls again
@@ -6907,7 +7231,13 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           } else {
             s.flash = 2.5;
             s.flashText =
-              kn.kind === "warlord" ? "WARLORD IS DOWN! GO HIT THE BONG" : kn.kind === "horned" ? "HORNED WARRIOR DOWN! KEEP GOING" : "SKELETON KNIGHT DOWN! KEEP GOING";
+              kn.kind === "warlord"
+                ? "WARLORD IS DOWN! GO HIT THE BONG"
+                : kn.kind === "horned"
+                  ? "HORNED WARRIOR DOWN! KEEP GOING"
+                  : kn.kind === "owl"
+                    ? "THE OWL FLEW OFF! TOMBFELL IS NEXT"
+                    : "SKELETON KNIGHT DOWN! KEEP GOING";
             if (s.power === "fire") s.fireTime = Math.min(s.fireTime, FIRE_TIME);
             s.ammo = Math.min(s.ammo, 5);
           }
@@ -6930,6 +7260,70 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
               kn.cool = Math.max(kn.cool, 0.6);
             }
           }
+        } else if (kn.kind === "owl") {
+          // THE GREAT HORNED OWL: hovers up high after you, eyes flash red, SWOOPS at where you stand,
+          // then sits stuck on the ground for a moment (stomp it now!) before flying back up.
+          const angry = kn.hp <= Math.ceil(kn.maxHp / 2);
+          if (kn.act === "walk") {
+            // flying back up / hovering over you, drifting a little from side to side
+            const want = Math.max(s.cam + 6, Math.min(s.cam + W - d.w - 6, pc - d.w / 2 + Math.sin(s.t * 1.7) * 40));
+            const sp = OWL_HOVER_SPEED * (angry ? 1.3 : 1);
+            kn.vx = Math.max(-sp, Math.min(sp, (want - kn.x) * 2.5));
+            kn.vy = Math.max(-150, Math.min(150, (OWL_PERCH_Y + Math.sin(s.t * 3) * 3 - kn.y) * 4));
+            kn.facing = towards;
+            if (Math.abs(kn.y - OWL_PERCH_Y) < 8) kn.cool -= dt; // only counts down once it's back up
+            if (kn.cool <= 0) {
+              kn.act = "wind";
+              kn.timer = angry ? OWL_WARN_ANGRY : OWL_WARN;
+              kn.vx = 0;
+              kn.vy = 0;
+              beep(520, 380, 0.18, 0.06, "triangle"); // hoo...
+              beep(420, 300, 0.22, 0.06, "triangle", 0.2); // ...hoo
+            }
+          } else if (kn.act === "wind") {
+            // eyes red: about to swoop
+            kn.vx = 0;
+            kn.vy = 0;
+            kn.facing = towards;
+            kn.timer -= dt;
+            if (kn.timer <= 0) {
+              // dive in a straight line at where you're standing right now
+              const dx = pc - (kn.x + d.w / 2);
+              const dy = 8 * T - (kn.y + d.foot);
+              const len = Math.max(1, Math.hypot(dx, dy));
+              const speed = angry ? OWL_SWOOP_SPEED_ANGRY : OWL_SWOOP_SPEED;
+              kn.vx = (dx / len) * speed;
+              kn.vy = (dy / len) * speed;
+              kn.act = "swing";
+              beep(1300, 500, 0.3, 0.06, "sawtooth"); // screech
+            }
+          } else if (kn.act === "swing") {
+            // diving: it lands when it hits the floor
+            if (onFloor) {
+              kn.act = "rest";
+              kn.timer = angry ? OWL_STUCK_ANGRY : OWL_STUCK;
+              kn.vx = 0;
+              kn.vy = 0;
+              s.shake = 0.15;
+              burst(kn.x + d.w / 2, 8 * T - 4, 14, OWL_FEATHERS, 80);
+              playBump();
+              if (angry) {
+                // angry landing: shockwaves both ways along the floor
+                const b = knightBox(kn);
+                s.kwaves.push({ x: b.x1, dir: -1, life: 1 }, { x: b.x2, dir: 1, life: 1 });
+              }
+            }
+          } else {
+            // stuck on the ground (dizzy stars over its head): your chance
+            kn.vx = 0;
+            kn.vy = 0;
+            kn.timer -= dt;
+            if (kn.timer <= 0) {
+              kn.act = "walk";
+              kn.cool = rand(OWL_REST[0], OWL_REST[1]) / (angry ? 1.4 : 1);
+            }
+          }
+          if (kn.msg && kn.msg > 0) kn.msg -= dt;
         } else if (kn.kind === "horned") {
           // THE HORNED WARRIOR: runs at you (fast!) swinging his chain mace round and round.
           // Every few seconds he lets the chain out wide. Only shots hurt him.
@@ -7078,7 +7472,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
             }
           }
         }
-        kn.vy = Math.min(420, kn.vy + GRAVITY * dt);
+        if (kn.kind !== "owl") kn.vy = Math.min(420, kn.vy + GRAVITY * dt); // (the owl flies: no gravity)
         kn.x += kn.vx * dt;
         kn.y += kn.vy * dt;
         if (kn.y > floorY) {
@@ -7114,6 +7508,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
         // touching his body hurts, landing on his head hurts HIM (except the horned warrior)
         const bx = knightBox(kn);
+        // the owl in the air (hovering, about to swoop, or swooping) can't be stomped; once it's sat on the ground it can
+        const owlUp = kn.kind === "owl" && kn.act !== "rest" && kn.act !== "stagger";
         if (hx() + HB_W > bx.x1 && hx() < bx.x2 && hy() + HB_H > bx.y1 && hy() < bx.y2) {
           const onTop = cameDown(bx.y1, 16);
           if (onTop) {
@@ -7121,6 +7517,13 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
             if (kn.kind === "horned") {
               s.vy = STOMP_BOUNCE;
               popup(bc, bx.y1 - 10, "NOPE! SHOOT HIM");
+              playBump();
+            } else if (owlUp) {
+              s.vy = STOMP_BOUNCE;
+              if (!kn.msg || kn.msg <= 0) {
+                popup(bc, bx.y1 - 10, "WAIT TILL IT LANDS!");
+                kn.msg = 1;
+              }
               playBump();
             } else if (kn.inv > 0) {
               s.vy = STOMP_BOUNCE;
@@ -7137,7 +7540,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
                 s.vy = -340;
                 s.knockT = 0.45;
               }
-              burst(bc, bx.y1, 18, KNIGHT_DUST, 90);
+              burst(bc, bx.y1, 18, kn.kind === "owl" ? OWL_FEATHERS : KNIGHT_DUST, 90);
               s.shake = 0.15;
               playStomp();
               if (kn.hp <= 0) {
@@ -7145,7 +7548,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
                 kn.vx = 0;
                 s.kwaves = [];
                 s.kshots = [];
-                popup(bc, bx.y1 - 10, kn.kind === "warlord" ? "THE WARLORD FALLS!" : "CRUMBLED!");
+                popup(bc, bx.y1 - 10, kn.kind === "warlord" ? "THE WARLORD FALLS!" : kn.kind === "owl" ? "NO MORE HOOTS!" : "CRUMBLED!");
                 playTrollDeath();
               } else {
                 popup(bc, bx.y1 - 10, `${kn.hp} LEFT`);
@@ -7162,7 +7565,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
                 }
               }
             }
-          } else if (s.invuln <= 0) {
+          } else if (s.invuln <= 0 && !(kn.kind === "owl" && !owlUp)) {
+            // (walking into the owl while it's stuck on the ground doesn't hurt)
             hurt();
             return;
           }
@@ -8094,10 +8498,173 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
   // LEVEL 3 backdrop: your cathedral, with the vines, grey squiggles, red title and its echoes wiggling.
   // It scrolls at half speed and lines up exactly when the WARLORD arena locks.
+  // THE ARMORY's or THE CRYPT's wall picture (drawn the first time it's needed, then kept)
+  const wingTile = (kind: "armory" | "crypt") => {
+    let c = wingTilesRef.current[kind];
+    if (c) return c;
+    c = document.createElement("canvas");
+    c.width = WING_TILE;
+    c.height = 128;
+    const g = c.getContext("2d");
+    if (g) {
+      if (kind === "armory") paintArmory(g);
+      else paintCrypt(g);
+    }
+    wingTilesRef.current[kind] = c;
+    return c;
+  };
+  // Draws one wing's backdrop. alpha < 1 while it's fading in over the wing before it.
+  const drawWingBack = (ctx: CanvasRenderingContext2D, wing: number, alpha: number) => {
+    const s = state.current;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (wing === 2) {
+      drawCathedral(ctx);
+      drawThroneExtras(ctx);
+      ctx.restore();
+      return;
+    }
+    const kind = wing === 0 ? "armory" : "crypt";
+    const tile = wingTile(kind);
+    const rel = s.cam * 0.5;
+    const off = -(((rel % WING_TILE) + WING_TILE) % WING_TILE);
+    const t = s.t * Math.PI;
+    for (let i = 0; i < 2; i++) {
+      const dx = Math.round(off + i * WING_TILE);
+      // a gentle wiggle, like your cathedral drawings
+      for (let y = 0; y < 128; y += 2) {
+        const shift = Math.round(0.9 * Math.sin(y * 0.16 + t * 0.9));
+        ctx.drawImage(tile, 0, y, WING_TILE, 2, dx + shift, y, WING_TILE, 2);
+      }
+      if (kind === "armory") {
+        // a burning torch on each pillar
+        for (const px of [11, 171]) {
+          const fx = dx + px;
+          ctx.fillStyle = ARMORY_COLORS.iron;
+          ctx.fillRect(fx - 3, 12, 7, 3);
+          ctx.fillRect(fx - 1, 15, 3, 6);
+          const fl = Math.sin(s.t * 13 + px) * 1.5;
+          ctx.fillStyle = "rgba(255, 170, 60, 0.07)";
+          ctx.beginPath();
+          ctx.arc(fx + 0.5, 8, 9 + fl, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#ff7a00";
+          ctx.fillRect(fx - 2, 4 - Math.round(fl), 5, 8 + Math.round(fl));
+          ctx.fillStyle = "#ffd23c";
+          ctx.fillRect(fx - 1, 7 - Math.round(fl * 0.5), 3, 5);
+        }
+      }
+    }
+    if (kind === "armory") {
+      // embers floating up from the forge below
+      for (let k = 0; k < 14; k++) {
+        const ex = (hash(k * 7.3) * (W + 40) - ((s.cam * 0.5) % (W + 40)) + (W + 40) * 2) % (W + 40) - 20;
+        const ey = 128 - ((s.t * (12 + hash(k + 2) * 18) + hash(k + 5) * 128) % 128);
+        ctx.fillStyle = k % 3 === 0 ? "#ffd23c" : "#ff7a00";
+        ctx.fillRect(Math.round(ex + Math.sin(s.t * 2 + k) * 3), Math.round(ey), 1, 1);
+      }
+    } else {
+      // cold mist drifting along the floor
+      for (let k = 0; k < 5; k++) {
+        const mx = ((k * 97 + s.t * (8 + k * 3) - s.cam * 0.3) % (W + 160)) - 80;
+        ctx.fillStyle = "rgba(150, 180, 230, 0.08)";
+        ctx.beginPath();
+        ctx.ellipse(Math.round(mx), 118 - (k % 2) * 6, 70, 9, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // water dripping from the ceiling
+      for (let k = 0; k < 4; k++) {
+        const period = 2.2 + hash(k + 11) * 1.5;
+        const ph = (s.t + hash(k) * period) % period;
+        const dxp = ((hash(k * 3.1) * W * 1.5 - s.cam * 0.5) % (W + 20) + W + 20) % (W + 20) - 10;
+        const dy = ph < 0.6 ? 2 : Math.min(128, 2 + (ph - 0.6) * (ph - 0.6) * 220);
+        ctx.fillStyle = "rgba(170, 210, 255, 0.7)";
+        ctx.fillRect(Math.round(dxp), Math.round(dy), 1, ph < 0.6 ? 1 : 2);
+      }
+    }
+    ctx.restore();
+  };
+  // THE THRONE ROOM: long red banners with gold trim swaying between the pillars, and light falling in from above.
+  // The banners fade away before the WARLORD arena, so they never cover his big title.
+  const drawThroneExtras = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    const t = s.t;
+    // light falling in
+    for (let k = 0; k < 3; k++) {
+      const bx = ((k * 140 - s.cam * 0.35) % (W + 140) + W + 140) % (W + 140) - 70;
+      ctx.fillStyle = "rgba(255, 220, 150, 0.05)";
+      ctx.beginPath();
+      ctx.moveTo(bx, 0);
+      ctx.lineTo(bx + 26, 0);
+      ctx.lineTo(bx + 66, 128);
+      ctx.lineTo(bx + 30, 128);
+      ctx.closePath();
+      ctx.fill();
+      // dust in the light
+      for (let d = 0; d < 5; d++) {
+        const dy = (t * (6 + d) + hash(k * 9 + d) * 128) % 128;
+        ctx.fillStyle = "rgba(255, 230, 170, 0.5)";
+        ctx.fillRect(Math.round(bx + 13 + dy * 0.31 + Math.sin(t + d) * 3), Math.round(dy), 1, 1);
+      }
+    }
+    const toArena = s.kfinalCol * T - (s.cam + W);
+    const fade = Math.max(0, Math.min(1, toArena / (WING_BLEND * T)));
+    if (fade <= 0) return;
+    ctx.save();
+    ctx.globalAlpha *= fade;
+    const rel = (s.cam - s.kfinalCol * T) * 0.5;
+    const off = -(((rel % KEEP_TILE) + KEEP_TILE) % KEEP_TILE);
+    const b = THRONE_BANNER;
+    for (let i = 0; i < 2; i++) {
+      for (const bxp of [53, 159, 265]) {
+        const cx = Math.round(off + i * KEEP_TILE + bxp);
+        if (cx < -20 || cx > W + 20) continue;
+        ctx.fillStyle = b.goldDark;
+        ctx.fillRect(cx - 13, 2, 26, 3);
+        for (let y = 5; y < 86; y++) {
+          // each row swings a little more the lower it hangs
+          const sway = Math.round(Math.sin(t * 1.6 + y * 0.05 + bxp) * (y / 86) * 2.5);
+          const edge = y > 74 ? Math.abs(y - 74) : 0; // the pointed bottom
+          const half = 10 - edge;
+          if (half <= 0) continue;
+          ctx.fillStyle = b.red;
+          ctx.fillRect(cx - half + sway, y, half * 2, 1);
+          ctx.fillStyle = b.gold;
+          ctx.fillRect(cx - half + sway, y, 2, 1);
+          ctx.fillRect(cx + half - 2 + sway, y, 2, 1);
+          if (y >= 22 && y <= 50) {
+            // a gold crown on the banner
+            const crown = y < 30 ? (y % 4 < 2 ? 6 : 2) : y < 34 ? 6 : 0;
+            if (crown) {
+              ctx.fillStyle = b.gold;
+              ctx.fillRect(cx - crown + sway, y, crown * 2, 1);
+            }
+          }
+        }
+      }
+    }
+    ctx.restore();
+  };
+
+  // Level 3's backdrop for the wing you're in. Walking into the next wing, the new one fades in over the old one.
   const drawKeep = (ctx: CanvasRenderingContext2D) => {
     const s = state.current;
     ctx.fillStyle = "#1c0a18";
     ctx.fillRect(-4, -1200, W + 8, H + 1400);
+    if (!s.levelMode) {
+      drawCathedral(ctx);
+      return;
+    }
+    const col = (s.cam + W / 2) / T;
+    const wi = wingAt(col);
+    const k = wi === 0 ? 1 : Math.min(1, (col - KEEP_WINGS[wi].from) / WING_BLEND);
+    if (k < 1) drawWingBack(ctx, wi - 1, 1);
+    drawWingBack(ctx, wi, k);
+  };
+
+  // Your cathedral (now THE THRONE ROOM's backdrop)
+  const drawCathedral = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
     const im = keepImgsRef.current;
     const ok = (k: string) => !!im[k] && im[k].complete && im[k].naturalWidth > 0;
     const t = s.t * Math.PI;
@@ -9153,6 +9720,46 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
   };
 
   // ---------- BOSS CARDS: the card before a fight, and your collection ----------
+  // The level's TRACKLIST: a small box with its songs, the one that's playing highlighted in pink
+  const drawTracklist = (ctx: CanvasRenderingContext2D) => {
+    const s = state.current;
+    const list = levelSongList();
+    if (!list || list.length === 0) return;
+    // fades out in the last half second
+    const left = s.mode === "ready" ? 1 : s.trackUntil - s.t;
+    if (left <= 0) return;
+    const alpha = Math.min(1, left / 0.5);
+    // one artist for the whole level: say it once at the top. Several artists: each line gets its artist.
+    const oneArtist = list.every((m) => m.artist === list[0].artist);
+    const lines = list.map((m, i) => `${i + 1}. ${m.title}${oneArtist ? "" : ` - ${m.artist}`}`);
+    const playing = levelMusicRef.current?.dataset.src;
+    const lineH = 8;
+    const boxW = 220;
+    const boxH = 15 + lines.length * lineH + 3;
+    const x = Math.round((W - boxW) / 2);
+    const y = H - boxH - 6;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = "rgba(22, 12, 29, 0.88)";
+    ctx.fillRect(x, y, boxW, boxH);
+    ctx.fillStyle = PINK;
+    ctx.fillRect(x, y, boxW, 1);
+    ctx.fillRect(x, y + boxH - 1, boxW, 1);
+    ctx.fillRect(x, y, 1, boxH);
+    ctx.fillRect(x + boxW - 1, y, 1, boxH);
+    ctx.font = `8px ${fontFamily}`;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffd700";
+    fitText(ctx, oneArtist ? `TRACKLIST: ${list[0].artist}` : "TRACKLIST", W / 2, y + 4, boxW - 10);
+    lines.forEach((line, i) => {
+      const on = playing === list[i].file;
+      ctx.fillStyle = on ? "#ff5fe0" : "#ffffff";
+      fitText(ctx, on ? `> ${line} <` : line, W / 2, y + 15 + i * lineH, boxW - 10);
+    });
+    ctx.restore();
+  };
+
   const drawBossIntro = (ctx: CanvasRenderingContext2D) => {
     const s = state.current;
     const it = s.intro;
@@ -10311,7 +10918,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     }
     drawPixels(ctx, LEAF, 50, 14, { G: trimDark, D: trimDark }, 1);
     drawPixels(ctx, LEAF, 279, 14, { G: trimDark, D: trimDark }, 1);
-    const title = sp.boss ? "BOSS STASH SPIN" : "STASH SPIN";
+    const title = sp.title ?? (sp.boss ? "BOSS STASH SPIN" : "STASH SPIN");
     ctx.fillStyle = trimDark;
     ctx.fillText(title, W / 2 + 1, 14);
     ctx.fillStyle = sp.boss ? INK : "#ffffff";
@@ -11282,6 +11889,29 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           else ctx.arc(cx, ky + 34, skeletonReach() - 6, -Math.PI * 0.32, Math.PI * 0.32);
           ctx.stroke();
         }
+      } else if (kd.kind === "owl") {
+        // THE GREAT HORNED OWL: flapping in the air, sitting once it has landed
+        const sitting = kd.act === "rest" || kd.act === "stagger" || kd.dead > 0;
+        const flapFast = kd.act === "wind" || kd.act === "swing";
+        const rows = sitting ? OWL_SIT : OWL_FLY[Math.floor(s.t * (flapFast ? 16 : 8)) % 2];
+        const angry = kd.hp <= Math.ceil(kd.maxHp / 2);
+        const redEyes = kd.act === "wind" ? Math.floor(s.t * 16) % 2 === 0 : angry && kd.dead <= 0;
+        const colors = flash ? whiteOf(OWL_COLORS) : redEyes ? OWL_WARN_COLORS : OWL_COLORS;
+        drawRimmed(ctx, rows, kx, ky, colors, 2);
+        if (kd.dead <= 0 && kd.act === "wind") {
+          // a red "!" over its head: it's about to swoop
+          ctx.fillStyle = "#ff2a2a";
+          ctx.fillRect(kx + d.w / 2 - 1, ky - 6, 3, 7);
+          ctx.fillRect(kx + d.w / 2 - 1, ky + 3, 3, 3);
+        }
+        if (kd.dead <= 0 && kd.act === "rest") {
+          // dizzy stars going round its head: stomp it now!
+          for (let k = 0; k < 3; k++) {
+            const a = s.t * 5 + (k * Math.PI * 2) / 3;
+            ctx.fillStyle = k === 0 ? "#ffffff" : "#ffe14a";
+            ctx.fillRect(Math.round(kx + d.w / 2 + Math.cos(a) * 14) - 1, Math.round(ky + 2 + Math.sin(a) * 4) - 1, 3, 3);
+          }
+        }
       } else {
         const angry = kd.hp <= Math.ceil(kd.maxHp / 2);
         const rows = WARLORD_ROWS[angry ? 1 : 0];
@@ -11321,12 +11951,12 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
           }
         }
       }
-      // small health bar over the horned warrior and the skeleton knight
+      // small health bar over the horned warrior, the skeleton knight and the owl
       if (kd.dead <= 0 && kd.kind !== "warlord") {
         const b = knightBox(kd);
         const bw = 30;
         const hbx = Math.round((b.x1 + b.x2) / 2 - cam - bw / 2) + jitter;
-        const hby = ky + (kd.kind === "horned" ? -6 : 2);
+        const hby = ky + (kd.kind === "horned" ? -6 : kd.kind === "owl" ? -2 : 2);
         ctx.fillStyle = INK;
         ctx.fillRect(hbx - 1, hby - 1, bw + 2, 4);
         ctx.fillStyle = "#9b8fa6";
@@ -11869,6 +12499,8 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       textBox(ctx, s.inBonus ? "PRESS DOWN TO LEAVE" : "PRESS DOWN TO ENTER", 88);
     }
 
+    // the level's tracklist: on its start screen, and for a few seconds after you start
+    if (s.levelMode && (s.mode === "ready" || s.mode === "running")) drawTracklist(ctx);
     if (s.mode === "choose") drawSpellPick(ctx);
     if (s.mode === "bossIntro") drawBossIntro(ctx);
     if (s.mode === "spin") drawSpin(ctx);
