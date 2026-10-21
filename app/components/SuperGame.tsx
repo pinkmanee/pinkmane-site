@@ -634,7 +634,7 @@ const SHIELD_COLORS = ["#9fe8ff", "#bfe3ff", "#4aa3ff", "#ffffff"];
 
 const MY_GOATS = ["LIL PEEP", "YUNG LEAN", "GHOSTEMANE", "WARLORD COLOSSUS", "SMOKEDOPE2016", "DRIPPIN SO PRETTY"];
 // Second sign, further left behind the jetpack
-const SHOUT_OUTS = ["O1M4DE", "TOMBFELL", "LEOHWASFOUND", "STUTTERS", "MARCZERO", "HELL JEXX"];
+const SHOUT_OUTS = ["O1M4DE", "TOMBFELL", "LEOHWASFOUND", "STUTTERS", "MARCZERO", "HELL JEXX", "808DIFFRACTION"];
 
 // Points
 const PTS_LEAF = 10;
