@@ -14,6 +14,7 @@ const HexGame = dynamic(() => import("./components/HexGame"), { ssr: false });
 const MazeGame = dynamic(() => import("./components/MazeGame"), { ssr: false });
 const SuperGame = dynamic(() => import("./components/SuperGame"), { ssr: false });
 const JungleGame = dynamic(() => import("./components/JungleGame"), { ssr: false });
+const HellGame = dynamic(() => import("./components/HellGame"), { ssr: false });
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
 import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
 
@@ -170,6 +171,7 @@ const ITEM_ICONS: Record<string, string> = {
   "Pink Bird": "/icons/pinkbird.gif",
   "Pink Snake": "/icons/pinksnake.gif",
   "Pink Jungle": "/icons/pinkjungle.gif",
+  "Pink Hell": "/icons/pinkhell.gif",
   Back: "/icons/arrow.gif",
 };
 
@@ -746,10 +748,10 @@ export default function Home() {
   const [playing, setPlaying] = useState(false);
   const [jumpSignal, setJumpSignal] = useState(0);
   // Which game is open, and how far the click wheel was turned (for Pink Vortex)
-  const [activeGame, setActiveGame] = useState<"pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle">("pinkrun");
+  const [activeGame, setActiveGame] = useState<"pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle" | "hell">("pinkrun");
   const spinRef = useRef(0);
-  // Pink Maze, Pinkmane Void and Pink Jungle play on a wide handheld instead of the iPod
-  const handheld = playing && (activeGame === "maze" || activeGame === "super" || activeGame === "jungle");
+  // Pink Maze, Pinkmane Void, Pink Jungle and Pink Hell play on a wide handheld instead of the iPod
+  const handheld = playing && (activeGame === "maze" || activeGame === "super" || activeGame === "jungle" || activeGame === "hell");
   // The song list. In PINKMANE VOID on the handheld the VOID_BEATS are added after your songs (your songs keep their places in the list).
   const inVoid = handheld && activeGame === "super";
   const tracks = inVoid ? [...TRACKS, ...VOID_BEATS] : TRACKS;
@@ -854,13 +856,14 @@ export default function Home() {
     // Games: the main game first, the rest live one step deeper in Mini Games
     games: ["Pinkmane Void", "Mini Games", "Back"],
     minigames: [
-      "Pink Jungle",
       "Pink Hexagon",
+      "Pink Hell",
       "Pink Maze",
       "Pink Vortex",
       "Pink Snake",
       "Pink Bird",
       "Pink Run",
+      "Pink Jungle",
       "Back",
     ],
   };
@@ -1050,7 +1053,7 @@ export default function Home() {
         setSelected(0);
       } else {
         setMenu("minigames");
-        setSelected({ jungle: 0, hex: 1, maze: 2, vortex: 3, snake: 4, bird: 5, pinkrun: 6 }[activeGame]);
+        setSelected({ hex: 0, hell: 1, maze: 2, vortex: 3, snake: 4, bird: 5, pinkrun: 6, jungle: 7 }[activeGame]);
       }
       return;
     }
@@ -1203,6 +1206,11 @@ export default function Home() {
         setActiveGame("jungle");
         setPlaying(true);
       }
+      if (item === "Pink Hell") {
+        spinRef.current = 0;
+        setActiveGame("hell");
+        setPlaying(true);
+      }
       if (item === "Back") goBack();
     }
   };
@@ -1313,7 +1321,7 @@ export default function Home() {
       // In Pink Snake the arrow keys steer (the game handles them itself)
       if (
         playing &&
-        (activeGame === "snake" || activeGame === "hex" || activeGame === "maze" || activeGame === "super" || activeGame === "jungle") &&
+        (activeGame === "snake" || activeGame === "hex" || activeGame === "maze" || activeGame === "super" || activeGame === "jungle" || activeGame === "hell") &&
         e.key.startsWith("Arrow")
       )
         return;
@@ -1340,6 +1348,8 @@ export default function Home() {
     };
 
     const handleWheel = (e: WheelEvent) => {
+      // In Pink Hell the game uses the mouse wheel itself (switch weapon)
+      if (playing && activeGame === "hell") return;
       // In Pink Vortex the mouse wheel spins the paddle, in Pink Snake it turns the snake
       if (playing && activeGame === "vortex") {
         spinRef.current += e.deltaY > 0 ? 14 : -14;
@@ -1688,7 +1698,8 @@ export default function Home() {
         activeGame === "hex" ||
         activeGame === "maze" ||
         activeGame === "super" ||
-        activeGame === "jungle")
+        activeGame === "jungle" ||
+        activeGame === "hell")
     ) {
       spinRef.current += delta;
       return;
@@ -1745,13 +1756,19 @@ export default function Home() {
 
   // The game that's open right now (shown on the iPod, or on the handheld for Maze / Super)
   const gameElement = !playing ? null : (
-activeGame === "jungle" ? (
+activeGame === "hell" ? (
+                <HellGame
+                  actionSignal={jumpSignal}
+                  spinRef={spinRef}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                />
+              ) : activeGame === "jungle" ? (
                 <JungleGame
                   actionSignal={jumpSignal}
                   spinRef={spinRef}
                   fontFamily={pixelFont.style.fontFamily}
                   muted={isMuted}
-                  touch={isTouch}
                 />
               ) : activeGame === "maze" ? (
                 <MazeGame
@@ -2266,6 +2283,8 @@ activeGame === "jungle" ? (
                   ? "PINKMANE VOID"
                   : activeGame === "jungle"
                   ? "PINK JUNGLE"
+                  : activeGame === "hell"
+                  ? "PINK HELL"
                   : "PINK RUN"
                 : menu === "main"
                 ? "PINKMANE"
@@ -2605,7 +2624,9 @@ activeGame === "jungle" ? (
                 : activeGame === "vortex"
                 ? "turn wheel or drag screen · OK launch · ◀▶ songs"
                 : activeGame === "jungle"
-                ? "swipe to change lane / jump / duck · tap to jump · PAUSE top left"
+                ? "swipe to move / jump / slide · tap to jump"
+                : activeGame === "hell"
+                ? "d-pad to move · touch the screen to aim + shoot"
                 : "tap screen or OK to jump · ◀▶ songs"
               : "swipe wheel to scroll · ◀▶ songs"}
           </span>
@@ -2652,7 +2673,6 @@ activeGame === "jungle" ? (
               [["←", "→"], "lane"],
               [["↑", "SPACE"], "jump"],
               [["↓"], "slide"],
-              [["ESC"], "pause"],
               [["BACKSPACE"], "exit"],
             ]
           : [
@@ -2710,7 +2730,7 @@ activeGame === "jungle" ? (
             <button className="tp-small" onClick={goBack} aria-label="Leave the game">
               EXIT
             </button>
-            {(activeGame === "super" || activeGame === "jungle") && (
+            {activeGame === "super" && (
               <button className="tp-small" onClick={() => tapKey("Escape")} aria-label="Pause">
                 PAUSE
               </button>
@@ -2735,9 +2755,9 @@ activeGame === "jungle" ? (
             </button>
           </div>
 
-          {/* Left thumb. Pink Jungle: nothing (you swipe). Pinkmane Void: two squares, walk left and walk right (slide between them without lifting).
+          {/* Left thumb. Pinkmane Void: two squares, walk left and walk right (slide between them without lifting).
               Pink Maze needs all four directions, so it keeps the round pad. */}
-          {activeGame === "jungle" ? null : activeGame === "super" ? (
+          {activeGame === "super" ? (
             <div
               className="tp-walk"
               role="group"
@@ -2805,8 +2825,6 @@ activeGame === "jungle" ? (
               <small>FIRE/DOWN</small>
             </button>
           )}
-          {/* Pink Jungle on phones has no thumb buttons: you swipe on the screen instead */}
-          {activeGame !== "jungle" && (
           <button
             className={`tp-btn tp-a ${tpAOn ? "tp-on" : ""}`}
             aria-label={activeGame === "super" ? "Jump" : "Start"}
@@ -2820,9 +2838,8 @@ activeGame === "jungle" ? (
             onLostPointerCapture={() => tpA(false)}
           >
             <span>A</span>
-            <small>{activeGame === "super" ? "JUMP" : "START"}</small>
+            <small>{activeGame === "super" || activeGame === "jungle" ? "JUMP" : "START"}</small>
           </button>
-          )}
 
           <div className="tp-rotate">TURN YOUR PHONE SIDEWAYS FOR A BIGGER SCREEN</div>
         </div>
@@ -3160,7 +3177,14 @@ activeGame === "jungle" ? (
                   [["A", "D", "←", "→"], "lane"],
                   [["W", "↑", "SPACE"], "jump"],
                   [["S", "↓"], "slide"],
-                  [["ESC"], "pause"],
+                  [["BACKSPACE"], "menu"],
+                ]
+              : activeGame === "hell"
+              ? [
+                  [["W", "A", "S", "D"], "move"],
+                  [["MOUSE"], "aim"],
+                  [["CLICK"], "shoot"],
+                  [["1", "2", "Q"], "weapon"],
                   [["BACKSPACE"], "menu"],
                 ]
               : [
@@ -3188,6 +3212,8 @@ activeGame === "jungle" ? (
               ? "d-pad / stick = walk · bottom button = jump · left button = fire · d-pad down = go into the Void · right button = back"
               : activeGame === "jungle"
               ? "d-pad left/right = change lane · up = jump · down = slide · bottom button = start / jump · right button = back"
+              : activeGame === "hell"
+              ? "d-pad / stick = move · touch the game screen to aim + shoot · bottom button = start · right button = back"
               : "d-pad / stick = move · bottom button = start · right button = back · top button = play/pause"}
             <span className="hh-rotate"> · turn your phone sideways for a bigger screen</span>
           </div>
