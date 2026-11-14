@@ -8,8 +8,14 @@ import { useEffect, useRef } from "react";
 //   ↑ / W / SPACE / OK (or swipe up)     = jump
 //   ↓ / S (or swipe down)                = slide
 // Hit something once = you stumble and BEARMANPIG catches up. Stumble again while he's close = he gets you.
-// Every 1000 score the world changes: GREEN JUNGLE -> ORANGE JUNGLE -> BLUE GRASS (no trees, tall grass) -> green again...
+// Every 1000 score the world changes: GREEN JUNGLE -> ORANGE JUNGLE -> BLUE GRASS (no trees, tall grass) -> RED VOLCANO -> BLACK CRYSTALS -> green again...
 // The game is drawn wide (like PINKMANE VOID), so it fills the PINKMANE handheld screen.
+// SPELLS lie on the path, run into one to pick it up:
+//   MAGNET  = pulls in the gems from all 3 lanes        SHIELD = saves you from one hit
+//   BOOST   = super fast, you smash through everything  2X     = every gem counts double
+// The gems you collect are saved. On the start / game over screen, DOWN (S, swipe down) opens the SHOP:
+//   upgrade the 4 spells (6 levels each) and buy / choose skins, all paid with gems.
+//   In the shop: arrows (or swipes) move, SPACE / OK / tap buys or picks, the BACK row closes it.
 
 type Props = {
   // Goes up by 1 every time the player presses OK / Enter / Space (= start / jump)
@@ -36,6 +42,22 @@ const CHASE_DECAY = 0.065; // how fast BEARMANPIG falls back after a stumble (bi
 const CHASE_DEADLY = 0.3; // stumble while he's closer than this = caught
 const START_PIXELS = 4; // how chunky the picture is at the start (it sharpens to 1 in the first seconds)
 const ZONE_SCORE = 1000; // every this many points the background changes to the next world
+// ---------- SPELLS + SKIN ----------
+const SPELL_EVERY = 110; // about how many meters between two spells on the path (smaller = more spells)
+const MAGNET_SECONDS = 8; // how long the magnet lasts (before upgrades)
+const DOUBLE_SECONDS = 10; // how long gems count double (before upgrades)
+const BOOST_SECONDS = 4; // how long the boost lasts (before upgrades)
+const BOOST_SPEED = 1.8; // how much faster you run during the boost
+// ---------- SHOP: spell upgrades ----------
+const SPELL_COSTS = [50, 120, 250, 400, 600, 900]; // gems for upgrade level 1 to 6 (the same for every spell). More numbers = more levels.
+const MAGNET_UP = 3; // seconds the magnet gains per level
+const DOUBLE_UP = 4; // seconds 2X gains per level
+const BOOST_UP = 1.5; // seconds the boost gains per level
+// (the shield blocks 1 hit, and 1 more per level)
+// Where the saved gems and the shop things are kept in the browser
+const BANK_KEY = "pinkmane-jungle-gems";
+const SHOP_KEY = "pinkmane-jungle-shop";
+const OLD_SKIN_KEY = "pinkmane-jungle-skin"; // from the first version (GOLD MANE only), still read so nobody loses it
 
 // ---------- Screen + camera ----------
 // wide picture, the same shape as the handheld screen (64 : 30)
@@ -63,7 +85,7 @@ const MORTAR: [number, number, number] = [34, 50, 32];
 const EDGE: [number, number, number] = [52, 70, 48];
 const EDGE_DARK: [number, number, number] = [40, 56, 38];
 
-// ---------- The 3 worlds (the background changes every ZONE_SCORE points) ----------
+// ---------- The 5 worlds (the background changes every ZONE_SCORE points) ----------
 // name      = the text that pops up when you get there
 // fog       = the colour far away
 // ground    = 4 colours for the ground next to the path
@@ -72,7 +94,14 @@ const EDGE_DARK: [number, number, number] = [40, 56, 38];
 // canopy    = the leaves hanging from the top of the screen (canopyAmt 0 = open sky with stars)
 // leaves    = 4 colours for the tree leaves (or the tall grass), dark to light
 // vine      = hanging vines + moss on the pillars (dark, light)
-// side      = "trees" or "grass" (tall grass instead of trees)
+// side      = "trees", "grass" (tall grass instead of trees) or "crystals" (crystals instead of trees)
+// crystals  = 1 = big glowing crystals at the horizon
+// stars     = 1 = stars and a moon in the sky
+// volcano   = 1 = a volcano at the horizon, and the rocks on the path are flames instead
+// moss      = the colour of the moss + vines on the obstacles (rocks, logs, branches): [bright, dark].
+//             Leave it out and they stay green.
+// plants    = true = the fallen trees (the log you jump and the branch you slide under) are long plants instead
+// lava      = true = the log you jump is a pit full of lava, the branch you slide under is a giant rock
 type RGB = [number, number, number];
 type Theme = {
   name: string;
@@ -87,8 +116,15 @@ type Theme = {
   vine: string;
   vineLight: string;
   firefly: string;
-  side: "trees" | "grass";
+  side: "trees" | "grass" | "crystals";
+  stars: number;
+  volcano: number;
+  crystals: number;
+  moss?: [string, string];
+  plants?: boolean;
+  lava?: boolean;
 };
+const GREEN_MOSS: [string, string] = ["#3ee05a", "#2c8a33"];
 const THEMES: Theme[] = [
   {
     name: "GREEN JUNGLE",
@@ -114,6 +150,9 @@ const THEMES: Theme[] = [
     vineLight: "#2c8a33",
     firefly: "#d8ff6a",
     side: "trees",
+    stars: 0,
+    volcano: 0,
+    crystals: 0,
   },
   {
     name: "ORANGE JUNGLE",
@@ -139,6 +178,10 @@ const THEMES: Theme[] = [
     vineLight: "#e07a1a",
     firefly: "#ffd36a",
     side: "trees",
+    stars: 0,
+    volcano: 0,
+    crystals: 0,
+    moss: ["#ffa23a", "#e07a1a"],
   },
   {
     name: "BLUE GRASS",
@@ -164,6 +207,70 @@ const THEMES: Theme[] = [
     vineLight: "#4a8cf0",
     firefly: "#a8d8ff",
     side: "grass",
+    stars: 1,
+    volcano: 0,
+    crystals: 0,
+    moss: ["#6ab4ff", "#1f5cc2"],
+    plants: true,
+  },
+  {
+    name: "RED VOLCANO",
+    title: "#ff5a3a",
+    fog: [46, 10, 6],
+    ground: [
+      [88, 20, 12],
+      [110, 28, 14],
+      [70, 16, 10],
+      [140, 44, 18],
+    ],
+    sky: [
+      [20, 4, 4],
+      [36, 8, 6],
+      [54, 12, 8],
+      [72, 18, 8],
+    ],
+    far: [50, 12, 8],
+    canopy: [20, 4, 4],
+    canopyAmt: 0,
+    leaves: ["#2a0a08", "#4a100c", "#8a1c10", "#d0401a"],
+    vine: "#8a1c10",
+    vineLight: "#ff5a1a",
+    firefly: "#ff7a2a",
+    side: "trees",
+    stars: 0,
+    volcano: 1,
+    crystals: 0,
+    moss: ["#ff5a3a", "#c2241a"],
+    lava: true,
+  },
+  {
+    name: "BLACK CRYSTALS",
+    title: "#b46aff",
+    fog: [10, 6, 16],
+    ground: [
+      [14, 10, 20],
+      [20, 14, 28],
+      [10, 8, 16],
+      [30, 18, 44],
+    ],
+    sky: [
+      [2, 2, 4],
+      [5, 3, 9],
+      [8, 5, 14],
+      [12, 7, 20],
+    ],
+    far: [16, 8, 28],
+    canopy: [2, 2, 4],
+    canopyAmt: 0,
+    leaves: ["#2a0f4a", "#5a1fa0", "#9a4cf0", "#d8a8ff"],
+    vine: "#5a1fa0",
+    vineLight: "#9a4cf0",
+    firefly: "#d8a8ff",
+    side: "crystals",
+    stars: 0.6,
+    volcano: 0,
+    crystals: 1,
+    moss: ["#b46aff", "#6a2ac2"],
   },
 ];
 
@@ -198,6 +305,57 @@ const DUDE_COLORS: Record<string, string> = {
   K: "#787878",
 };
 const DUDE_LEGS = 13; // row where the legs start (they move when running)
+// ---------- SHOP: skins ----------
+// To add a skin: copy one block, give it a new id + name + price and change the colours.
+//   B = hair, D = the dark bit on the tee, F = skin, K = pants (A is the black outline + tee, keep it)
+//   fire: true = the spiky hair is taken off and moving flames are drawn there instead
+const SKINS: { id: string; name: string; price: number; colors: Record<string, string>; fire?: boolean }[] = [
+  { id: "pink", name: "PINKMANE", price: 0, colors: DUDE_COLORS },
+  { id: "gold", name: "GOLD MANE", price: 250, colors: { A: "#111111", B: "#ffd24a", D: "#b8860b", F: "#ffc800", K: "#f2f2f2" } },
+  { id: "ice", name: "ICE MANE", price: 400, colors: { A: "#111111", B: "#6ae0ff", D: "#2a9ad0", F: "#ffc800", K: "#e8f2ff" } },
+  { id: "toxic", name: "TOXIC", price: 600, colors: { A: "#111111", B: "#7dff3a", D: "#2c8a33", F: "#ffc800", K: "#7a3cc8" } },
+  { id: "fire", name: "FIRE MANE", price: 1000, fire: true, colors: { A: "#111111", B: "#ff7a1a", D: "#8a1f86", F: "#ffc800", K: "#787878" } },
+];
+
+// The spell pickups (9 x 9 pixels, drawn whole, not mirrored)
+const SPELL_MAPS: Record<string, string[]> = {
+  magnet: [".AAA.AAA.", ".AWA.AWA.", ".AWA.AWA.", ".ARA.ARA.", ".ARA.ARA.", ".ARAAARA.", ".ARRRRRA.", "..ARRRA..", "...AAA..."],
+  shield: ["AAAAAAAAA", "ACCCCcccA", "ACCCCcccA", "ACCCCcccA", "ACCCCcccA", ".ACCCccA.", ".ACCCccA.", "..ACCcA..", "...AAA..."],
+  boost: ["....AAAA.", "...AYYA..", "..AYYA...", ".AYYAAAA.", ".AYYYYYA.", ".AAAAYYA.", "...AYYA..", "..AYYA...", "..AAA...."],
+  double: [".........", "..A...A..", ".AgA.AgA.", "AgGGAgGGA", "AGGGAGGGA", ".AGA.AGA.", "..A...A..", ".........", "........."],
+};
+const SPELL_COLORS: Record<string, string> = {
+  A: "#111111",
+  R: "#ff3b3b",
+  W: "#f2f2f2",
+  C: "#6ae0ff",
+  c: "#2a9ad0",
+  Y: "#ffd400",
+  G: "#3ee05a",
+  g: "#b6ff9e",
+};
+// the glow colour + the name that pops up for each spell
+const SPELL_INFO: Record<string, { color: string; name: string }> = {
+  magnet: { color: "#ff3b3b", name: "MAGNET!" },
+  shield: { color: "#6ae0ff", name: "SHIELD!" },
+  boost: { color: "#ffd400", name: "BOOST!" },
+  double: { color: "#3ee05a", name: "2X GEMS!" },
+};
+function buildMap(rows: string[], colors: Record<string, string>) {
+  const cv = document.createElement("canvas");
+  cv.width = rows[0].length;
+  cv.height = rows.length;
+  const g = cv.getContext("2d")!;
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      const col = colors[row[x]];
+      if (!col) continue;
+      g.fillStyle = col;
+      g.fillRect(x, y, 1, 1);
+    }
+  });
+  return cv;
+}
 
 // BEARMANPIG from behind: bear ears + fur, a dirty tank top and jeans (the man part), a curly pig tail
 const BMP_HALF = [
@@ -365,6 +523,45 @@ function buildTree(seed: number, greens: string[], vine: string) {
   return cv;
 }
 
+// One crystal: a tall pointed shard. c = 4 colours (dark edge, shaded side, lit side, bright edge)
+function shard(g: CanvasRenderingContext2D, cx: number, base: number, w: number, h: number, lean: number, c: string[]) {
+  for (let y = 0; y < h; y++) {
+    const v = y / h; // 0 at the ground .. 1 at the tip
+    const hw = (w / 2) * (v < 0.7 ? 1 : (1 - v) / 0.3);
+    const x = cx + lean * v;
+    const l = Math.round(x - hw);
+    const r = Math.round(x + hw);
+    const m = Math.round(x - hw * 0.2);
+    const yy = Math.round(base - y);
+    if (r - l < 2) {
+      g.fillStyle = c[3];
+      g.fillRect(l, yy, 1, 1);
+      continue;
+    }
+    g.fillStyle = c[2];
+    g.fillRect(l, yy, m - l, 1);
+    g.fillStyle = c[1];
+    g.fillRect(m, yy, r - m, 1);
+    g.fillStyle = c[0];
+    g.fillRect(r - 1, yy, 1, 1);
+    g.fillStyle = c[3];
+    g.fillRect(l, yy, 1, 1);
+  }
+}
+
+// A cluster of crystals (24 x 40 pixels), used instead of trees in the BLACK CRYSTALS world
+function buildCrystal(seed: number, colors: string[]) {
+  const r = seeded(seed);
+  const cv = document.createElement("canvas");
+  cv.width = 24;
+  cv.height = 40;
+  const g = cv.getContext("2d")!;
+  // small ones at the back first, the big one in the middle last
+  for (let i = 0; i < 4; i++) shard(g, 4 + r() * 16, 39, 4 + r() * 3, 12 + r() * 14, (r() - 0.5) * 8, colors);
+  shard(g, 10 + r() * 4, 39, 7 + r() * 2, 32 + r() * 7, (r() - 0.5) * 4, colors);
+  return cv;
+}
+
 // A clump of tall grass (28 x 22 pixels), used instead of trees in the BLUE GRASS world
 function buildGrass(seed: number, colors: string[]) {
   const r = seeded(seed);
@@ -418,9 +615,18 @@ function buildPillar(seed: number, moss: string, mossDark: string) {
 
 type Obstacle = { at: number; kind: "rock" | "root" | "branch"; lanes: number[]; hit: boolean };
 type Gem = { at: number; lane: number; taken: boolean };
+type SpellKind = "magnet" | "shield" | "boost" | "double";
+type Spell = { at: number; lane: number; kind: SpellKind; taken: boolean };
 type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string };
 type Popup = { x: number; y: number; text: string; life: number; color: string };
-type Mode = "ready" | "running" | "caught";
+type Mode = "ready" | "running" | "caught" | "shop";
+// the spell rows in the shop, top to bottom
+const SPELL_ROWS: { kind: SpellKind; name: string }[] = [
+  { kind: "magnet", name: "MAGNET" },
+  { kind: "shield", name: "SHIELD" },
+  { kind: "boost", name: "BOOST" },
+  { kind: "double", name: "2X GEM" },
+];
 
 export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -444,14 +650,25 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
     ctx.imageSmoothingEnabled = false;
 
     // ---------- sprites ----------
-    const dude = [buildSprite(DUDE_HALF, DUDE_COLORS, DUDE_LEGS, 1), buildSprite(DUDE_HALF, DUDE_COLORS, DUDE_LEGS, 2)];
-    const dudeStand = buildSprite(DUDE_HALF, DUDE_COLORS, DUDE_LEGS, 0);
+    const makeFit = (colors: Record<string, string>, fire?: boolean) => {
+      // fire skin: the 3 rows of hair spikes are removed (the flames are drawn there, moving)
+      const half = fire ? DUDE_HALF.map((row, i) => (i < 3 ? row.replace(/B/g, ".") : row)) : DUDE_HALF;
+      return {
+        run: [buildSprite(half, colors, DUDE_LEGS, 1), buildSprite(half, colors, DUDE_LEGS, 2)],
+        stand: buildSprite(half, colors, DUDE_LEGS, 0),
+      };
+    };
+    const fits = SKINS.map((sk) => makeFit(sk.colors, sk.fire));
+    const spellImg: Record<string, HTMLCanvasElement> = {};
+    for (const k of Object.keys(SPELL_MAPS)) spellImg[k] = buildMap(SPELL_MAPS[k], SPELL_COLORS);
     const tail = { px: BMP_TAIL, color: "#ff8fb8" };
     const bmp = [buildSprite(BMP_HALF, BMP_COLORS, BMP_LEGS, 1, tail), buildSprite(BMP_HALF, BMP_COLORS, BMP_LEGS, 2, tail)];
     const face = buildSprite(FACE_HALF, FACE_COLORS, 99, 0);
     // one set of trees (or tall grass) and pillars for each world
     const trees = THEMES.map((th) =>
-      [7, 21, 99].map((seed) => (th.side === "grass" ? buildGrass(seed, th.leaves) : buildTree(seed, th.leaves, th.vineLight)))
+      [7, 21, 99].map((seed) =>
+        th.side === "grass" ? buildGrass(seed, th.leaves) : th.side === "crystals" ? buildCrystal(seed, th.leaves) : buildTree(seed, th.leaves, th.vineLight)
+      )
     );
     const pillars = THEMES.map((th) => [buildPillar(3, th.vineLight, th.vine), buildPillar(11, th.vineLight, th.vine)]);
 
@@ -500,6 +717,21 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         tone(330, 660, 0.1, "square", 0.05);
         tone(660, 990, 0.12, "square", 0.05, 0.1);
       },
+      spell: () => {
+        tone(660, 1320, 0.12, "square", 0.06);
+        tone(1320, 1760, 0.1, "square", 0.05, 0.1);
+      },
+      smash: () => tone(220, 90, 0.12, "sawtooth", 0.07),
+      shield: () => {
+        tone(900, 300, 0.18, "triangle", 0.09);
+        tone(1400, 700, 0.1, "square", 0.04, 0.03);
+      },
+      buy: () => {
+        tone(520, 1040, 0.1, "square", 0.06);
+        tone(780, 1560, 0.1, "square", 0.06, 0.1);
+        tone(1040, 2080, 0.2, "square", 0.06, 0.2);
+      },
+      no: () => tone(200, 120, 0.18, "square", 0.06),
       zone: () => {
         tone(520, 780, 0.1, "square", 0.05);
         tone(780, 1040, 0.1, "square", 0.05, 0.1);
@@ -512,6 +744,46 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
     try {
       best = Number(localStorage.getItem(BEST_KEY)) || 0;
     } catch {}
+
+    // ---------- saved gems + shop ----------
+    let bank = 0; // all the gems you ever collected (minus what you spent)
+    const lv: Record<SpellKind, number> = { magnet: 0, shield: 0, boost: 0, double: 0 }; // upgrade level of each spell (0-6)
+    let owned: string[] = ["pink"]; // ids of the skins you have
+    let skinIdx = 0; // which skin you're wearing (its place in SKINS)
+    try {
+      bank = Math.max(0, Math.floor(Number(localStorage.getItem(BANK_KEY)) || 0));
+      const old = localStorage.getItem(OLD_SKIN_KEY);
+      if (old === "on" || old === "off") {
+        owned.push("gold");
+        if (old === "on") skinIdx = 1;
+      }
+      const raw = localStorage.getItem(SHOP_KEY);
+      if (raw) {
+        const d = JSON.parse(raw) as { lv?: Record<string, number>; owned?: string[]; on?: string };
+        for (const r of SPELL_ROWS) {
+          const n = Math.floor(Number(d.lv?.[r.kind]) || 0);
+          lv[r.kind] = Math.max(0, Math.min(SPELL_COSTS.length, n));
+        }
+        if (Array.isArray(d.owned)) owned = SKINS.filter((sk) => sk.price === 0 || d.owned!.includes(sk.id)).map((sk) => sk.id);
+        const i = SKINS.findIndex((sk) => sk.id === d.on);
+        if (i >= 0 && owned.includes(SKINS[i].id)) skinIdx = i;
+      }
+    } catch {}
+    const saveShop = () => {
+      try {
+        localStorage.setItem(BANK_KEY, String(bank));
+        localStorage.setItem(SHOP_KEY, JSON.stringify({ lv, owned, on: SKINS[skinIdx].id }));
+      } catch {}
+    };
+    // how strong each spell is right now (with its upgrades)
+    const magnetSecs = () => MAGNET_SECONDS + lv.magnet * MAGNET_UP;
+    const doubleSecs = () => DOUBLE_SECONDS + lv.double * DOUBLE_UP;
+    const boostSecs = () => BOOST_SECONDS + lv.boost * BOOST_UP;
+    const shieldHits = () => 1 + lv.shield;
+    // where the cursor is in the shop: col 0 = spells, col 1 = skins, row 4 = BACK
+    const SHOP_BACK = SKINS.length; // the BACK row comes after the longest list (the skins)
+    const shopLastRow = () => (shop.col === 0 ? SPELL_ROWS.length : SKINS.length) - 1;
+    const shop = { col: 0, row: 0, from: "ready" as "ready" | "caught" };
 
     // ---------- game state ----------
     const s = {
@@ -538,6 +810,12 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       pops: [] as Popup[],
       curve: 0,
       newBest: false,
+      spells: [] as Spell[],
+      nextSpell: 70, // where the next spell will be put
+      magnet: 0, // seconds left of each spell
+      double: 0,
+      boost: 0,
+      shield: 0, // how many hits the shield can still take
       zone: 0, // how many times the world has changed in this run
       // where each world starts (distance) and which one it is. The new world comes towards you from the horizon.
       zones: [{ from: -1e9, theme: 0 }] as { from: number; theme: number }[],
@@ -566,12 +844,18 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       s.newBest = false;
       s.zone = 0;
       s.zones = [{ from: -1e9, theme: 0 }];
+      s.spells = [];
+      s.nextSpell = 70;
+      s.magnet = 0;
+      s.double = 0;
+      s.boost = 0;
+      s.shield = 0;
       // a little line of gems to start with
       for (let i = 0; i < 8; i++) s.gemList.push({ at: 14 + i * 1.6, lane: 0, taken: false });
       sfx.start();
     };
 
-    const speed = () => (START_SPEED + Math.min(MAX_EXTRA_SPEED, s.dist / SPEED_RAMP)) * s.speedMul;
+    const speed = () => (START_SPEED + Math.min(MAX_EXTRA_SPEED, s.dist / SPEED_RAMP)) * s.speedMul * (s.boost > 0 ? BOOST_SPEED : 1);
     const rndLane = () => Math.floor(Math.random() * 3) - 1;
 
     // Builds the path ahead. The farther you are, the more kinds of obstacles and the closer together.
@@ -595,6 +879,13 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
           } else lanes = [rndLane()];
         } else lanes = [-1, 0, 1];
         s.obs.push({ at: d, kind, lanes, hit: false });
+
+        // a spell every now and then, a few steps after the obstacle
+        if (d >= s.nextSpell) {
+          const kinds: SpellKind[] = ["magnet", "shield", "boost", "double"];
+          s.spells.push({ at: d + 3.2, lane: rndLane(), kind: kinds[Math.floor(Math.random() * kinds.length)], taken: false });
+          s.nextSpell = d + SPELL_EVERY * (0.8 + Math.random() * 0.5);
+        }
 
         // gems after the obstacle, in a lane that's free
         if (Math.random() < 0.7) {
@@ -628,8 +919,27 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       o.hit = true;
       if (s.invuln > 0) return;
       const p = playerScreen();
-      if (o.kind === "rock") burst(p.x, p.y - 10, 14, ["#6b7d63", "#53634e", "#2c8a33"]);
-      else burst(p.x, p.y - 10, 12, ["#6a4423", "#4a2e17", "#2c8a33"]);
+      if (o.kind === "rock" && THEMES[themeIndexAt(o.at)].volcano) burst(p.x, p.y - 10, 16, ["#ffd24a", "#ff7a1a", "#e0301a"]);
+      else if (o.kind === "rock") burst(p.x, p.y - 10, 14, ["#6b7d63", "#53634e", mossAt(o.at)[1]]);
+      else if (THEMES[themeIndexAt(o.at)].lava)
+        burst(p.x, p.y - 10, 14, o.kind === "root" ? ["#ffd24a", "#ff7a1a", "#e0301a"] : ["#7a4a3c", "#5a3028", "#ff7a1a"]);
+      else if (THEMES[themeIndexAt(o.at)].plants) burst(p.x, p.y - 10, 12, ["#17408a", "#4a8cf0", "#a8d8ff"]);
+      else burst(p.x, p.y - 10, 12, ["#6a4423", "#4a2e17", mossAt(o.at)[1]]);
+      // BOOST: you smash straight through
+      if (s.boost > 0) {
+        sfx.smash();
+        return;
+      }
+      // SHIELD: it breaks instead of you stumbling
+      if (s.shield > 0) {
+        s.shield--;
+        s.invuln = 1;
+        s.shake = 0.2;
+        sfx.shield();
+        burst(p.x, p.y - 20, 14, ["#6ae0ff", "#2a9ad0", "#ffffff"]);
+        s.pops.push({ x: p.x, y: p.y - 46, text: "SAVED!", life: 0.9, color: "#6ae0ff" });
+        return;
+      }
       if (s.chase > CHASE_DEADLY) {
         caught();
         return;
@@ -648,6 +958,9 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       s.t = 0;
       s.shake = 0.5;
       s.score = Math.floor(s.dist) + s.gems * 5;
+      // the gems from this run go into your saved gems
+      bank += s.gems;
+      saveShop();
       if (s.score > best) {
         best = s.score;
         s.newBest = true;
@@ -658,12 +971,72 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
     };
 
     // ---------- input ----------
+    // The shop: up / down move, left / right switch between SPELLS and SKINS, go (SPACE / OK / tap) buys or picks
+    const shopInput = (a: "left" | "right" | "jump" | "slide" | "go") => {
+      if (a === "jump" && shop.row > 0) {
+        shop.row = shop.row === SHOP_BACK ? shopLastRow() : shop.row - 1;
+        sfx.lane();
+      } else if (a === "slide" && shop.row < SHOP_BACK) {
+        shop.row = shop.row >= shopLastRow() ? SHOP_BACK : shop.row + 1;
+        sfx.lane();
+      } else if ((a === "left" && shop.col !== 0) || (a === "right" && shop.col !== 1)) {
+        shop.col = a === "left" ? 0 : 1;
+        if (shop.row !== SHOP_BACK) shop.row = Math.min(shop.row, shopLastRow());
+        sfx.lane();
+      } else if (a === "go") {
+        if (shop.row === SHOP_BACK) {
+          // BACK: close the shop
+          s.mode = shop.from;
+          sfx.lane();
+        } else if (shop.col === 0) {
+          // upgrade a spell
+          const kind = SPELL_ROWS[shop.row].kind;
+          const cost = SPELL_COSTS[lv[kind]];
+          if (cost === undefined || bank < cost) {
+            sfx.no();
+            return;
+          }
+          bank -= cost;
+          lv[kind]++;
+          sfx.buy();
+          saveShop();
+        } else {
+          // buy a skin, or put on one you already have
+          const sk = SKINS[shop.row];
+          if (!sk) return;
+          if (!owned.includes(sk.id)) {
+            if (bank < sk.price) {
+              sfx.no();
+              return;
+            }
+            bank -= sk.price;
+            owned.push(sk.id);
+            sfx.buy();
+          } else sfx.lane();
+          skinIdx = shop.row;
+          saveShop();
+        }
+      }
+    };
+
     inputRef.current = (a) => {
+      if (s.mode === "shop") {
+        shopInput(a);
+        return;
+      }
       if (s.mode !== "running") {
         // start / restart (after game over wait a moment so you don't skip the screen by accident)
         if (a === "go" || a === "jump") {
           if (s.mode === "caught" && s.t < 0.9) return;
           reset();
+        }
+        // DOWN = open the shop
+        if (a === "slide" && !(s.mode === "caught" && s.t < 0.9)) {
+          shop.from = s.mode === "caught" ? "caught" : "ready";
+          shop.col = 0;
+          shop.row = 0;
+          s.mode = "shop";
+          sfx.lane();
         }
         return;
       }
@@ -714,6 +1087,8 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       for (const z of s.zones) if (z.from <= at) t = z.theme;
       return t;
     };
+    // the moss colour of the obstacles in the world at that spot
+    const mossAt = (at: number) => THEMES[themeIndexAt(at)].moss ?? GREEN_MOSS;
     const mix = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
     const css = (c: RGB) => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
     // the sky + fog colours right now (they blend slowly while the next world gets closer)
@@ -723,6 +1098,9 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       far: THEMES[0].far,
       canopy: THEMES[0].canopy,
       canopyAmt: THEMES[0].canopyAmt,
+      stars: THEMES[0].stars,
+      volcano: THEMES[0].volcano,
+      crystals: THEMES[0].crystals,
       near: THEMES[0],
     };
     const updateLook = () => {
@@ -735,6 +1113,9 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       look.far = mix(cur.far, next.far, t);
       look.canopy = mix(cur.canopy, next.canopy, t);
       look.canopyAmt = cur.canopyAmt + (next.canopyAmt - cur.canopyAmt) * t;
+      look.stars = cur.stars + (next.stars - cur.stars) * t;
+      look.volcano = cur.volcano + (next.volcano - cur.volcano) * t;
+      look.crystals = cur.crystals + (next.crystals - cur.crystals) * t;
       look.near = t < 0.5 ? cur : next;
     };
 
@@ -749,7 +1130,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
     };
 
     // a blocky rounded boulder
-    const blob = (cx: number, bottom: number, w: number, h: number) => {
+    const blob = (cx: number, bottom: number, w: number, h: number, moss: string) => {
       const rows = Math.max(1, Math.round(h));
       for (let i = 0; i < rows; i++) {
         const v = (i + 0.5) / rows; // 0 top .. 1 bottom
@@ -758,13 +1139,47 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         const y = Math.round(bottom - rows + i);
         ctx.fillStyle = "#111";
         ctx.fillRect(Math.round(cx - hw - 1), y, hw * 2 + 2, 1);
-        ctx.fillStyle = v < 0.2 ? "#3ee05a" : v < 0.4 ? "#b08d62" : v < 0.8 ? "#86684a" : "#5a4630";
+        ctx.fillStyle = v < 0.2 ? moss : v < 0.4 ? "#b08d62" : v < 0.8 ? "#86684a" : "#5a4630";
         ctx.fillRect(Math.round(cx - hw), y, hw * 2, 1);
       }
     };
 
+    // a fire burning on the path (RED VOLCANO: these take the place of the rocks). Jump over it like a rock.
+    const flame = (cx: number, bottom: number, w: number, h: number, seed: number) => {
+      const t = clock;
+      const cols = Math.max(3, Math.round(w / 2));
+      const cw = Math.max(1, Math.ceil(w / cols));
+      const b = Math.round(bottom);
+      for (let i = 0; i < cols; i++) {
+        const mid = 1 - Math.abs(i - (cols - 1) / 2) / (cols / 2 + 0.5); // taller in the middle
+        const flick = 0.8 + 0.14 * Math.sin(t * 13 + i * 2.1 + seed) + 0.1 * Math.sin(t * 7 + i * 4.3 + seed * 2);
+        const fh = Math.max(2, Math.round(h * (0.4 + 0.75 * mid) * flick));
+        const x = Math.round(cx - w / 2 + (i * w) / cols);
+        const red = Math.round(fh * 0.4);
+        const orange = Math.round(fh * 0.35);
+        ctx.fillStyle = "#e0301a";
+        ctx.fillRect(x, b - red, cw, red);
+        ctx.fillStyle = "#ff7a1a";
+        ctx.fillRect(x, b - red - orange, cw, orange);
+        ctx.fillStyle = "#ffd24a";
+        ctx.fillRect(x, b - fh, cw, fh - red - orange);
+      }
+      // the bright middle of the fire + glowing coals underneath
+      const core = Math.max(1, Math.round(w * 0.3));
+      ctx.fillStyle = "#fff3b0";
+      ctx.fillRect(Math.round(cx - core / 2), b - Math.max(1, Math.round(h * 0.3)), core, Math.max(1, Math.round(h * 0.3)));
+      ctx.fillStyle = "#3a0c08";
+      ctx.fillRect(Math.round(cx - w / 2) - 1, b, Math.round(w) + 2, Math.max(1, Math.round(h * 0.08)));
+      // sparks
+      for (let i = 0; i < 3; i++) {
+        const ph = (t * 1.3 + i * 0.37 + seed) % 1;
+        ctx.fillStyle = i % 2 ? "#ffd24a" : "#ff7a1a";
+        ctx.fillRect(Math.round(cx + Math.sin(t * 4 + i * 2 + seed) * w * 0.3), Math.round(b - h - ph * h * 0.6), 1, 1);
+      }
+    };
+
     // a log lying across the path (y0 = bottom height, y1 = top height, in world units)
-    const log = (z: number, y0: number, y1: number) => {
+    const log = (z: number, y0: number, y1: number, moss: string) => {
       const a = proj(-PATHW - 0.1, z);
       const b = proj(PATHW + 0.1, z);
       const top = Math.round(a.y - y1 * a.s);
@@ -785,21 +1200,137 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       for (let x = x0 + step; x < x0 + w - 2; x += step) {
         ctx.fillStyle = "#4a2e17";
         ctx.fillRect(x, top + Math.round(h * 0.35), Math.max(1, Math.round(h * 0.25)), Math.max(1, Math.round(h * 0.25)));
-        ctx.fillStyle = "#2c8a33";
+        ctx.fillStyle = moss;
         ctx.fillRect(x + 2, top, Math.max(1, Math.round(step * 0.4)), Math.max(1, Math.round(h * 0.15)));
       }
       return { x0, w, top };
     };
 
+    // a long blue plant lying across the path (BLUE GRASS: these take the place of the fallen trees).
+    // Same size and place as the log, so you jump it / slide under it the same way.
+    const plant = (z: number, y0: number, y1: number, _moss: string) => {
+      const a = proj(-PATHW - 0.1, z);
+      const b = proj(PATHW + 0.1, z);
+      const top = Math.round(a.y - y1 * a.s);
+      const bot = Math.round(a.y - y0 * a.s);
+      const h = Math.max(2, bot - top);
+      const x0 = Math.round(a.x);
+      const w = Math.round(b.x - a.x);
+      // the thick stem
+      ctx.fillStyle = "#081a3a";
+      ctx.fillRect(x0 - 1, top - 1, w + 2, h + 2);
+      ctx.fillStyle = "#17408a";
+      ctx.fillRect(x0, top, w, h);
+      ctx.fillStyle = "#4a8cf0";
+      ctx.fillRect(x0, top, w, Math.max(1, Math.round(h * 0.3)));
+      ctx.fillStyle = "#0f2a5a";
+      ctx.fillRect(x0, top + Math.round(h * 0.7), w, Math.max(1, Math.round(h * 0.3)));
+      // leaves along it (pointing up and down in turn) and little glowing buds
+      const step = Math.max(4, Math.round(a.s * 0.4));
+      const leaf = Math.max(2, Math.round(a.s * 0.14));
+      let n = 0;
+      for (let x = x0 + Math.round(step / 2); x < x0 + w - 2; x += step, n++) {
+        const up = n % 2 === 0;
+        for (let k = 0; k < leaf; k++) {
+          const lw = Math.max(1, Math.round((leaf - k) * 0.8));
+          ctx.fillStyle = k < leaf / 2 ? "#1f5cc2" : "#6ab4ff";
+          ctx.fillRect(x - Math.round(lw / 2), up ? top - 1 - k : top + h + k, lw, 1);
+        }
+        if (n % 3 === 1) {
+          ctx.fillStyle = Math.sin(clock * 4 + x) > 0 ? "#ffffff" : "#a8d8ff";
+          ctx.fillRect(x + Math.round(step / 2), top + Math.round(h * 0.4), Math.max(1, Math.round(h * 0.25)), Math.max(1, Math.round(h * 0.25)));
+        }
+      }
+      return { x0, w, top };
+    };
+
+    // RED VOLCANO: a pit full of lava across the whole path (takes the place of the log on the ground). Jump over it.
+    const lavaPit = (z: number) => {
+      const y0 = Math.round(HOR + F / (z + 0.38)); // far edge
+      const y1 = Math.round(HOR + F / Math.max(1.2, z - 0.38)); // near edge
+      for (let y = y0; y <= y1; y++) {
+        const zr = F / (y - HOR + 0.5);
+        const a = proj(-PATHW, zr);
+        const b = proj(PATHW, zr);
+        const xl = Math.round(a.x);
+        const w = Math.round(b.x - a.x);
+        if (y === y0 || y === y1) {
+          // the burnt edge of the pit
+          ctx.fillStyle = "#1a0604";
+          ctx.fillRect(xl - 1, y, w + 2, 1);
+          continue;
+        }
+        if (y - y0 <= Math.max(1, Math.round((y1 - y0) * 0.2))) {
+          // the far wall of the pit, glowing from below
+          ctx.fillStyle = "#7a1408";
+          ctx.fillRect(xl, y, w, 1);
+          continue;
+        }
+        // the lava itself, slowly flowing
+        for (let x = 0; x < w; x += 2) {
+          const n = Math.sin(x * 0.35 + y * 0.9 + clock * 4) + Math.sin(x * 0.12 - clock * 2.3 + y);
+          ctx.fillStyle = n > 0.9 ? "#ffd24a" : n > 0 ? "#ff7a1a" : "#e0301a";
+          ctx.fillRect(xl + x, y, 2, 1);
+        }
+      }
+      // sparks jumping out of it
+      const p = proj(0, z);
+      for (let i = 0; i < 4; i++) {
+        const ph = (clock * 1.2 + i * 0.27) % 1;
+        ctx.fillStyle = i % 2 ? "#ffd24a" : "#ff7a1a";
+        ctx.fillRect(Math.round(p.x + Math.sin(i * 2.4 + Math.floor(clock * 1.2 + i * 0.27) * 1.7) * PATHW * 0.8 * p.s), Math.round(p.y - ph * 0.45 * p.s), 1, 1);
+      }
+    };
+
+    // RED VOLCANO: a giant rock lying on the two posts (takes the place of the branch up high). Slide under it.
+    const giantRock = (z: number, seed: number) => {
+      const a = proj(-PATHW - 0.25, z);
+      const b = proj(PATHW + 0.25, z);
+      const bot = Math.round(a.y - 0.62 * a.s);
+      const top = Math.round(a.y - 1.5 * a.s);
+      const rows = Math.max(2, bot - top);
+      const w = b.x - a.x;
+      for (let i = 0; i < rows; i++) {
+        const v = i / rows; // 0 = top .. 1 = bottom
+        // rounded top corners + a slightly bumpy outline
+        const round = v < 0.45 ? 1 - Math.sqrt(Math.max(0, 1 - Math.pow(1 - v / 0.45, 2))) : 0;
+        const inset = round * w * 0.22 + (Math.sin(i * 1.3 + seed) + 1) * 0.5;
+        const xl = Math.round(a.x + inset);
+        const ww = Math.max(2, Math.round(w - inset * 2));
+        ctx.fillStyle = "#111";
+        ctx.fillRect(xl - 1, top + i - (i === 0 ? 1 : 0), ww + 2, i === 0 ? 2 : 1);
+        ctx.fillStyle = v < 0.18 ? "#7a4a3c" : v < 0.6 ? "#5a3028" : "#3a1c18";
+        ctx.fillRect(xl, top + i, ww, 1);
+      }
+      ctx.fillStyle = "#111";
+      ctx.fillRect(Math.round(a.x) - 1, bot, Math.round(w) + 2, 1);
+      // glowing lava cracks running down it
+      const cw = Math.max(1, Math.round(a.s * 0.03));
+      for (let c = 0; c < 4; c++) {
+        let cx = a.x + w * (0.15 + 0.22 * c + hash(c, Math.round(seed)) * 0.1);
+        for (let i = Math.round(rows * (0.2 + hash(c, 7) * 0.2)); i < rows - 1; i++) {
+          cx += (hash(i + c * 31, Math.round(seed)) - 0.5) * 2.2;
+          ctx.fillStyle = Math.sin(clock * 5 + c + i * 0.3) > 0.3 ? "#ffd24a" : "#ff7a1a";
+          ctx.fillRect(Math.round(cx), top + i, cw, 1);
+        }
+      }
+    };
+
     const drawObstacle = (o: Obstacle, z: number) => {
       const p = proj(0, z);
+      const [mossBright, moss] = mossAt(o.at);
+      const bar = THEMES[themeIndexAt(o.at)].plants ? plant : log; // BLUE GRASS: long plants instead of fallen trees
+      const lava = !!THEMES[themeIndexAt(o.at)].lava; // RED VOLCANO: lava pits + giant rocks instead of fallen trees
       if (o.kind === "rock") {
+        const fire = THEMES[themeIndexAt(o.at)].volcano > 0; // RED VOLCANO: flames instead of rocks
         for (const l of o.lanes) {
           const q = proj(l * LANE, z);
-          blob(q.x, q.y + 1, 0.7 * q.s, 0.52 * q.s);
+          if (fire) flame(q.x, q.y + 1, 0.7 * q.s, 0.62 * q.s, o.at + l);
+          else blob(q.x, q.y + 1, 0.7 * q.s, 0.52 * q.s, mossBright);
         }
       } else if (o.kind === "root") {
-        log(z, 0, 0.28);
+        if (lava) lavaPit(z);
+        else bar(z, 0, 0.28, moss);
       } else {
         // a fallen branch up high, held by two posts. Slide under it!
         const a = proj(-PATHW - 0.1, z);
@@ -812,9 +1343,13 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         ctx.fillStyle = "#5d6e57";
         ctx.fillRect(Math.round(a.x) - pw, top, pw, Math.round(p.y) - top);
         ctx.fillRect(Math.round(b.x), top, pw, Math.round(p.y) - top);
-        const L = log(z, 0.62, 0.92);
+        if (lava) {
+          giantRock(z, o.at);
+          return;
+        }
+        const L = bar(z, 0.62, 0.92, moss);
         // vines hanging from it
-        ctx.fillStyle = "#2c8a33";
+        ctx.fillStyle = moss;
         const step = Math.max(3, Math.round(p.s * 0.35));
         for (let x = L.x0 + 2; x < L.x0 + L.w; x += step) {
           const len = Math.round(((hash(x, Math.round(o.at)) * 0.18) + 0.05) * p.s);
@@ -823,8 +1358,25 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       }
     };
 
+    const drawSpell = (sp: Spell, z: number, t: number) => {
+      const q = proj(sp.lane * LANE, z);
+      const size = Math.max(3, Math.round(0.5 * q.s));
+      const cx = Math.round(q.x);
+      const cy = Math.round(q.y - (0.42 + Math.sin(t * 4 + sp.at) * 0.07) * q.s);
+      // a glowing frame behind it that blinks, so you can tell it apart from the gems
+      const pad = Math.max(1, Math.round(size * 0.18));
+      ctx.fillStyle = Math.floor(t * 6) % 2 ? SPELL_INFO[sp.kind].color : "#ffffff";
+      ctx.fillRect(cx - Math.round(size / 2) - pad, cy - Math.round(size / 2) - pad, size + pad * 2, size + pad * 2);
+      ctx.fillStyle = "#1a1030";
+      ctx.fillRect(cx - Math.round(size / 2), cy - Math.round(size / 2), size, size);
+      ctx.drawImage(spellImg[sp.kind], cx - Math.round(size / 2), cy - Math.round(size / 2), size, size);
+    };
+
     const drawGem = (g: Gem, z: number, t: number) => {
-      const q = proj(g.lane * LANE, z);
+      // MAGNET: the gems close to you fly over to your lane
+      let gx = g.lane * LANE;
+      if (s.magnet > 0 && s.mode === "running") gx += (s.px - gx) * Math.min(1, Math.max(0, 1 - (z - PZ) / 6));
+      const q = proj(gx, z);
       const size = Math.max(1, Math.round(0.13 * q.s));
       const cy = Math.round(q.y - (0.32 + Math.sin(t * 5 + g.at) * 0.06) * q.s);
       const cx = Math.round(q.x);
@@ -891,7 +1443,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       });
       const shift = s.curve * 90;
       // open sky (BLUE GRASS): stars and a moon, fading in as the leaves above go away
-      const open = 1 - look.canopyAmt;
+      const open = look.stars;
       if (open > 0.02) {
         ctx.globalAlpha = open;
         for (let i = 0; i < 34; i++) {
@@ -908,6 +1460,64 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         ctx.fillStyle = "#b8d0f0";
         ctx.fillRect(mx - 1, 9, 2, 2);
         ctx.fillRect(mx + 1, 12, 1, 1);
+        ctx.globalAlpha = 1;
+      }
+      // RED VOLCANO: a volcano at the horizon, with a glowing top, lava running down and sparks flying out
+      if (look.volcano > 0.02) {
+        ctx.globalAlpha = look.volcano;
+        const vx = Math.round(W * 0.3 - shift * 0.3);
+        const vh = 38;
+        const top = HOR - vh;
+        // glow in the sky above it
+        for (let r = 3; r >= 1; r--) {
+          ctx.fillStyle = `rgba(255,${50 + (3 - r) * 40},20,${0.12 + 0.05 * Math.sin(t * 3)})`;
+          ctx.fillRect(vx - r * 10, top - r * 4, r * 20, r * 5);
+        }
+        // the mountain
+        for (let y = 0; y < vh; y++) {
+          const hw = Math.round(7 + (y / vh) * 52 + Math.sin(y * 1.7) * 1.5);
+          ctx.fillStyle = y < 2 ? "#ffb030" : y < 4 ? "#ff5a1a" : y % 5 === 0 ? "#3a0c08" : "#260705";
+          ctx.fillRect(vx - hw, top + y, hw * 2, 1);
+        }
+        // lava running down (3 streams)
+        const lavaCols = ["#ffd24a", "#ff7a1a", "#e0301a"];
+        [
+          [-4, 0.85],
+          [1, 0.55],
+          [5, 1],
+        ].forEach(([off, len]) => {
+          for (let y = 2; y < vh * len; y++) {
+            const lx = vx + off + Math.round(Math.sin(y * 0.45 + off) * 2 + y * off * 0.14);
+            ctx.fillStyle = lavaCols[(((Math.floor(t * 6) - y) % 3) + 3) % 3];
+            ctx.fillRect(lx, top + y, 2, 1);
+          }
+        });
+        // sparks thrown out of the top
+        for (let i = 0; i < 9; i++) {
+          const ph = (t * 0.6 + hash(i, 31)) % 1;
+          const sx = vx + (hash(i, 32) - 0.5) * 46 * ph;
+          const sy = top - ph * 30 + ph * ph * 18;
+          ctx.fillStyle = i % 2 ? "#ffd24a" : "#ff7a1a";
+          ctx.fillRect(Math.round(sx), Math.round(sy), i % 3 === 0 ? 2 : 1, i % 3 === 0 ? 2 : 1);
+        }
+        ctx.globalAlpha = 1;
+      }
+      // BLACK CRYSTALS: big purple crystals at the horizon, with a soft glow and sparkles
+      if (look.crystals > 0.02) {
+        ctx.globalAlpha = look.crystals;
+        ctx.fillStyle = `rgba(154,76,240,${0.12 + 0.06 * Math.sin(t * 2)})`;
+        ctx.fillRect(0, HOR - 10, W, 10);
+        const cc = ["#1a0a30", "#4a1a8a", "#8a3ce0", "#d8a8ff"];
+        for (let i = 0; i < 11; i++) {
+          const cx = (((hash(i, 41) * W * 1.3 - shift * 0.3) % W) + W) % W;
+          const ch = 14 + hash(i, 42) * 28;
+          const lean = (hash(i, 44) - 0.5) * 10;
+          shard(ctx, cx, HOR - 1, 5 + hash(i, 43) * 8, ch, lean, cc);
+          if (Math.sin(t * 3 + i * 1.9) > 0.75) {
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(Math.round(cx + lean * 0.6), Math.round(HOR - ch * 0.6), 1, 1);
+          }
+        }
         ctx.globalAlpha = 1;
       }
       // far tree line
@@ -979,7 +1589,8 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
             // tall grass: a clump next to the path and another one behind it
             add(wx + side * 1.3, trees[ti][Math.abs(k + 1) % 3], 1.9, 1.5);
             add(wx, trees[ti][Math.abs(k) % 3], 1.8, 1.3);
-          } else add(wx, trees[ti][Math.abs(k) % 3], 1.8, 3.6);
+          } else if (THEMES[ti].side === "crystals") add(wx, trees[ti][Math.abs(k) % 3], 1.6, 2.7);
+          else add(wx, trees[ti][Math.abs(k) % 3], 1.8, 3.6);
         }
       }
       for (const o of s.obs) {
@@ -1008,12 +1619,44 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
           },
         });
       }
+      for (const sp of s.spells) {
+        if (sp.taken) continue;
+        const z = sp.at - s.dist + PZ;
+        if (z < 1.7 || z > FAR * 0.75) continue;
+        items.push({
+          z,
+          draw: () => {
+            ctx.globalAlpha = 1 - fogAt(z);
+            drawSpell(sp, z, t);
+            ctx.globalAlpha = 1;
+          },
+        });
+      }
       items.sort((a, b) => b.z - a.z);
       // everything farther than the player, then the player, then nearer things
       let i = 0;
       for (; i < items.length && items[i].z >= PZ; i++) items[i].draw();
       drawPlayer(t);
       for (; i < items.length; i++) items[i].draw();
+    };
+
+    // FIRE MANE: moving flames where the hair would be. x, y = the top left corner of the 24 x 36 character.
+    const fireHair = (x: number, y: number, t: number) => {
+      for (let i = 0; i < 9; i++) {
+        const mid = 1 - Math.abs(i - 4) / 5; // taller in the middle
+        const h = Math.round(4 + mid * 6 + Math.sin(t * 13 + i * 2.1) * 2 + Math.sin(t * 7 + i * 4.3) * 1.5);
+        for (let k = 0; k < h; k++) {
+          const v = k / h;
+          ctx.fillStyle = v < 0.35 ? "#e0301a" : v < 0.7 ? "#ff7a1a" : "#ffd24a";
+          ctx.fillRect(x + 3 + i * 2, y + 7 - k, 2, 1);
+        }
+      }
+      // two little sparks floating up
+      for (let i = 0; i < 2; i++) {
+        const ph = (t * 1.4 + i * 0.5) % 1;
+        ctx.fillStyle = "#ffd24a";
+        ctx.fillRect(Math.round(x + 8 + i * 7 + Math.sin(t * 5 + i) * 2), Math.round(y - 4 - ph * 9), 1, 1);
+      }
     };
 
     const drawPlayer = (t: number) => {
@@ -1025,15 +1668,37 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       ctx.fillStyle = "rgba(0,0,0,0.35)";
       ctx.fillRect(Math.round(p.x - shw), Math.round(p.y - 2), shw * 2, 3);
       if (s.invuln > 0 && Math.floor(t * 16) % 2 === 0) return; // blink after a stumble
+      const fit = fits[skinIdx];
+      const dude = fit.run;
+      const dudeStand = fit.stand;
+      const onFire = !!SKINS[skinIdx].fire;
+      // BOOST: pink speed trail behind you
+      if (s.boost > 0 && s.mode === "running") {
+        for (let i = 1; i <= 3; i++) {
+          ctx.fillStyle = i % 2 ? PINK : "#ffd400";
+          ctx.fillRect(Math.round(p.x - 9 + i * 2), Math.round(p.y - lift + i * 5), 18 - i * 4, 3);
+        }
+      }
       const x = Math.round(p.x - 12);
       if (s.mode === "ready") {
         ctx.drawImage(dudeStand, x, Math.round(p.y - 36), 24, 36);
+        if (onFire) fireHair(x, Math.round(p.y - 36), t);
       } else if (s.slide > 0 && s.jumpY <= 0.001) {
         // sliding: only the top half shows, low to the ground
         ctx.drawImage(dudeStand, 0, 0, 12, 12, x, Math.round(p.y - 24), 24, 24);
+        if (onFire) fireHair(x, Math.round(p.y - 24), t);
       } else {
         const f = s.jumpY > 0.001 ? dudeStand : dude[Math.floor(s.dist * 2.4) % 2];
         ctx.drawImage(f, x, Math.round(p.y - 36 - lift), 24, 36);
+        if (onFire) fireHair(x, Math.round(p.y - 36 - lift), t);
+      }
+      // SHIELD: a sparkling bubble around you
+      if (s.shield > 0 && s.mode === "running") {
+        for (let i = 0; i < 20; i++) {
+          const a = (i / 20) * Math.PI * 2 + t * 2;
+          ctx.fillStyle = i % 2 ? "#6ae0ff" : "#ffffff";
+          ctx.fillRect(Math.round(p.x + Math.cos(a) * 17), Math.round(p.y - 18 - lift + Math.sin(a) * 23), 2, 2);
+        }
       }
     };
 
@@ -1064,6 +1729,106 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         ctx.fillStyle = s.chase > CHASE_DEADLY ? "#ff3b5c" : PINK;
         ctx.fillRect(W / 2 - 20, 6, w, 3);
       }
+    };
+
+    // the spells that are on right now, bottom left, each with a bar that runs out
+    const drawSpellHud = () => {
+      let y = H - 12;
+      const row = (label: string, frac: number, color: string) => {
+        text(label, 4, y, color, 8, "left");
+        ctx.fillStyle = "#000";
+        ctx.fillRect(56, y + 1, 42, 5);
+        ctx.fillStyle = color;
+        ctx.fillRect(57, y + 2, Math.round(40 * Math.min(1, Math.max(0, frac))), 3);
+        y -= 11;
+      };
+      if (s.shield > 0) row("SHIELD", s.shield / shieldHits(), SPELL_INFO.shield.color);
+      if (s.double > 0) row("2X GEM", s.double / doubleSecs(), SPELL_INFO.double.color);
+      if (s.magnet > 0) row("MAGNET", s.magnet / magnetSecs(), SPELL_INFO.magnet.color);
+      if (s.boost > 0) row("BOOST", s.boost / boostSecs(), SPELL_INFO.boost.color);
+    };
+
+    // on the start + game over screens: your gems on the left, your skin + how to open the shop on the right
+    const drawShop = () => {
+      const lx = 48;
+      text("YOUR GEMS", lx, 44, "#b6ffb0");
+      text(String(bank), lx, 56, GREEN, 16);
+      const rx = W - 48;
+      ctx.drawImage(fits[skinIdx].stand, rx - 12, 30, 24, 36);
+      if (SKINS[skinIdx].fire) fireHair(rx - 12, 30, clock);
+      text(SKINS[skinIdx].name, rx, 72, "#ffd24a");
+      text("DOWN: SHOP", rx, 84, "#ffffff");
+    };
+
+    // THE SHOP: spells to upgrade on the left, skins on the right, BACK at the bottom
+    const drawShopScreen = () => {
+      ctx.fillStyle = "rgba(0,12,6,0.9)";
+      ctx.fillRect(0, 0, W, H);
+      text("SHOP", W / 2, 4, PINK);
+      text(`GEMS ${bank}`, W - 6, 4, GREEN, 8, "right");
+      text("SPELLS", 10, 18, "#9ad19a", 8, "left");
+      text("SKINS", 178, 18, "#9ad19a", 8, "left");
+      const rowY = (r: number) => 32 + r * 13;
+      const RED = "#ff7a7a";
+      let info = "BACK TO THE GAME";
+
+      SPELL_ROWS.forEach((r, i) => {
+        const y = rowY(i);
+        const on = shop.col === 0 && shop.row === i;
+        if (on) {
+          ctx.fillStyle = "#4a1447";
+          ctx.fillRect(6, y - 3, 162, 13);
+        }
+        const level = lv[r.kind];
+        const cost = SPELL_COSTS[level];
+        const color = SPELL_INFO[r.kind].color;
+        text(r.name, 10, y, on ? "#ffffff" : color, 8, "left");
+        // the little squares = the upgrade level
+        for (let p = 0; p < SPELL_COSTS.length; p++) {
+          ctx.fillStyle = "#000";
+          ctx.fillRect(66 + p * 9, y, 8, 8);
+          ctx.fillStyle = p < level ? color : "#3a3a3a";
+          ctx.fillRect(67 + p * 9, y + 1, 6, 6);
+        }
+        if (cost === undefined) text("MAX", 164, y, "#9ad19a", 8, "right");
+        else text(String(cost), 164, y, bank >= cost ? GREEN : RED, 8, "right");
+        if (on) {
+          const max = cost === undefined;
+          if (r.kind === "magnet") info = max ? `LASTS ${magnetSecs()} SEC (MAX)` : `LASTS ${magnetSecs()} SEC, NEXT ${magnetSecs() + MAGNET_UP}`;
+          else if (r.kind === "double") info = max ? `LASTS ${doubleSecs()} SEC (MAX)` : `LASTS ${doubleSecs()} SEC, NEXT ${doubleSecs() + DOUBLE_UP}`;
+          else if (r.kind === "boost") info = max ? `LASTS ${boostSecs()} SEC (MAX)` : `LASTS ${boostSecs()} SEC, NEXT ${boostSecs() + BOOST_UP}`;
+          else info = max ? `BLOCKS ${shieldHits()} HITS (MAX)` : `BLOCKS ${shieldHits()} HIT${shieldHits() > 1 ? "S" : ""}, NEXT ${shieldHits() + 1}`;
+        }
+      });
+
+      SKINS.slice(0, SHOP_BACK).forEach((sk, i) => {
+        const y = rowY(i);
+        const on = shop.col === 1 && shop.row === i;
+        if (on) {
+          ctx.fillStyle = "#4a1447";
+          ctx.fillRect(174, y - 3, 140, 13);
+        }
+        const have = owned.includes(sk.id);
+        text(sk.name, 178, y, on ? "#ffffff" : "#ffd24a", 8, "left");
+        if (i === skinIdx) text("ON", 310, y, GREEN, 8, "right");
+        else if (have) text("OWNED", 310, y, "#9ad19a", 8, "right");
+        else text(String(sk.price), 310, y, bank >= sk.price ? GREEN : RED, 8, "right");
+        if (on) info = i === skinIdx ? "YOU'RE WEARING IT" : have ? "SPACE = PUT IT ON" : bank >= sk.price ? "SPACE = BUY IT" : `YOU NEED ${sk.price - bank} MORE GEMS`;
+      });
+
+      const backOn = shop.row === SHOP_BACK;
+      if (backOn) {
+        ctx.fillStyle = "#4a1447";
+        ctx.fillRect(W / 2 - 40, rowY(SHOP_BACK) + 1, 80, 13);
+      }
+      text("BACK", W / 2, rowY(SHOP_BACK) + 4, backOn ? "#ffffff" : "#9ad19a");
+
+      // what the picked row does, and the skin it would give you
+      text(info, 10, 120, "#b6ffb0", 8, "left");
+      const show = shop.col === 1 && shop.row < SHOP_BACK && SKINS[shop.row] ? shop.row : skinIdx;
+      ctx.drawImage(fits[show].stand, W - 38, 108, 24, 36);
+      if (SKINS[show].fire) fireHair(W - 38, 108, clock);
+      text("ARROWS = MOVE   SPACE = BUY", W / 2 - 14, 140, "#6f9a6f");
     };
 
     const drawFace = (cx: number, y: number, scale: number) => {
@@ -1123,6 +1888,14 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         if (s.slide > 0) s.slide -= dt;
         if (s.invuln > 0) s.invuln -= dt;
         s.chase = Math.max(0, s.chase - CHASE_DECAY * dt);
+        // spell timers
+        if (s.magnet > 0) s.magnet -= dt;
+        if (s.double > 0) s.double -= dt;
+        if (s.boost > 0) {
+          s.boost -= dt;
+          s.chase = Math.max(0, s.chase - 0.5 * dt); // BEARMANPIG can't keep up
+          if (s.boost <= 0) s.invuln = Math.max(s.invuln, 1.2); // a safe moment when the boost ends
+        }
 
         generate(s.dist + FAR + 5);
 
@@ -1144,14 +1917,31 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
           const d = g.at - s.dist;
           if (d > 0.4) break;
           if (d < -0.4) continue;
-          if (g.lane === myLane && s.jumpY < 0.9) {
+          if (s.magnet > 0 || (g.lane === myLane && s.jumpY < 0.9)) {
             g.taken = true;
-            s.gems++;
+            s.gems += s.double > 0 ? 2 : 1;
             sfx.gem();
             const p = playerScreen();
             burst(p.x, p.y - 20, 5, ["#b6ff9e", "#3ee05a", "#fff"]);
           }
         }
+        // spells: run into one to pick it up
+        for (const sp of s.spells) {
+          if (sp.taken) continue;
+          const d = sp.at - s.dist;
+          if (d > 0.45 || d < -0.45) continue;
+          if (sp.lane !== myLane || s.jumpY > 0.9) continue;
+          sp.taken = true;
+          if (sp.kind === "magnet") s.magnet = magnetSecs();
+          else if (sp.kind === "double") s.double = doubleSecs();
+          else if (sp.kind === "boost") s.boost = boostSecs();
+          else s.shield = shieldHits();
+          sfx.spell();
+          const p = playerScreen();
+          burst(p.x, p.y - 20, 12, [SPELL_INFO[sp.kind].color, "#ffffff"]);
+          s.pops.push({ x: p.x, y: p.y - 50, text: SPELL_INFO[sp.kind].name, life: 1.1, color: SPELL_INFO[sp.kind].color });
+        }
+        s.spells = s.spells.filter((sp) => sp.at > s.dist - 3);
         // forget things behind us
         s.obs = s.obs.filter((o) => o.at > s.dist - 3);
         s.gemList = s.gemList.filter((g) => g.at > s.dist - 3);
@@ -1171,7 +1961,8 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         s.chase = 0.55 + Math.sin(clock * 1.5) * 0.1; // he's lurking
       }
 
-      const target = s.mode === "caught" ? 1.45 : s.chase;
+      const gotYou = s.mode === "caught" || (s.mode === "shop" && shop.from === "caught");
+      const target = gotYou ? 1.45 : s.chase;
       s.chaseVis += (target - s.chaseVis) * Math.min(1, dt * (s.mode === "caught" ? 5 : 2.5));
       s.mx += (s.px - s.mx) * Math.min(1, dt * 3);
       if (s.shake > 0) s.shake -= dt;
@@ -1210,7 +2001,10 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
 
       for (const p of s.pops) text(p.text, p.x, p.y, p.color);
 
-      if (s.mode === "running") drawHud();
+      if (s.mode === "running") {
+        drawHud();
+        drawSpellHud();
+      }
 
       if (s.mode === "ready") {
         ctx.fillStyle = "rgba(0,20,8,0.55)";
@@ -1222,7 +2016,10 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         text("SWIPE / ARROWS", W / 2, 100, "#b6ffb0");
         if (Math.floor(clock * 2) % 2 === 0) text("SPACE = RUN", W / 2, 114, GREEN);
         if (best > 0) text(`BEST ${best}`, W / 2, 130, "#9ad19a");
+        drawShop();
       }
+
+      if (s.mode === "shop") drawShopScreen();
 
       if (s.mode === "caught") {
         const a = Math.min(0.7, s.t * 1.2);
@@ -1236,6 +2033,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
           text(s.newBest ? "NEW BEST!" : `BEST ${best}`, W / 2, 100, s.newBest ? PINK : "#9ad19a");
           text(`${Math.floor(s.dist)}M  ${s.gems} GEMS`, W / 2, 112, "#b6ffb0");
           if (s.t > 0.9 && Math.floor(clock * 2) % 2 === 0) text("SPACE = AGAIN", W / 2, 128, GREEN);
+          drawShop();
         }
       }
     };
