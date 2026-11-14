@@ -14,6 +14,8 @@ const HexGame = dynamic(() => import("./components/HexGame"), { ssr: false });
 const MazeGame = dynamic(() => import("./components/MazeGame"), { ssr: false });
 const SuperGame = dynamic(() => import("./components/SuperGame"), { ssr: false });
 const JungleGame = dynamic(() => import("./components/JungleGame"), { ssr: false });
+const HellGame = dynamic(() => import("./components/HellGame"), { ssr: false });
+const HellPad = dynamic(() => import("./components/HellPad"), { ssr: false });
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
 import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
 
@@ -170,6 +172,7 @@ const ITEM_ICONS: Record<string, string> = {
   "Pink Bird": "/icons/pinkbird.gif",
   "Pink Snake": "/icons/pinksnake.gif",
   "Pink Jungle": "/icons/pinkjungle.gif",
+  "Pink Hell": "/icons/pinkhell.gif",
   Back: "/icons/arrow.gif",
 };
 
@@ -258,8 +261,16 @@ const STRUCTURED_DATA = {
 // Clicking "Games" on the iPod turns on the PSP with this list. The highlighted game shows a little moving preview
 // (public/previews/<file>.gif, a few seconds recorded from the real game) with what it is and how to play.
 // The order here = the order on the PSP. Rename / reorder freely; "name" must match ITEM_ICONS for the icon.
-type GameId = "pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle";
+type GameId = "pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle" | "hell";
 const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; how: string; psp: boolean }[] = [
+  {
+    name: "Pinkmane Void",
+    id: "super",
+    preview: "/previews/void.gif",
+    blurb: "The main game. Run, jump and shoot through the Void, beat the bosses, stack your gold.",
+    how: "left/right = walk · up = jump · down = shoot",
+    psp: true,
+  },
   {
     name: "Pink Jungle",
     id: "jungle",
@@ -269,11 +280,11 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     psp: true,
   },
   {
-    name: "Pinkmane Void",
-    id: "super",
-    preview: "/previews/void.gif",
-    blurb: "The main game. Run, jump and shoot through the Void, beat the bosses, stack your gold.",
-    how: "left/right = walk · up = jump · down = shoot",
+    name: "Pink Hell",
+    id: "hell",
+    preview: "/previews/hell.gif",
+    blurb: "Demons pour out of the portals in waves. Grab the shotgun and blast them all, BEARMANPIG waits every 5th wave!",
+    how: "WASD = move · mouse = aim · click = shoot · phone: joystick + FIRE",
     psp: true,
   },
   {
@@ -931,8 +942,8 @@ export default function Home() {
   // Which game is open, and how far the click wheel was turned (for Pink Vortex)
   const [activeGame, setActiveGame] = useState<GameId>("pinkrun");
   const spinRef = useRef(0);
-  // Pink Maze, Pinkmane Void and Pink Jungle play on a wide handheld instead of the iPod
-  const hhGame = playing && (activeGame === "maze" || activeGame === "super" || activeGame === "jungle");
+  // Pink Maze, Pinkmane Void, Pink Jungle and Pink Hell play on a wide handheld instead of the iPod
+  const hhGame = playing && (activeGame === "maze" || activeGame === "super" || activeGame === "jungle" || activeGame === "hell");
   // Games menu: the PSP turns on and shows the game list with previews
   const gamePicker = !playing && menu === "games";
   // The PSP is on: playing one of its games, or picking a game
@@ -1440,7 +1451,7 @@ export default function Home() {
       // In Pink Snake the arrow keys steer (the game handles them itself)
       if (
         playing &&
-        (activeGame === "snake" || activeGame === "hex" || activeGame === "maze" || activeGame === "super" || activeGame === "jungle") &&
+        (activeGame === "snake" || activeGame === "hex" || activeGame === "maze" || activeGame === "super" || activeGame === "jungle" || activeGame === "hell") &&
         e.key.startsWith("Arrow")
       )
         return;
@@ -1467,6 +1478,8 @@ export default function Home() {
     };
 
     const handleWheel = (e: WheelEvent) => {
+      // In Pink Hell the game uses the mouse wheel itself (switch weapon)
+      if (playing && activeGame === "hell") return;
       // In Pink Vortex the mouse wheel spins the paddle, in Pink Snake it turns the snake
       if (playing && activeGame === "vortex") {
         spinRef.current += e.deltaY > 0 ? 14 : -14;
@@ -1815,7 +1828,8 @@ export default function Home() {
         activeGame === "hex" ||
         activeGame === "maze" ||
         activeGame === "super" ||
-        activeGame === "jungle")
+        activeGame === "jungle" ||
+        activeGame === "hell")
     ) {
       spinRef.current += delta;
       return;
@@ -1872,7 +1886,14 @@ export default function Home() {
 
   // The game that's open right now (shown on the iPod, or on the handheld for Maze / Super)
   const gameElement = !playing ? null : (
-activeGame === "jungle" ? (
+activeGame === "hell" ? (
+                <HellGame
+                  actionSignal={jumpSignal}
+                  spinRef={spinRef}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                />
+              ) : activeGame === "jungle" ? (
                 <JungleGame
                   actionSignal={jumpSignal}
                   spinRef={spinRef}
@@ -2408,6 +2429,8 @@ activeGame === "jungle" ? (
                   ? "PINKMANE VOID"
                   : activeGame === "jungle"
                   ? "PINK JUNGLE"
+                  : activeGame === "hell"
+                  ? "PINK HELL"
                   : "PINK RUN"
                 : menu === "main"
                 ? "PINKMANE"
@@ -2746,6 +2769,8 @@ activeGame === "jungle" ? (
                 ? "turn wheel or drag screen · OK launch · ◀▶ songs"
                 : activeGame === "jungle"
                 ? "swipe to change lane / jump / duck · tap to jump · PAUSE top left"
+                : activeGame === "hell"
+                ? "joystick = move · hold FIRE = shoot (auto aim) · PAUSE top left"
                 : "tap screen or OK to jump · ◀▶ songs"
               : "swipe wheel to scroll · ◀▶ songs"}
           </span>
@@ -2850,7 +2875,7 @@ activeGame === "jungle" ? (
             <button className="tp-small" onClick={goBack} aria-label="Leave the game">
               EXIT
             </button>
-            {!gamePicker && (activeGame === "super" || activeGame === "jungle") && (
+            {!gamePicker && (activeGame === "super" || activeGame === "jungle" || activeGame === "hell") && (
               <button className="tp-small" onClick={() => tapKey("Escape")} aria-label="Pause">
                 PAUSE
               </button>
@@ -2877,7 +2902,10 @@ activeGame === "jungle" ? (
 
           {/* Left thumb. Pink Jungle: nothing (you swipe). Pinkmane Void: two squares, walk left and walk right (slide between them without lifting).
               Pink Maze needs all four directions, so it keeps the round pad. */}
-          {gamePicker || activeGame === "jungle" ? null : activeGame === "super" ? (
+          {gamePicker || activeGame === "jungle" ? null : activeGame === "hell" ? (
+            // Pink Hell: a pink joystick on the left, a big FIRE button + GUN on the right (components/HellPad.tsx)
+            <HellPad onWeapon={() => tapKey("q")} />
+          ) : activeGame === "super" ? (
             <div
               className="tp-walk"
               role="group"
@@ -2946,7 +2974,7 @@ activeGame === "jungle" ? (
             </button>
           )}
           {/* Pink Jungle on phones has no thumb buttons: you swipe on the screen instead */}
-          {!gamePicker && activeGame !== "jungle" && (
+          {!gamePicker && activeGame !== "jungle" && activeGame !== "hell" && (
           <button
             className={`tp-btn tp-a ${tpAOn ? "tp-on" : ""}`}
             aria-label={activeGame === "super" ? "Jump" : "Start"}
@@ -3310,6 +3338,15 @@ activeGame === "jungle" ? (
                   [["ESC"], "pause"],
                   [["BACKSPACE"], "menu"],
                 ]
+              : activeGame === "hell"
+              ? [
+                  [["W", "A", "S", "D"], "move"],
+                  [["MOUSE"], "aim"],
+                  [["CLICK"], "shoot"],
+                  [["1", "2", "Q"], "weapon"],
+                  [["ESC"], "pause"],
+                  [["BACKSPACE"], "menu"],
+                ]
               : [
                   [["↑", "↓", "←", "→"], "move"],
                   [["SPACE"], "start"],
@@ -3337,6 +3374,8 @@ activeGame === "jungle" ? (
               ? "d-pad / stick = walk · bottom button = jump · left button = fire · d-pad down = go into the Void · right button = back"
               : activeGame === "jungle"
               ? "d-pad left/right = change lane · up = jump · down = slide · bottom button = start / jump · right button = back"
+              : activeGame === "hell"
+              ? "pink joystick = move · hold FIRE = shoot (it aims for you) · GUN = switch weapon · PAUSE + EXIT at the top"
               : "d-pad / stick = move · bottom button = start · right button = back · top button = play/pause"}
             <span className="hh-rotate"> · turn your phone sideways for a bigger screen</span>
           </div>
