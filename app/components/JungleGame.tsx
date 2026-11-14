@@ -26,6 +26,8 @@ type Props = {
   fontFamily: string;
   // Follows the iPod mute button
   muted: boolean;
+  // true on phones / tablets: no thumb buttons, you swipe anywhere on the screen, and swipe hints show at the start
+  touch?: boolean;
 };
 
 // The name of the game on its start screen (the menu on the iPod has its own copy in page.tsx)
@@ -628,7 +630,11 @@ const SPELL_ROWS: { kind: SpellKind; name: string }[] = [
   { kind: "double", name: "2X GEM" },
 ];
 
-export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }: Props) {
+export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, touch = false }: Props) {
+  const touchRef = useRef(touch);
+  touchRef.current = touch;
+  // a tap / click on the game picture, in game pixels (shop rows, pause menu, start screen)
+  const tapRef = useRef<((x: number, y: number) => void) | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
@@ -1077,6 +1083,54 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         s.slide = 0.65;
         sfx.slide();
       }
+    };
+
+    // TAPS / CLICKS on the game picture (x, y in game pixels)
+    const SHOP_ROW_Y = (r: number) => 32 + r * 13; // the same rows drawShopScreen uses
+    tapRef.current = (x, y) => {
+      if (pause.on) {
+        // tap RESUME or RESTART
+        const row = y >= 58 && y < 76 ? 0 : y >= 76 && y < 94 ? 1 : -1;
+        if (row >= 0) {
+          pause.row = row;
+          inputRef.current?.("go");
+        }
+        return;
+      }
+      if (s.mode === "shop") {
+        // close (X, top left)
+        if (x < 30 && y < 16) {
+          s.mode = shop.from;
+          sfx.lane();
+          return;
+        }
+        // BACK
+        const by = SHOP_ROW_Y(SHOP_BACK);
+        if (y >= by && y < by + 16 && Math.abs(x - W / 2) < 50) {
+          shop.row = SHOP_BACK;
+          shopInput("go");
+          return;
+        }
+        // a spell (left) or skin (right) row: first tap picks it, tapping it again buys / puts it on
+        const r = Math.floor((y - SHOP_ROW_Y(0) + 3) / 13);
+        const col = x < 171 ? 0 : 1;
+        const last = (col === 0 ? SPELL_ROWS.length : SKINS.length) - 1;
+        if (r < 0 || r > last || r >= SHOP_BACK) return;
+        if (shop.col === col && shop.row === r) shopInput("go");
+        else {
+          shop.col = col;
+          shop.row = r;
+          sfx.lane();
+        }
+        return;
+      }
+      if (s.mode === "ready" || (s.mode === "caught" && s.t > 0.9)) {
+        // the skin picture on the right = open the shop, anywhere else = run
+        if (x > W - 92 && y > 24 && y < 96) inputRef.current?.("slide");
+        else inputRef.current?.("go");
+        return;
+      }
+      inputRef.current?.("go"); // running: jump
     };
 
     const onKey = (e: KeyboardEvent) => {
@@ -1791,7 +1845,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       ctx.drawImage(fits[skinIdx].stand, rx - 12, 30, 24, 36);
       if (SKINS[skinIdx].fire) fireHair(rx - 12, 30, clock);
       text(SKINS[skinIdx].name, rx, 72, "#ffd24a");
-      text("DOWN: SHOP", rx, 84, "#ffffff");
+      text(touchRef.current ? "TAP: SHOP" : "DOWN: SHOP", rx, 84, "#ffffff");
     };
 
     // THE SHOP: spells to upgrade on the left, skins on the right, BACK at the bottom
@@ -1847,7 +1901,10 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         if (i === skinIdx) text("ON", 310, y, GREEN, 8, "right");
         else if (have) text("OWNED", 310, y, "#9ad19a", 8, "right");
         else text(String(sk.price), 310, y, bank >= sk.price ? GREEN : RED, 8, "right");
-        if (on) info = i === skinIdx ? "YOU'RE WEARING IT" : have ? "SPACE = PUT IT ON" : bank >= sk.price ? "SPACE = BUY IT" : `YOU NEED ${sk.price - bank} MORE GEMS`;
+        if (on) {
+          const k = touchRef.current ? "TAP AGAIN" : "SPACE";
+          info = i === skinIdx ? "YOU'RE WEARING IT" : have ? `${k} = PUT IT ON` : bank >= sk.price ? `${k} = BUY IT` : `YOU NEED ${sk.price - bank} MORE GEMS`;
+        }
       });
 
       const backOn = shop.row === SHOP_BACK;
@@ -1862,7 +1919,11 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       const show = shop.col === 1 && shop.row < SHOP_BACK && SKINS[shop.row] ? shop.row : skinIdx;
       ctx.drawImage(fits[show].stand, W - 38, 108, 24, 36);
       if (SKINS[show].fire) fireHair(W - 38, 108, clock);
-      text("ARROWS = MOVE   SPACE = BUY", W / 2 - 14, 140, "#6f9a6f");
+      text(touchRef.current ? "TAP = PICK   TAP AGAIN = BUY" : "ARROWS / CLICK = PICK   SPACE = BUY", W / 2 - 14, 140, "#6f9a6f");
+      // close button (top left)
+      ctx.fillStyle = "#4a1447";
+      ctx.fillRect(4, 2, 22, 12);
+      text("X", 15, 4, "#ffffff");
     };
 
     const drawFace = (cx: number, y: number, scale: number) => {
@@ -2015,6 +2076,55 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       s.pops = s.pops.filter((p) => p.life > 0);
     };
 
+    // SWIPE HINTS (phones): during the first seconds of a run, four arrows show what each swipe does.
+    // A little finger dot slides along each arrow. They fade away before the first obstacle comes.
+    const HINT_START = 0.3; // seconds after you start running
+    const HINT_END = 6; // seconds after you start running (the first SAFE_START meters have no obstacles)
+    const pixArrow = (cx: number, cy: number, dir: "left" | "right" | "up" | "down", color: string) => {
+      // a blocky arrow 21 px long pointing in dir
+      const pts: [number, number][] = [];
+      for (let i = 0; i < 8; i++) for (let j = -i; j <= i; j++) pts.push([10 - i, j]); // the head
+      for (let i = 0; i < 12; i++) for (let j = -2; j <= 2; j++) pts.push([3 - i - 1 + 0, j]); // the stem
+      const map = ([a, b]: [number, number]): [number, number] =>
+        dir === "right" ? [a, b] : dir === "left" ? [-a, b] : dir === "down" ? [b, a] : [b, -a];
+      ctx.fillStyle = "#000";
+      for (const p of pts) {
+        const [x, y] = map(p);
+        ctx.fillRect(Math.round(cx + x) - 1, Math.round(cy + y) - 1, 3, 3);
+      }
+      ctx.fillStyle = color;
+      for (const p of pts) {
+        const [x, y] = map(p);
+        ctx.fillRect(Math.round(cx + x), Math.round(cy + y), 1, 1);
+      }
+    };
+    const drawSwipeHints = () => {
+      if (!touchRef.current || pause.on || s.mode !== "running" || s.t < HINT_START || s.t > HINT_END) return;
+      const fade = Math.min(1, (s.t - HINT_START) / 0.4, (HINT_END - s.t) / 0.8);
+      ctx.globalAlpha = fade;
+      const pulse = Math.floor(clock * 4) % 2 === 0;
+      const prog = (clock * 1.4) % 1; // where the finger dot is along the arrow
+      const hints: { x: number; y: number; dir: "left" | "right" | "up" | "down"; label: string; ly: number }[] = [
+        { x: 70, y: 70, dir: "left", label: "SWIPE", ly: 84 },
+        { x: W - 70, y: 70, dir: "right", label: "SWIPE", ly: 84 },
+        { x: W / 2, y: 30, dir: "up", label: "JUMP", ly: 14 },
+        { x: W / 2 + 62, y: 118, dir: "down", label: "DUCK", ly: 134 },
+      ];
+      for (const h of hints) {
+        pixArrow(h.x, h.y, h.dir, pulse ? "#ffffff" : GREEN);
+        const d = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }[h.dir];
+        const fx = h.x + d[0] * (-12 + prog * 24);
+        const fy = h.y + d[1] * (-12 + prog * 24);
+        ctx.fillStyle = "#000";
+        ctx.fillRect(Math.round(fx) - 3, Math.round(fy) - 3, 7, 7);
+        ctx.fillStyle = PINK;
+        ctx.fillRect(Math.round(fx) - 2, Math.round(fy) - 2, 5, 5);
+        text(h.label, h.x, h.ly, "#ffffff");
+      }
+      text("TAP = JUMP TOO", W / 2, 100, "#b6ffb0");
+      ctx.globalAlpha = 1;
+    };
+
     const drawPause = () => {
       ctx.fillStyle = "rgba(0,15,5,0.72)";
       ctx.fillRect(0, 0, W, H);
@@ -2030,7 +2140,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         text(on ? `> ${o} <` : o, W / 2, y, on ? "#ffffff" : "#9ad19a");
       });
       text(`${Math.floor(s.dist)}M  ${s.gems} GEMS`, W / 2, 110, "#b6ffb0");
-      if (Math.floor(pauseClock * 2) % 2 === 0) text("ESC / PAUSE = RESUME", W / 2, 128, GREEN);
+      if (Math.floor(pauseClock * 2) % 2 === 0) text(touchRef.current ? "TAP RESUME TO PLAY" : "ESC / PAUSE = RESUME", W / 2, 128, GREEN);
     };
 
     const render = () => {
@@ -2056,6 +2166,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       if (s.mode === "running") {
         drawHud();
         drawSpellHud();
+        drawSwipeHints();
       }
 
       if (s.mode === "ready") {
@@ -2065,8 +2176,8 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         drawFace(W / 2, 36, 2);
         text("RUN FROM", W / 2, 72, "#ffffff");
         text("BEARMANPIG!", W / 2, 83, PINK);
-        text("SWIPE / ARROWS", W / 2, 100, "#b6ffb0");
-        if (Math.floor(clock * 2) % 2 === 0) text("SPACE = RUN", W / 2, 114, GREEN);
+        text(touchRef.current ? "SWIPE TO PLAY" : "SWIPE / ARROWS", W / 2, 100, "#b6ffb0");
+        if (Math.floor(clock * 2) % 2 === 0) text(touchRef.current ? "TAP TO RUN" : "SPACE = RUN", W / 2, 114, GREEN);
         if (best > 0) text(`BEST ${best}`, W / 2, 130, "#9ad19a");
         drawShop();
       }
@@ -2084,7 +2195,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
           text(`SCORE ${s.score}`, W / 2, 88, GREEN);
           text(s.newBest ? "NEW BEST!" : `BEST ${best}`, W / 2, 100, s.newBest ? PINK : "#9ad19a");
           text(`${Math.floor(s.dist)}M  ${s.gems} GEMS`, W / 2, 112, "#b6ffb0");
-          if (s.t > 0.9 && Math.floor(clock * 2) % 2 === 0) text("SPACE = AGAIN", W / 2, 128, GREEN);
+          if (s.t > 0.9 && Math.floor(clock * 2) % 2 === 0) text(touchRef.current ? "TAP = AGAIN" : "SPACE = AGAIN", W / 2, 128, GREEN);
           drawShop();
         }
       }
@@ -2108,43 +2219,124 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       window.removeEventListener("keydown", onKey);
       document.removeEventListener("visibilitychange", onHidden);
       inputRef.current = null;
+      tapRef.current = null;
       try {
         ac?.close();
       } catch {}
     };
   }, [fontFamily, spinRef]);
 
-  // ---------- touch: swipe to move, tap to jump / start ----------
-  const swipe = useRef({ x: 0, y: 0, on: false, fired: false });
-  const SWIPE_PX = 16;
+  // ---------- touch: swipe to move, tap to pick / jump ----------
+  // PHONES (touch = true): swipe ANYWHERE on the screen (the page's small EXIT / PAUSE / music buttons still work).
+  //   Other touch screens: the swipe has to start on the game picture (or just next to it).
+  // One finger can do several moves in a row: swipe left, keep the finger down, swipe up = lane + jump.
+  // A tap on the game picture goes to whatever is under the finger (shop row, RESUME...), elsewhere it = jump / start.
+  const swipe = useRef({ x: 0, y: 0, on: false, fired: false, id: -1 });
+  const SWIPE_PX = 18; // how far the finger has to slide for one move (in screen pixels)
+
+  // which way a slide went, or null if it's still too short
+  const swipeDir = (dx: number, dy: number) => {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_PX) return null;
+    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "right" : "left";
+    return dy > 0 ? "slide" : "jump";
+  };
+
+  // a tap / click at a screen point: inside the picture = tap that spot, outside = OK
+  const tapAt = (cx: number, cy: number) => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const r = c.getBoundingClientRect();
+    const sc = Math.min(r.width / W, r.height / H); // the picture is fitted inside the canvas box ("contain")
+    const x = (cx - r.left - (r.width - W * sc) / 2) / sc;
+    const y = (cy - r.top - (r.height - H * sc) / 2) / sc;
+    if (x >= 0 && x < W && y >= 0 && y < H && tapRef.current) tapRef.current(x, y);
+    else inputRef.current?.("go");
+  };
+
+  useEffect(() => {
+    // touches on buttons, sliders and links are left alone
+    const onUi = (t: EventTarget | null) =>
+      t instanceof Element && !!t.closest("button, a, input, select, textarea, [role='button'], [role='slider']");
+
+    const start = (e: TouchEvent) => {
+      if (swipe.current.on || onUi(e.target)) return;
+      const t = e.changedTouches[0];
+      if (!touchRef.current) {
+        const r = canvasRef.current?.getBoundingClientRect();
+        const M = 40;
+        if (!r || t.clientX < r.left - M || t.clientX > r.right + M || t.clientY < r.top - M || t.clientY > r.bottom + M) return;
+      }
+      swipe.current = { x: t.clientX, y: t.clientY, on: true, fired: false, id: t.identifier };
+      if (e.cancelable) e.preventDefault(); // no double-tap zoom / long-press menu
+    };
+    const find = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++)
+        if (e.changedTouches[i].identifier === swipe.current.id) return e.changedTouches[i];
+      return null;
+    };
+    const move = (e: TouchEvent) => {
+      const sw = swipe.current;
+      if (!sw.on) return;
+      const t = find(e);
+      if (!t) return;
+      if (e.cancelable) e.preventDefault(); // don't scroll the page while swiping
+      const dir = swipeDir(t.clientX - sw.x, t.clientY - sw.y);
+      if (!dir) return;
+      inputRef.current?.(dir);
+      sw.fired = true;
+      sw.x = t.clientX; // measure again from here, so the same finger can swipe again
+      sw.y = t.clientY;
+    };
+    const end = (e: TouchEvent) => {
+      const sw = swipe.current;
+      if (!sw.on) return;
+      const t = find(e);
+      if (!t) return;
+      if (e.type === "touchend" && !sw.fired) tapAt(t.clientX, t.clientY);
+      sw.on = false;
+    };
+
+    window.addEventListener("touchstart", start, { passive: false });
+    window.addEventListener("touchmove", move, { passive: false });
+    window.addEventListener("touchend", end);
+    window.addEventListener("touchcancel", end);
+    return () => {
+      window.removeEventListener("touchstart", start);
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("touchend", end);
+      window.removeEventListener("touchcancel", end);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <canvas
       ref={canvasRef}
       width={W}
       height={H}
+      // COMPUTER mouse: click = pick / jump / start, drag = swipe (touch is handled above)
       onPointerDown={(e) => {
+        if (e.pointerType !== "mouse") return;
         e.stopPropagation();
-        swipe.current = { x: e.clientX, y: e.clientY, on: true, fired: false };
+        swipe.current = { x: e.clientX, y: e.clientY, on: true, fired: false, id: -1 };
       }}
       onPointerMove={(e) => {
         const sw = swipe.current;
-        if (!sw.on || sw.fired) return;
-        const dx = e.clientX - sw.x;
-        const dy = e.clientY - sw.y;
-        if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_PX) return;
+        if (e.pointerType !== "mouse" || !sw.on || sw.fired) return;
+        const dir = swipeDir(e.clientX - sw.x, e.clientY - sw.y);
+        if (!dir) return;
         sw.fired = true;
-        if (Math.abs(dx) > Math.abs(dy)) inputRef.current?.(dx > 0 ? "right" : "left");
-        else inputRef.current?.(dy > 0 ? "slide" : "jump");
+        inputRef.current?.(dir);
       }}
       onPointerUp={(e) => {
+        if (e.pointerType !== "mouse") return;
         e.stopPropagation();
         const sw = swipe.current;
-        if (sw.on && !sw.fired) inputRef.current?.("go"); // a tap
+        if (sw.on && !sw.fired) tapAt(e.clientX, e.clientY);
         sw.on = false;
       }}
-      onPointerCancel={() => {
-        swipe.current.on = false;
+      onPointerCancel={(e) => {
+        if (e.pointerType === "mouse") swipe.current.on = false;
       }}
       style={{
         position: "absolute",

@@ -1751,6 +1751,7 @@ activeGame === "jungle" ? (
                   spinRef={spinRef}
                   fontFamily={pixelFont.style.fontFamily}
                   muted={isMuted}
+                  touch={isTouch}
                 />
               ) : activeGame === "maze" ? (
                 <MazeGame
@@ -2604,7 +2605,7 @@ activeGame === "jungle" ? (
                 : activeGame === "vortex"
                 ? "turn wheel or drag screen · OK launch · ◀▶ songs"
                 : activeGame === "jungle"
-                ? "◀▶ change lane · A jump · ↓ duck · PAUSE top left"
+                ? "swipe to change lane / jump / duck · tap to jump · PAUSE top left"
                 : "tap screen or OK to jump · ◀▶ songs"
               : "swipe wheel to scroll · ◀▶ songs"}
           </span>
@@ -2734,13 +2735,13 @@ activeGame === "jungle" ? (
             </button>
           </div>
 
-          {/* Left thumb. Pinkmane Void: two squares, walk left and walk right (slide between them without lifting).
+          {/* Left thumb. Pink Jungle: nothing (you swipe). Pinkmane Void: two squares, walk left and walk right (slide between them without lifting).
               Pink Maze needs all four directions, so it keeps the round pad. */}
-          {activeGame === "super" || activeGame === "jungle" ? (
+          {activeGame === "jungle" ? null : activeGame === "super" ? (
             <div
               className="tp-walk"
               role="group"
-              aria-label={activeGame === "jungle" ? "Change lane left or right" : "Walk left or right"}
+              aria-label="Walk left or right"
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.currentTarget.setPointerCapture(e.pointerId);
@@ -2787,10 +2788,10 @@ activeGame === "jungle" ? (
 
           {/* Right thumb: A = jump (hold it to fly with the jetpack) / OK in the menus,
               S = shoot, or go down into the Void (the game's hints say PRESS S TO SHOOT, so the button says S) */}
-          {(activeGame === "super" || activeGame === "jungle") && (
+          {activeGame === "super" && (
             <button
               className={`tp-btn tp-b ${tpBOn ? "tp-on" : ""}`}
-              aria-label={activeGame === "jungle" ? "Duck" : "Shoot, or go down into the Void"}
+              aria-label="Shoot, or go down into the Void"
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.currentTarget.setPointerCapture(e.pointerId);
@@ -2800,10 +2801,12 @@ activeGame === "jungle" ? (
               onPointerCancel={() => tpB(false)}
               onLostPointerCapture={() => tpB(false)}
             >
-              <span>{activeGame === "jungle" ? "↓" : "S"}</span>
-              <small>{activeGame === "jungle" ? "DUCK" : "FIRE/DOWN"}</small>
+              <span>S</span>
+              <small>FIRE/DOWN</small>
             </button>
           )}
+          {/* Pink Jungle on phones has no thumb buttons: you swipe on the screen instead */}
+          {activeGame !== "jungle" && (
           <button
             className={`tp-btn tp-a ${tpAOn ? "tp-on" : ""}`}
             aria-label={activeGame === "super" ? "Jump" : "Start"}
@@ -2817,8 +2820,9 @@ activeGame === "jungle" ? (
             onLostPointerCapture={() => tpA(false)}
           >
             <span>A</span>
-            <small>{activeGame === "super" || activeGame === "jungle" ? "JUMP" : "START"}</small>
+            <small>{activeGame === "super" ? "JUMP" : "START"}</small>
           </button>
+          )}
 
           <div className="tp-rotate">TURN YOUR PHONE SIDEWAYS FOR A BIGGER SCREEN</div>
         </div>
