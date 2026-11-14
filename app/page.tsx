@@ -15,6 +15,7 @@ const MazeGame = dynamic(() => import("./components/MazeGame"), { ssr: false });
 const SuperGame = dynamic(() => import("./components/SuperGame"), { ssr: false });
 const JungleGame = dynamic(() => import("./components/JungleGame"), { ssr: false });
 const HellGame = dynamic(() => import("./components/HellGame"), { ssr: false });
+const HellPad = dynamic(() => import("./components/HellPad"), { ssr: false });
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
 import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
 
@@ -856,14 +857,14 @@ export default function Home() {
     // Games: the main game first, the rest live one step deeper in Mini Games
     games: ["Pinkmane Void", "Mini Games", "Back"],
     minigames: [
-      "Pink Hexagon",
+      "Pink Jungle",
       "Pink Hell",
+      "Pink Hexagon",
       "Pink Maze",
       "Pink Vortex",
       "Pink Snake",
       "Pink Bird",
       "Pink Run",
-      "Pink Jungle",
       "Back",
     ],
   };
@@ -1053,7 +1054,7 @@ export default function Home() {
         setSelected(0);
       } else {
         setMenu("minigames");
-        setSelected({ hex: 0, hell: 1, maze: 2, vortex: 3, snake: 4, bird: 5, pinkrun: 6, jungle: 7 }[activeGame]);
+        setSelected({ jungle: 0, hell: 1, hex: 2, maze: 3, vortex: 4, snake: 5, bird: 6, pinkrun: 7 }[activeGame]);
       }
       return;
     }
@@ -2626,7 +2627,7 @@ activeGame === "hell" ? (
                 : activeGame === "jungle"
                 ? "swipe to move / jump / slide · tap to jump"
                 : activeGame === "hell"
-                ? "d-pad to move · touch the screen to aim + shoot"
+                ? "left stick = move · right stick = aim + shoot · pause at the top"
                 : "tap screen or OK to jump · ◀▶ songs"
               : "swipe wheel to scroll · ◀▶ songs"}
           </span>
@@ -2730,7 +2731,7 @@ activeGame === "hell" ? (
             <button className="tp-small" onClick={goBack} aria-label="Leave the game">
               EXIT
             </button>
-            {activeGame === "super" && (
+            {(activeGame === "super" || activeGame === "hell") && (
               <button className="tp-small" onClick={() => tapKey("Escape")} aria-label="Pause">
                 PAUSE
               </button>
@@ -2757,7 +2758,10 @@ activeGame === "hell" ? (
 
           {/* Left thumb. Pinkmane Void: two squares, walk left and walk right (slide between them without lifting).
               Pink Maze needs all four directions, so it keeps the round pad. */}
-          {activeGame === "super" ? (
+          {activeGame === "hell" ? (
+            // Pink Hell: a walk stick on the left, an aim + shoot stick on the right, and a GUN button (components/HellPad.tsx)
+            <HellPad onWeapon={() => tapKey("q")} />
+          ) : activeGame === "super" ? (
             <div
               className="tp-walk"
               role="group"
@@ -2825,6 +2829,7 @@ activeGame === "hell" ? (
               <small>FIRE/DOWN</small>
             </button>
           )}
+          {activeGame !== "hell" && (
           <button
             className={`tp-btn tp-a ${tpAOn ? "tp-on" : ""}`}
             aria-label={activeGame === "super" ? "Jump" : "Start"}
@@ -2840,6 +2845,7 @@ activeGame === "hell" ? (
             <span>A</span>
             <small>{activeGame === "super" || activeGame === "jungle" ? "JUMP" : "START"}</small>
           </button>
+          )}
 
           <div className="tp-rotate">TURN YOUR PHONE SIDEWAYS FOR A BIGGER SCREEN</div>
         </div>
@@ -3185,6 +3191,7 @@ activeGame === "hell" ? (
                   [["MOUSE"], "aim"],
                   [["CLICK"], "shoot"],
                   [["1", "2", "Q"], "weapon"],
+                  [["ESC"], "pause"],
                   [["BACKSPACE"], "menu"],
                 ]
               : [
@@ -3213,7 +3220,7 @@ activeGame === "hell" ? (
               : activeGame === "jungle"
               ? "d-pad left/right = change lane · up = jump · down = slide · bottom button = start / jump · right button = back"
               : activeGame === "hell"
-              ? "d-pad / stick = move · touch the game screen to aim + shoot · bottom button = start · right button = back"
+              ? "left stick = move · right stick = aim + shoot (it helps you aim) · GUN = switch weapon · PAUSE + EXIT at the top"
               : "d-pad / stick = move · bottom button = start · right button = back · top button = play/pause"}
             <span className="hh-rotate"> · turn your phone sideways for a bigger screen</span>
           </div>

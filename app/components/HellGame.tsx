@@ -8,6 +8,9 @@ import { useEffect, useRef } from "react";
 //   MOUSE              = aim (the red crosshair), Pinkmane always looks where you aim
 //   CLICK (hold)       = shoot
 //   1 / 2, Q, wheel    = switch weapon (PISTOL never runs out, SHOTGUN needs shells)
+//   ESC / P            = pause (it also pauses by itself if you switch to another tab or window)
+// On phones + tablets (see HellPad.tsx): left stick = walk, right stick = aim + shoot, GUN = switch weapon,
+// PAUSE button at the top. You can also just touch the game screen where you want to shoot.
 // Demons:
 //   IMP        = throws fireballs from far away (its eyes light up just before it throws)
 //   PIG DEMON  = pink, fat, fast. Runs at you and bites
@@ -43,6 +46,7 @@ const MEDKIT_HP = 20;
 const BOSS_EVERY = 5; // the boss comes every this many waves
 const DARKNESS = 0.62; // 0 = no darkness, 1 = pitch black outside your light
 const LIGHT_RADIUS = 95; // how far your light reaches
+const AIM_HELP = 0.3; // phones: the right stick snaps to a demon this close to where you aim (in radians, 0 = no help)
 
 // ---------- Screen ----------
 const W = 320;
@@ -633,12 +637,26 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       camY: startY - VH / 2,
       newBest: false,
       needRelease: false,
+      paused: false,
     });
     let s = fresh();
 
     // ---------- input ----------
     const keys = new Set<string>();
     const mouse = { x: W / 2, y: VH / 2 - 30, down: false };
+    // phones: the two thumb sticks from HellPad.tsx (x / y from -1 to 1)
+    const stick = { mx: 0, my: 0, ax: 0, ay: 0, aimOn: false };
+    const touchy = window.matchMedia?.("(pointer: coarse)").matches ?? false; // a phone / tablet: the start screen says TAP
+    const setPause = (on: boolean) => {
+      if (s.mode !== "play" || s.paused === on) return;
+      s.paused = on;
+      keys.clear();
+      mouse.down = false;
+      stick.mx = stick.my = 0;
+      stick.aimOn = false;
+      s.needRelease = false;
+      tone(on ? 600 : 400, on ? 300 : 800, 0.12, "square", 0.04);
+    };
     const toCanvas = (cx: number, cy: number) => {
       const r = canvas.getBoundingClientRect();
       const sc = Math.min(r.width / W, r.height / H); // the canvas uses objectFit: contain
@@ -678,26 +696,61 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       e.stopPropagation();
       if (e.button !== 0) return;
       onMove(e);
+      if (s.paused) {
+        setPause(false); // a click / tap on the pause screen = back to the game
+        return;
+      }
       mouse.down = true;
       if (s.mode !== "play") go();
     };
     const onKey = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)) e.preventDefault();
-      keys.add(k);
       if (e.repeat) return;
+      if (k === "escape" || k === "p") {
+        setPause(!s.paused);
+        return;
+      }
+      if (s.paused) return;
+      keys.add(k);
       if (k === "1") switchWeapon(0);
       if (k === "2") switchWeapon(1);
-      if (k === "q") switchWeapon();
+      if (k === "q" && s.mode === "play") switchWeapon();
     };
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.key.toLowerCase());
     const onBlur = () => {
       keys.clear();
       mouse.down = false;
+      setPause(true);
+    };
+    const onHidden = () => {
+      if (document.hidden) setPause(true);
+    };
+    const onStick = (e: Event) => {
+      const d = (e as CustomEvent<{ stick: "move" | "aim"; x: number; y: number; on: boolean }>).detail;
+      if (!d) return;
+      if (d.stick === "move") {
+        stick.mx = d.on ? d.x : 0;
+        stick.my = d.on ? d.y : 0;
+        return;
+      }
+      const wasOn = stick.aimOn;
+      stick.aimOn = d.on;
+      if (d.on) {
+        stick.ax = d.x;
+        stick.ay = d.y;
+      } else s.needRelease = false;
+      if (d.on && !wasOn) {
+        if (s.paused) setPause(false);
+        else if (s.mode !== "play") {
+          go();
+          s.needRelease = true; // the touch that starts the game doesn't shoot yet
+        }
+      }
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      if (s.mode === "play") switchWeapon();
+      if (s.mode === "play" && !s.paused) switchWeapon();
     };
     const onMenu = (e: Event) => e.preventDefault();
     window.addEventListener("pointermove", onMove);
@@ -705,6 +758,8 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
+    window.addEventListener("pinkmane-hell-stick", onStick);
+    document.addEventListener("visibilitychange", onHidden);
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("contextmenu", onMenu);
@@ -971,6 +1026,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
 
     // ---------- update ----------
     const step = (dt: number) => {
+      if (s.paused) return; // everything stands still
       s.t += dt;
       s.shake = Math.max(0, s.shake - dt);
       s.bannerT = Math.max(0, s.bannerT - dt);
@@ -1007,10 +1063,17 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       if (keys.has("d") || keys.has("arrowright")) ix++;
       if (keys.has("w") || keys.has("arrowup")) iy--;
       if (keys.has("s") || keys.has("arrowdown")) iy++;
+      let power = 1; // the stick can walk slower if you only push it a little
+      const sl = Math.hypot(stick.mx, stick.my);
+      if (sl > 0.15) {
+        ix = stick.mx;
+        iy = stick.my;
+        power = Math.min(1, (sl - 0.15) / 0.6 + 0.35);
+      }
       const inLava = lavaAt(s.px, s.py);
       if (ix || iy) {
         const l = Math.hypot(ix, iy);
-        const sp = PLAYER_SPEED * (inLava ? 0.6 : 1) * dt;
+        const sp = PLAYER_SPEED * power * (inLava ? 0.6 : 1) * dt;
         movePlayer((ix / l) * sp, (iy / l) * sp);
         s.walk += dt * 10;
       }
@@ -1025,16 +1088,38 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       if (s.mode !== "play") return;
 
       // --- aim: Pinkmane looks at the crosshair ---
-      const mx = mouse.x + s.camX;
-      const my = mouse.y + s.camY;
-      s.angle = Math.atan2(my - s.py, mx - s.px);
+      const aimStick = stick.aimOn && Math.hypot(stick.ax, stick.ay) > 0.25;
+      if (aimStick) {
+        let a = Math.atan2(stick.ay, stick.ax);
+        // aim help: snap to the demon closest to where the stick points
+        let bestDiff = AIM_HELP;
+        for (const e of s.enemies) {
+          if (e.spawnT > 0 || !e.los) continue;
+          const d = Math.hypot(e.x - s.px, e.y - s.py);
+          if (d > 220) continue;
+          const ea = Math.atan2(e.y - s.py, e.x - s.px);
+          const diff = Math.abs(Math.atan2(Math.sin(ea - a), Math.cos(ea - a)));
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            a = ea;
+          }
+        }
+        s.angle = a;
+        // the crosshair sits in front of Pinkmane, where the stick points
+        mouse.x = Math.max(0, Math.min(VW - 1, s.px - s.camX + Math.cos(a) * 45));
+        mouse.y = Math.max(0, Math.min(VH - 1, s.py - s.camY + Math.sin(a) * 45));
+      } else {
+        const mx = mouse.x + s.camX;
+        const my = mouse.y + s.camY;
+        s.angle = Math.atan2(my - s.py, mx - s.px);
+      }
 
       // --- shoot ---
       s.cd -= dt;
       s.recoil = Math.max(0, s.recoil - dt);
       s.muzzle = Math.max(0, s.muzzle - dt);
       s.hurt = Math.max(0, s.hurt - dt);
-      if (mouse.down && !s.needRelease && s.cd <= 0) shoot();
+      if ((mouse.down || aimStick) && !s.needRelease && s.cd <= 0) shoot();
 
       // --- bullets ---
       for (const b of s.bullets) {
@@ -1626,10 +1711,16 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         ctx.fillRect(0, 0, W, H);
         text(GAME_TITLE, W / 2, 14, RED, 24);
         text("KILL THE DEMONS", W / 2, 46, "#ffffff");
-        text("WSAD / ARROWS = MOVE", W / 2, 66, "#ff9a9a");
-        text("MOUSE = AIM  CLICK = SHOOT", W / 2, 78, "#ff9a9a");
-        text("1 / 2 / Q = WEAPON", W / 2, 90, "#ff9a9a");
-        if (Math.floor(clock * 2) % 2 === 0) text("CLICK TO START", W / 2, 110, YELLOW);
+        if (touchy) {
+          text("LEFT STICK = MOVE", W / 2, 66, "#ff9a9a");
+          text("RIGHT STICK = AIM + SHOOT", W / 2, 78, "#ff9a9a");
+          text("GUN = SWITCH WEAPON", W / 2, 90, "#ff9a9a");
+        } else {
+          text("WSAD / ARROWS = MOVE", W / 2, 66, "#ff9a9a");
+          text("MOUSE = AIM  CLICK = SHOOT", W / 2, 78, "#ff9a9a");
+          text("1 / 2 / Q = WEAPON  ESC = PAUSE", W / 2, 90, "#ff9a9a");
+        }
+        if (Math.floor(clock * 2) % 2 === 0) text(touchy ? "TAP TO START" : "CLICK TO START", W / 2, 110, YELLOW);
         if (best > 0) text(`BEST ${best}`, W / 2, 126, "#c08080");
       }
       if (s.mode === "dead") {
@@ -1641,10 +1732,18 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
           text(`SCORE ${s.score}`, W / 2, 54, YELLOW);
           text(s.newBest ? "NEW BEST!" : `BEST ${best}`, W / 2, 68, s.newBest ? PINK : "#c08080");
           text(`WAVE ${s.wave}   ${s.kills} KILLS`, W / 2, 82, "#ffffff");
-          if (s.t > 1 && Math.floor(clock * 2) % 2 === 0) text("CLICK = AGAIN", W / 2, 106, YELLOW);
+          if (s.t > 1 && Math.floor(clock * 2) % 2 === 0) text(touchy ? "TAP = AGAIN" : "CLICK = AGAIN", W / 2, 106, YELLOW);
         }
       }
-      drawCrosshair();
+      if (s.paused) {
+        ctx.fillStyle = "rgba(20,0,0,0.65)";
+        ctx.fillRect(0, 0, W, H);
+        text("PAUSED", W / 2, 30, RED, 24);
+        text(`WAVE ${s.wave}   SCORE ${s.score}`, W / 2, 66, "#ffffff");
+        if (Math.floor(clock * 2) % 2 === 0) text(touchy ? "TAP TO PLAY" : "ESC / CLICK = PLAY", W / 2, 90, YELLOW);
+        text(touchy ? "EXIT = MENU" : "BACKSPACE = MENU", W / 2, 110, "#c08080");
+      }
+      if (!s.paused) drawCrosshair();
     };
 
     let raf = 0;
@@ -1666,6 +1765,8 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
+      window.removeEventListener("pinkmane-hell-stick", onStick);
+      document.removeEventListener("visibilitychange", onHidden);
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", onMenu);
