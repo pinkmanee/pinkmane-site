@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { ScorePanel, type ScoreApi } from "./Scoreboard";
 
 // PINK JUNGLE: an endless 3-lane jungle runner. Pinkmane runs down an old mossy temple path
 // and BEARMANPIG (half bear, half pig, half man) chases him.
@@ -635,6 +636,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
   touchRef.current = touch;
   // a tap / click on the game picture, in game pixels (shop rows, pause menu, start screen)
   const tapRef = useRef<((x: number, y: number) => void) | null>(null);
+  const boardRef = useRef<ScoreApi | null>(null); // the online Top 10 box (Scoreboard.tsx), board id "jungle"
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
@@ -796,8 +798,10 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     const pause = { on: false, row: 0 };
     let pauseClock = 0;
 
+    let runId = 0; // goes up every run, so a late Top 10 box never opens in the middle of a new run
     const s = {
       mode: "ready" as Mode,
+      runT: 0, // seconds this run has lasted (the scoreboard checks the score is possible for that time)
       t: 0, // time in this mode
       dist: 0,
       speedMul: 1,
@@ -832,8 +836,11 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     };
 
     const reset = () => {
+      boardRef.current?.hide();
+      runId++;
       s.mode = "running";
       s.t = 0;
+      s.runT = 0;
       s.dist = 0;
       s.speedMul = 1;
       s.lane = 0;
@@ -978,6 +985,13 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           localStorage.setItem(BEST_KEY, String(best));
         } catch {}
       }
+      // ONLINE TOP 10: after the GOT YOU moment, the name box (good score) or the Top 10 pops up
+      const myRun = runId;
+      const score = s.score;
+      const runT = s.runT;
+      setTimeout(() => {
+        if (runId === myRun && s.mode !== "running") boardRef.current?.gameOver(score, runT);
+      }, 700);
     };
 
     // ---------- input ----------
@@ -1048,6 +1062,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
         return;
       }
       if (s.mode !== "running") {
+        if (boardRef.current?.busy()) return; // the Top 10 / name box is open: close it first (OK)
         // start / restart (after game over wait a moment so you don't skip the screen by accident)
         if (a === "go" || a === "jump") {
           if (s.mode === "caught" && s.t < 0.9) return;
@@ -1135,6 +1150,8 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
 
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return; // typing your name for the Top 10
       const k = e.key;
       // ESC (or the PAUSE button on phones) = pause / resume, only while running
       if (k === "Escape" || k === "p" || k === "P") {
@@ -1952,6 +1969,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     const step = (dt: number) => {
       clock += dt;
       s.t += dt;
+      if (s.mode === "running") s.runT += dt;
 
       // click wheel: every 35 degrees = one lane
       spinAcc += spinRef.current;
@@ -2315,6 +2333,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
   }, []);
 
   return (
+    <>
     <canvas
       ref={canvasRef}
       width={W}
@@ -2355,5 +2374,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
         cursor: "pointer",
       }}
     />
+    <ScorePanel game="jungle" title="PINK JUNGLE" apiRef={boardRef} fontFamily={fontFamily} accent="#3ee05a" />
+    </>
   );
 }

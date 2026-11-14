@@ -28,6 +28,10 @@ export const GAMES: Record<string, GameCfg> = {
   // around 525 a second, and WAX MODE (after 20k) doubles every gram, so it's 1100.
   // max went from 1 million to 5 million for the same reason: a long wax run can pass a million honestly.
   super: { key: "pinksuper:scores", rate: 1100, base: 500, max: 5000000 },
+  // PINK HELL: kills + wave bonuses. Late waves can average ~350 a second, so there's plenty of room.
+  hell: { key: "pinkhell:scores", rate: 800, base: 5000, max: 3000000 },
+  // PINK JUNGLE: meters run + 5 per gem. Top speed with BOOST is ~29 m/s, plus gems (2X GEMS doubles them).
+  jungle: { key: "pinkjungle:scores", rate: 200, base: 1000, max: 2000000 },
 };
 
 for (let n = 1; n <= LEVEL_COUNT; n++) {

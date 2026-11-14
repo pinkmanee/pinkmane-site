@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { ScorePanel, type ScoreApi } from "./Scoreboard";
 
 // PINK HELL: a top-down 2D shooter, a bit like the old 90s demon shooters.
 // Pinkmane is stuck in a hell dungeon and the demons come out of the glowing portals in waves.
@@ -18,6 +19,7 @@ import { useEffect, useRef } from "react";
 //   FIRE SKULL = small flying skull, dashes at you
 //   BEARMANPIG = the boss every 5 waves, a giant floating head that flies through walls
 // Dead demons sometimes drop SHELLS (yellow) or a MEDKIT (white with a red cross).
+// ONLINE TOP 10: when you die, a good score lets you type your name (see Scoreboard.tsx). Board id: "hell".
 
 type Props = {
   // Goes up by 1 every time the player presses OK / Enter / Space (= start)
@@ -352,6 +354,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
   const goRef = useRef<(() => void) | null>(null);
+  const boardRef = useRef<ScoreApi | null>(null); // the online Top 10 box (Scoreboard.tsx)
   const lastSignal = useRef(actionSignal);
 
   useEffect(() => {
@@ -617,6 +620,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       muzzle: 0,
       hurt: 0,
       lavaT: 0,
+      runT: 0, // seconds this run has lasted (the scoreboard checks the score is possible for that time)
       walk: 0,
       enemies: [] as Enemy[],
       bullets: [] as Bullet[],
@@ -688,7 +692,9 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       sfx.switch();
     };
     const go = () => {
-      if (s.mode === "ready" || (s.mode === "dead" && s.t > 1)) {
+      if (boardRef.current?.busy()) return; // the Top 10 / name box is still open
+      if (s.mode === "ready" || (s.mode === "dead" && s.t > 1.3)) {
+        boardRef.current?.hide();
         const wasDead = s.mode === "dead";
         s = fresh();
         if (wasDead) bakeMap(); // wash the blood away
@@ -715,6 +721,8 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       if (s.mode !== "play") go();
     };
     const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return; // typing your name for the Top 10
       const k = e.key.toLowerCase();
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)) e.preventDefault();
       if (e.repeat) return;
@@ -1005,6 +1013,13 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         s.t = 0;
         burst(s.px, s.py, 40, ["#c00000", "#ff2a2a", "#7a0000", "#d63cc8"], 70, 0.6, 2);
         sfx.dead();
+        const score = s.score;
+        const runT = s.runT;
+        const deadRun = s;
+        // after the YOU DIED moment (and only if you haven't started a new run meanwhile)
+        setTimeout(() => {
+          if (s === deadRun) boardRef.current?.gameOver(score, runT);
+        }, 1200);
         if (s.score > best) {
           best = s.score;
           s.newBest = true;
@@ -1058,6 +1073,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       s.pops = s.pops.filter((p) => p.life > 0);
 
       if (s.mode !== "play") return;
+      s.runT += dt;
 
       // weapon wheel on the handheld
       if (Math.abs(spinRef.current) > 40) {
@@ -1798,6 +1814,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
   }, [fontFamily, spinRef]);
 
   return (
+    <>
     <canvas
       ref={canvasRef}
       width={W}
@@ -1814,5 +1831,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         cursor: "none",
       }}
     />
+    <ScorePanel game="hell" title="PINK HELL" apiRef={boardRef} fontFamily={fontFamily} accent="#ff2a2a" />
+    </>
   );
 }
