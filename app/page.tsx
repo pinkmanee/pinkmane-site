@@ -3,25 +3,56 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Press_Start_2P } from "next/font/google";
-import JumpGame from "./components/JumpGame";
-import VortexGame from "./components/VortexGame";
-import SnakeGame from "./components/SnakeGame";
-import BirdGame from "./components/BirdGame";
-import HexGame from "./components/HexGame";
-import MazeGame from "./components/MazeGame";
-import SuperGame from "./components/SuperGame";
+import dynamic from "next/dynamic";
+import { Press_Start_2P, Silkscreen } from "next/font/google";
+// The games only download when someone actually opens one, so the iPod shows up much faster on the first visit
+const JumpGame = dynamic(() => import("./components/JumpGame"), { ssr: false });
+const VortexGame = dynamic(() => import("./components/VortexGame"), { ssr: false });
+const SnakeGame = dynamic(() => import("./components/SnakeGame"), { ssr: false });
+const BirdGame = dynamic(() => import("./components/BirdGame"), { ssr: false });
+const HexGame = dynamic(() => import("./components/HexGame"), { ssr: false });
+const MazeGame = dynamic(() => import("./components/MazeGame"), { ssr: false });
+const SuperGame = dynamic(() => import("./components/SuperGame"), { ssr: false });
+import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
+import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
   subsets: ["latin"],
 });
 
+// Small blocky font for the "CONTROL VOLUME HERE!" tip (pixel letters with a hard shadow, Minecraft style)
+const tipFont = Silkscreen({
+  weight: "400",
+  subsets: ["latin"],
+});
+
+// VOLUME TIP: after the iPod boots up, a little "CONTROL VOLUME HERE!" with an arrow points at the
+// volume controls for this many seconds, then fades away. It also goes away as soon as you touch the slider or mute.
+const VOLUME_TIP_SECONDS = 4;
+
+// The tip's little pixel arrow, pointing right at the volume controls (pink with a dark shadow, like the logo)
+const TIP_ARROW = ["1....", "11...", "111..", "1111.", "111..", "11...", "1...."];
+const TipArrow = () => {
+  const px: { x: number; y: number }[] = [];
+  TIP_ARROW.forEach((row, y) => row.split("").forEach((c, x) => c === "1" && px.push({ x, y })));
+  return (
+    <svg viewBox="0 0 6 8" className="vol-tip-arrow" shapeRendering="crispEdges" aria-hidden="true">
+      {px.map((p, i) => (
+        <rect key={`s${i}`} x={p.x + 1} y={p.y + 1} width={1.02} height={1.02} fill="#4a1447" />
+      ))}
+      {px.map((p, i) => (
+        <rect key={`p${i}`} x={p.x} y={p.y} width={1.02} height={1.02} fill="#d63cc8" />
+      ))}
+    </svg>
+  );
+};
+
 const GLYPH_IMAGES = ["/glyphs/heart.gif", "/glyphs/sparkle.gif"];
 
 // PINKMANE flying with a jetpack: made from the same pixels as the game character (pinkdude.png),
 // with a jetpack on his back. O / Y are the flame.
-// These fly across the background behind the handheld (Super Pinkmane / Pink Maze).
+// These fly across the background behind the handheld (Pinkmane Void / Pink Maze).
 const JET_DUDE = [
   ".............A.....A..........",
   ".......A.....AB...AB..........",
@@ -129,8 +160,9 @@ const ITEM_ICONS: Record<string, string> = {
   TOPSHELF: "/icons/topshelf.gif",
   Extras: "/icons/extras.gif",
   Games: "/icons/games.gif",
+  "Mini Games": "/icons/games.gif",
   "Pink Run": "/icons/pinkrun.gif",
-  "Super Pinkmane": "/icons/superpinkmane.gif",
+  "Pinkmane Void": "/icons/superpinkmane.gif",
   "Pink Hexagon": "/icons/pinkhex.gif",
   "Pink Maze": "/icons/pinkmaze.gif",
   "Pink Vortex": "/icons/pinkvortex.gif",
@@ -139,25 +171,64 @@ const ITEM_ICONS: Record<string, string> = {
   Back: "/icons/arrow.gif",
 };
 
-// Sync visual effects to your track's tempo
-const BPM = 140;
-const BEAT_SECONDS = 60 / BPM; // ~0.429s per beat
+// BEAT SYNC: everything that wiggles on the site moves to the song that's playing.
+// For each song, fill in:
+//   bpm    = the tempo from your project (use half, e.g. 70 instead of 140, if you want half-time bounce)
+//   offset = seconds from the start of the file to the first beat (0 if the song starts right on the beat)
+// Songs without a bpm use DEFAULT_BPM.
+const DEFAULT_BPM = 140;
+// If everything feels a tiny bit early or late on your speakers, change this (in seconds).
+// Bigger number = the visuals hit later. Try steps of 0.02. Bluetooth headphones often need about 0.15.
+const SYNC_NUDGE = 0;
+// BASS QUAKE slider: 0 = off, 10 = max. Visitors can change it, but it always starts here
+// every time the website is opened.
+const QUAKE_DEFAULT = 3;
+// The shaking border around the screen: how thick it is (in screen pixels, ~57 = about 1.5 cm)
+const EDGE_BAND_PX = 57;
+// How far the border shakes on an 808 at level 10 (in screen pixels)
+const EDGE_MAX_SHAKE_PX = 10;
 
 // Your songs. Files go in public/music/ named 01.mp3, 02.mp3 ...
-const TRACKS = [
-  { title: "pinkmane's random ass beat", file: "/sounds/song.mp3" },
-  { title: "wet socks (w/ o1m4de)", file: "/music/06.mp3" },
-  { title: "hurricane of blades", file: "/music/07.mp3" },
-  { title: "cat piss kenny", file: "/music/10.mp3" },
-  { title: "gaf (ft. TOMBFELL)", file: "/music/05.mp3" },
-  { title: "snehulienka", file: "/music/03.mp3" },
-  { title: "small pretty titties", file: "/music/01.mp3" },
-  { title: "vomit trap", file: "/music/08.mp3" },
-  { title: "gods psp (ft. TOMBFELL)", file: "/music/09.mp3" },
+// link: the SoundCloud page of that song. Clicking the "NOW PLAYING" text on the iPod opens it.
+//   Paste each song's link between the quotes, e.g. link: "https://soundcloud.com/pinkmanee/wet-socks"
+//   If a link is left empty (""), clicking searches SoundCloud for that song instead.
+const TRACKS: { title: string; file: string; bpm?: number; offset?: number; link?: string }[] = [
+  { title: "pinkmane's random ass beat", file: "/sounds/song.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
+  { title: "wet socks (w/ o1m4de)", file: "/music/06.mp3", bpm: 82, offset: 0, link: "https://soundcloud.com/pinkmanee/wet-socks" },
+  { title: "hurricane of blades", file: "/music/07.mp3", bpm: 77, offset: 0, link: "https://soundcloud.com/pinkmanee/hurricane-of-blades" },
+  { title: "cat piss kenny", file: "/music/10.mp3", bpm: 142, offset: 0, link: "https://soundcloud.com/pinkmanee/cat-piss-kenny" },
+  { title: "gaf (ft. TOMBFELL)", file: "/music/05.mp3", bpm: 138, offset: 0, link: "https://soundcloud.com/pinkmanee/gaf" },
+  { title: "snehulienka", file: "/music/03.mp3", bpm: 140, offset: 0, link: "" },
+  { title: "small pretty titties", file: "/music/01.mp3", bpm: 140, offset: 0, link: "" },
+  { title: "vomit trap", file: "/music/08.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee/vomit-trap" },
+  { title: "gods psp (ft. TOMBFELL)", file: "/music/09.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee/gods-psp" },
 ];
 
-// How many menu rows fit on the screen at once
+// PINKMANE VOID beats. These 5 join your songs in the music player ONLY while you're playing PINKMANE VOID on the handheld (PSP);
+// they leave the player again when you go back to the menu. Put the mp3 files in public/music/ with exactly these names
+// (until a file is there, that beat is simply skipped). Rename them, set the real bpm, add a SoundCloud link whenever you like.
+const VOID_BEATS: typeof TRACKS = [
+  { title: "pinkmane's random ass beat 2", file: "/music/beat-2.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
+  { title: "pinkmane's random ass beat 3", file: "/music/beat-3.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
+  { title: "pinkmane's random ass beat 4", file: "/music/beat-4.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
+  { title: "pinkmane's random ass beat 5", file: "/music/beat-5.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
+  { title: "pinkmane's random ass beat 6", file: "/music/beat-6.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
+];
+
+// Where clicking the now-playing text goes: the song's own link, or a SoundCloud search for it
+function trackLink(track: { title: string; link?: string }) {
+  if (track.link) return track.link;
+  const name = track.title.replace(/\(.*?\)/g, "").trim(); // drop "(ft. ...)" bits for a cleaner search
+  return `https://soundcloud.com/search/sounds?q=${encodeURIComponent(`pinkmane ${name}`)}`;
+}
+
+// PHONES: the round pad under your left thumb, and which key each of its arrows holds down
+const TP_KEYS = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight" } as const;
+
+// How many menu rows fit on the iPod screen at once (on a computer)
 const VISIBLE_ROWS = 5;
+// ...and on a phone, where the iPod screen is much smaller: fewer rows, so each one is big enough to read
+const PHONE_ROWS = 4;
 
 // SEO: official profile links, readable by search engines
 const ARTIST_LINKS = [
@@ -177,7 +248,7 @@ const STRUCTURED_DATA = {
   url: "https://pinkmane.site",
   genre: ["Cloud rap", "Trap"],
   description:
-    "PINKMANE is a cloud rap and trap artist. Music on Spotify, Apple Music, SoundCloud and Bandcamp.",
+    "PINKMANE is an artist and producer who codes and makes music in their free time. Cloud rap and trap, made mostly with Serum 2. Music on Spotify, Apple Music, SoundCloud and Bandcamp.",
   sameAs: ARTIST_LINKS.map((link) => link.url),
 };
 
@@ -354,6 +425,234 @@ const DpadArrow = ({ dir }: { dir: "up" | "down" | "left" | "right" }) => {
 };
 
 // Small dancing bars next to the mute button, pulsing on the beat
+// WIGGLY BACKGROUND: the background picture gently wiggles like heat haze / water
+// (the same wiggle as the covers in Pinkmane Void), and a ~1.5 cm border around the
+// edge of the screen shakes when an 808 hits. The middle never shakes.
+// If a browser can't do it, the normal still picture just shows instead.
+// WIGGLE_PX: how far the wiggle moves the picture sideways (0 = no wiggle)
+const WIGGLE_PX = 5;
+// BACKGROUND MODES: the 3 pixel buttons above the iPod swap the page background.
+// Put your pictures in /public/bg/ named mode1.png, mode2.png, mode3.png.
+// If one is missing, the normal topshelf.png shows instead.
+// focus: which part of the picture stays on screen when it doesn't fit
+//   0 = keep the top, 0.5 = keep the middle, 1 = keep the bottom
+// screen: the iPod screen colour that goes with that background
+//   (mode 1 light pink, mode 2 light green, mode 3 light red)
+const BG_MODES = [
+  { label: "MODE 1", sources: ["/bg/mode1.png", "/topshelf.png"], focus: 0.15, screen: "#f6d3ee", screenRgb: "246, 211, 238" },
+  { label: "MODE 2", sources: ["/bg/mode2.png", "/topshelf.png"], focus: 0.15, screen: "#d7efbc", screenRgb: "215, 239, 188" },
+  { label: "MODE 3", sources: ["/bg/mode3.png", "/topshelf.png"], focus: 0.15, screen: "#f8d0ca", screenRgb: "248, 208, 202" },
+];
+// HANDHELD (PSP) BACKGROUND MODES: 4 pixel buttons above the handheld.
+// MODE 1 is the one you had before (handheld-bg.png, or .jpg, or the normal one, whichever exists first).
+// MODE 2-4 are the same 3 pictures as the iPod modes (/public/bg/mode1.png, mode2.png, mode3.png).
+// focus works the same as the iPod ones: 0 = keep the top, 0.5 = keep the middle.
+// glow: the colour of the glow around the handheld (and its beat light) in that mode, as "red, green, blue".
+//   MODE 1 keeps the pink it always had. MODE 2-4 use the same colours as the iPod screen in that
+//   background (light pink, light green, light red).
+const HH_BG_MODES = [
+  { label: "MODE 1", sources: ["/handheld-bg.png", "/handheld-bg.jpg", "/topshelf.png"], focus: 0.5, glow: "214, 60, 200" },
+  { label: "MODE 2", sources: ["/bg/mode1.png", "/topshelf.png"], focus: 0.15, glow: "246, 211, 238" },
+  { label: "MODE 3", sources: ["/bg/mode2.png", "/topshelf.png"], focus: 0.15, glow: "215, 239, 188" },
+  { label: "MODE 4", sources: ["/bg/mode3.png", "/topshelf.png"], focus: 0.15, glow: "248, 208, 202" },
+];
+
+// live = the music is really playing right now (not paused or muted): the game's painted background only wiggles then
+type BeatState = { kick: number; sway: number; bass: number; quake: number; live: boolean };
+
+const LIQUID_VERT = `
+attribute vec2 pos;
+varying vec2 uv;
+void main() {
+  uv = pos * 0.5 + 0.5;
+  uv.y = 1.0 - uv.y;
+  gl_Position = vec4(pos, 0.0, 1.0);
+}`;
+
+const LIQUID_FRAG = `
+precision mediump float;
+varying vec2 uv;
+uniform sampler2D img;
+uniform vec2 res;
+uniform vec2 imgSize;
+uniform float t;
+uniform float pxScale;
+uniform float wiggle;
+uniform float band;
+uniform vec2 shake;
+uniform float focusY;
+void main() {
+  // work in screen pixels
+  vec2 px = uv * res / pxScale;
+  vec2 size = res / pxScale;
+
+  // wiggle: every row slides left/right a little on a slow wave (like the game covers)
+  vec2 off = vec2(sin(t * 1.6 + px.y * 0.023) * wiggle, 0.0);
+
+  // 808 border: only a band around the edge of the screen shakes, fading out towards the middle
+  float edgeDist = min(min(px.x, size.x - px.x), min(px.y, size.y - px.y));
+  float mask = 1.0 - smoothstep(band * 0.6, band, edgeDist);
+  off += shake * mask;
+
+  vec2 p = uv + off / size;
+  // zoom in a hair so the wiggle never shows the picture's edge
+  float pad = 1.0 - 2.0 * (wiggle + 12.0) / size.x;
+  p = (p - 0.5) * pad + 0.5;
+
+  // fit the picture to fill the screen (like background-size: cover)
+  float rs = res.x / res.y;
+  float ri = imgSize.x / imgSize.y;
+  vec2 sc = rs > ri ? vec2(1.0, ri / rs) : vec2(rs / ri, 1.0);
+  vec2 tc = (p - 0.5) * sc + 0.5;
+  // when the top/bottom gets cut off, slide towards the part we want to keep (focusY: 0 = top)
+  tc.y += (focusY - 0.5) * (1.0 - sc.y);
+  gl_FragColor = vec4(texture2D(img, tc).rgb, 1.0);
+}`;
+
+function LiquidBg({
+  sources,
+  beat,
+  active,
+  focus = 0.5,
+}: {
+  sources: string[];
+  beat: { current: BeatState };
+  active: boolean;
+  focus?: number;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const activeRef = useRef(active);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // A brand new canvas every time, so a closed one is never reused
+    // (this is why it didn't show up while testing locally before)
+    const canvas = document.createElement("canvas");
+    canvas.className = "liquid-canvas";
+    wrap.appendChild(canvas);
+    const gl = canvas.getContext("webgl", { alpha: false, antialias: false });
+    if (!gl) {
+      canvas.remove();
+      return;
+    }
+
+    const compile = (type: number, code: string) => {
+      const sh = gl.createShader(type);
+      if (!sh) return null;
+      gl.shaderSource(sh, code);
+      gl.compileShader(sh);
+      return gl.getShaderParameter(sh, gl.COMPILE_STATUS) ? sh : null;
+    };
+    const vs = compile(gl.VERTEX_SHADER, LIQUID_VERT);
+    const fs = compile(gl.FRAGMENT_SHADER, LIQUID_FRAG);
+    const prog = gl.createProgram();
+    if (!vs || !fs || !prog) return;
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return;
+    gl.useProgram(prog);
+
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const posLoc = gl.getAttribLocation(prog, "pos");
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    const u = (name: string) => gl.getUniformLocation(prog, name);
+    const uRes = u("res");
+    const uImg = u("imgSize");
+    const uT = u("t");
+    const uScale = u("pxScale");
+    const uWiggle = u("wiggle");
+    const uBand = u("band");
+    const uShake = u("shake");
+    gl.uniform1f(u("focusY"), focus);
+
+    let cancelled = false;
+    let frame = 0;
+
+    const start = (image: HTMLImageElement) => {
+      // Picture too big for this device's graphics chip: keep the normal still picture
+      const maxSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+      if (image.naturalWidth > maxSize || image.naturalHeight > maxSize) return;
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
+      if (gl.getError() !== gl.NO_ERROR) return;
+      gl.uniform2f(uImg, image.naturalWidth, image.naturalHeight);
+
+      let clock = 0;
+      let prev = performance.now();
+      let shown = false;
+      const draw = (now: number) => {
+        frame = requestAnimationFrame(draw);
+        const dt = Math.min(0.1, (now - prev) / 1000);
+        prev = now;
+        if (!activeRef.current) return; // hidden behind something else: don't waste battery
+        const b = beat.current;
+        clock += dt;
+        // keep it sharp but light: never draw more pixels than the screen shows
+        const w = Math.min(1600, Math.round(canvas.clientWidth * Math.min(1, window.devicePixelRatio || 1)));
+        const h = Math.round((w * canvas.clientHeight) / Math.max(1, canvas.clientWidth));
+        if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.uniform2f(uRes, canvas.width, canvas.height);
+        gl.uniform1f(uT, clock);
+        gl.uniform1f(uScale, canvas.width / Math.max(1, canvas.clientWidth));
+        gl.uniform1f(uWiggle, WIGGLE_PX);
+        gl.uniform1f(uBand, EDGE_BAND_PX);
+        // 808 shake: a new random nudge every frame while the hit lasts
+        const amount = b.bass * b.quake * EDGE_MAX_SHAKE_PX;
+        gl.uniform2f(uShake, (Math.random() * 2 - 1) * amount, (Math.random() * 2 - 1) * amount);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        if (!shown) {
+          shown = true;
+          setReady(true);
+        }
+      };
+      frame = requestAnimationFrame(draw);
+    };
+
+    // Try each picture in order until one loads
+    const load = (i: number) => {
+      if (cancelled || i >= sources.length) return;
+      // window.Image = the browser picture loader (plain "Image" here means the Next.js <Image> component)
+      const image = new window.Image();
+      image.onload = () => {
+        if (!cancelled) start(image);
+      };
+      image.onerror = () => load(i + 1);
+      image.src = sources[i];
+    };
+    load(0);
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      canvas.remove();
+      setReady(false);
+    };
+  }, [sources, beat, focus]);
+
+  return <div ref={wrapRef} className={`liquid-bg ${ready ? "liquid-on" : ""}`} aria-hidden="true" />;
+}
+
 const VuBars = ({ active }: { active: boolean }) => (
   <div className="vu-bars">
     {[0, 1, 2, 3].map((i) => (
@@ -426,10 +725,18 @@ export default function Home() {
   const [volume, setVolume] = useState(0.5);
   const [trackIndex, setTrackIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(true);
+  // A song from a game level (Pinkmane Void Level 3) is playing: the music buttons control that instead
+  type GameSong = { title: string; artist: string; paused: boolean };
+  const [gameSong, setGameSong] = useState<GameSong | null>(null);
+  const gameSongRef = useRef<GameSong | null>(null);
+  const gameSongShownRef = useRef<string | null>(null); // last level song shown in the purple box
   const trackRef = useRef(0);
   const errorCountRef = useRef(0);
 
   const [showBoot, setShowBoot] = useState(true);
+  // The "CONTROL VOLUME HERE!" tip: showing, and fading out
+  const [volTip, setVolTip] = useState(false);
+  const [volTipFade, setVolTipFade] = useState(false);
   const [bootFadeOut, setBootFadeOut] = useState(false);
   const [exiting, setExiting] = useState(false);
 
@@ -439,15 +746,95 @@ export default function Home() {
   // Which game is open, and how far the click wheel was turned (for Pink Vortex)
   const [activeGame, setActiveGame] = useState<"pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super">("pinkrun");
   const spinRef = useRef(0);
-  // Pink Maze and Super Pinkmane play on a wide handheld instead of the iPod
+  // Pink Maze and Pinkmane Void play on a wide handheld instead of the iPod
   const handheld = playing && (activeGame === "maze" || activeGame === "super");
+  // The song list. In PINKMANE VOID on the handheld the VOID_BEATS are added after your songs (your songs keep their places in the list).
+  const inVoid = handheld && activeGame === "super";
+  const tracks = inVoid ? [...TRACKS, ...VOID_BEATS] : TRACKS;
+  const tracksRef = useRef(tracks);
+  tracksRef.current = tracks;
+  // PHONES + TABLETS: on a phone or tablet, Pink Maze and Pinkmane Void get their own full-screen
+  // layout with big thumb buttons instead of the drawn handheld.
+  // Computers never get it, even laptops with a touch screen (they keep the drawn handheld + keyboard).
+  // To look at it on your computer, open the site with ?touch=1 at the end: http://localhost:3000/?touch=1
+  const [isTouch, setIsTouch] = useState(false);
+  const [padDir, setPadDir] = useState<string | null>(null); // which way the round pad is pushed (lights up its arrow)
+  const [tpAOn, setTpAOn] = useState(false);
+  const [tpBOn, setTpBOn] = useState(false);
+  const fsc = useFullscreen(); // FULL SCREEN (see components/Fullscreen.tsx)
+  // True while the phone game covers the screen. The iPod behind it can't be seen then, so its beat-driven visuals aren't redrawn
+  // (that was wasted work on a phone, every frame).
+  const phoneGameRef = useRef(false);
+  phoneGameRef.current = handheld && isTouch;
+  // The phone flight recorder (components/Trace.tsx): on for phones and tablets only. Add ?trace=1 to the address to see its report on screen.
+  const showTrace = useTraceSetup(isTouch);
+  useEffect(() => {
+    trace(playing ? "playing" : "stopped", activeGame);
+  }, [playing, activeGame]);
+  useEffect(() => {
+    trace("layout", `touch=${isTouch} handheld=${handheld}`);
+  }, [isTouch, handheld]);
+  // The page's own heartbeat for the flight recorder: how long it's been open and what the music is doing
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!traceActive()) return;
+      const a = songRef.current;
+      writePageBeat({
+        up: Math.round(performance.now() / 1000),
+        song: trackRef.current,
+        pos: a ? Math.round(a.currentTime) : -1,
+        dur: a && Number.isFinite(a.duration) ? Math.round(a.duration) : -1,
+        paused: a ? a.paused : true,
+        muted: a ? a.muted : false,
+        where: playing ? `playing ${activeGame}` : "menu",
+      });
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [playing, activeGame]);
+  useEffect(() => {
+    const forced = new URLSearchParams(window.location.search).get("touch") !== null;
+    const mq = window.matchMedia("(pointer: coarse)");
+    // Is this really a phone or tablet? (iPads call themselves a Mac, but a Mac with a touch screen is an iPad)
+    const ua = navigator.userAgent;
+    const phoneOrTablet =
+      /Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+    const update = () => setIsTouch(forced || (mq.matches && phoneOrTablet));
+    update();
+    mq.addEventListener?.("change", update);
+    return () => mq.removeEventListener?.("change", update);
+  }, []);
   const [handheldBoot, setHandheldBoot] = useState(false);
+  // "CONTROL W THESE!" arrows pointing at the key legend, for 5 seconds after Pinkmane Void starts
+  const [keyTip, setKeyTip] = useState(false);
+  // Which background mode is picked (0, 1 or 2), remembered for next visit
+  const [bgMode, setBgMode] = useState(0);
+  // Same thing for the handheld (PSP) view (0-3), remembered separately
+  const [hhBgMode, setHhBgMode] = useState(0);
+
+  // TWITCH MODE: only shows on your own computer (localhost), never on the real site.
+  // Rate the songs people send you while you play: MIX and OVERALL VIBE from 0 to 100, and a replay-able tick.
+  const [twitchMode, setTwitchMode] = useState(false);
+  const [twMix, setTwMix] = useState(0);
+  const [twVibe, setTwVibe] = useState(0);
+  const [twReplay, setTwReplay] = useState(false);
+  useEffect(() => {
+    const h = window.location.hostname;
+    setTwitchMode(h === "localhost" || h === "127.0.0.1" || h === "[::1]" || /^(192\.168\.|10\.)/.test(h));
+  }, []);
 
   // Glitch flicker on menu change
   const [glitch, setGlitch] = useState(false);
   const isFirstRender = useRef(true);
 
   const songRef = useRef<HTMLAudioElement | null>(null);
+  // The whole page; the beat clock writes the beat values onto it
+  const mainRef = useRef<HTMLElement>(null);
+  // The beat numbers, shared with the liquid background
+  const beatRef = useRef<BeatState>({ kick: 0, sway: 0, bass: 0, quake: QUAKE_DEFAULT / 10, live: false });
+  // BASS QUAKE level (0-10) from the slider, and when it was last moved (for a test shake)
+  const [quake, setQuake] = useState(QUAKE_DEFAULT);
+  const quakeRef = useRef(QUAKE_DEFAULT);
+  const quakeTestRef = useRef(-10000);
   const scrollSoundRef = useRef<HTMLAudioElement | null>(null);
   const selectSoundRef = useRef<HTMLAudioElement | null>(null);
   const hasStartedSong = useRef(false);
@@ -462,8 +849,9 @@ export default function Home() {
     music: ["SoundCloud", "Spotify", "Apple Music", "Bandcamp", "Back"],
     socials: ["Instagram", "Twitch", "Releases", "Back"],
     releases: ["TOPSHELF", "Back"],
-    games: [
-      "Super Pinkmane",
+    // Games: the main game first, the rest live one step deeper in Mini Games
+    games: ["Pinkmane Void", "Mini Games", "Back"],
+    minigames: [
       "Pink Hexagon",
       "Pink Maze",
       "Pink Vortex",
@@ -477,16 +865,35 @@ export default function Home() {
   const items = menus[menu as keyof typeof menus];
 
   // Which part of a long menu is visible (keeps the selected row on screen)
-  const listStart = Math.max(0, Math.min(selected - 2, items.length - VISIBLE_ROWS));
-  const visibleItems = items.slice(listStart, listStart + VISIBLE_ROWS);
+  // (phones show PHONE_ROWS rows at a time, computers VISIBLE_ROWS)
+  const [visibleRows, setVisibleRows] = useState(VISIBLE_ROWS);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 480px)");
+    const update = () => setVisibleRows(mq.matches ? PHONE_ROWS : VISIBLE_ROWS);
+    update();
+    mq.addEventListener?.("change", update);
+    return () => mq.removeEventListener?.("change", update);
+  }, []);
+  const listStart = Math.max(0, Math.min(selected - 2, items.length - visibleRows));
+  const visibleItems = items.slice(listStart, listStart + visibleRows);
+
+  // The small label next to a menu row (null = no label)
+  const rowTag = (item: string) => {
+    if (item === "Pinkmane Void") return "[ MAIN GAME ]";
+    if (item === "Mini Games") return `[${menus.minigames.length - 1} games]`;
+    if (menu === "minigames" && item !== "Back") return "[mini game]";
+    return null;
+  };
 
   const loadAndPlay = (i: number) => {
     const audio = songRef.current;
     if (!audio) return;
-    const idx = (i + TRACKS.length) % TRACKS.length;
+    const list = tracksRef.current;
+    const idx = (i + list.length) % list.length;
+    trace("song", `#${idx} ${list[idx].file}`);
     trackRef.current = idx;
     setTrackIndex(idx);
-    audio.src = TRACKS[idx].file;
+    audio.src = list[idx].file;
     audio
       .play()
       .then(() => {
@@ -495,9 +902,34 @@ export default function Home() {
       .catch(() => {});
   };
 
-  const nextTrack = () => loadAndPlay(trackRef.current + 1);
+  // Leaving PINKMANE VOID: the beats leave the player too. If one is on, go back to your first song (and keep it paused if it was paused).
+  useEffect(() => {
+    if (inVoid || trackRef.current < TRACKS.length) return;
+    const audio = songRef.current;
+    if (audio && !audio.paused) {
+      loadAndPlay(0);
+    } else {
+      trackRef.current = 0;
+      setTrackIndex(0);
+      if (audio) audio.src = TRACKS[0].file;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inVoid]);
+
+  // Sends a music button press to the game (when a level song is playing)
+  const gameMusic = (cmd: "next" | "prev" | "toggle") => {
+    if (!gameSongRef.current) return false;
+    window.dispatchEvent(new CustomEvent("pinkmane-level-control", { detail: cmd }));
+    return true;
+  };
+
+  const nextTrack = () => {
+    if (gameMusic("next")) return;
+    loadAndPlay(trackRef.current + 1);
+  };
 
   const prevTrack = () => {
+    if (gameMusic("prev")) return;
     const audio = songRef.current;
     // Like a real iPod: restart the song if it's been playing a few seconds
     if (audio && audio.currentTime > 3) {
@@ -508,6 +940,7 @@ export default function Home() {
   };
 
   const togglePlay = () => {
+    if (gameMusic("toggle")) return;
     const audio = songRef.current;
     if (!audio) return;
     if (audio.paused) {
@@ -522,24 +955,58 @@ export default function Home() {
     }
   };
 
-  // Super Pinkmane asks the page to pause your music while the secret Stutters track plays, then resume it
+  // Pinkmane Void asks the page to pause your music while the secret Stutters track plays, then resume it
   const pausedForGameRef = useRef(false);
+  // true from the game's "pause" until its "resume" (a level with its own songs, the secret track...):
+  // your music must not start by itself during that time
+  const gameHoldRef = useRef(false);
   useEffect(() => {
     const onGameMusic = (e: Event) => {
       const audio = songRef.current;
       const what = (e as CustomEvent<string>).detail;
       if (what === "pause") {
+        gameHoldRef.current = true;
         if (audio && !audio.paused) {
           audio.pause();
           pausedForGameRef.current = true;
         }
       } else if (what === "resume") {
-        if (audio && pausedForGameRef.current) audio.play().catch(() => {});
+        gameHoldRef.current = false;
+        if (audio && pausedForGameRef.current) {
+          audio
+            .play()
+            .then(() => {
+              hasStartedSong.current = true;
+            })
+            .catch(() => {});
+        }
         pausedForGameRef.current = false;
       }
     };
     window.addEventListener("pinkmane-music", onGameMusic);
     return () => window.removeEventListener("pinkmane-music", onGameMusic);
+  }, []);
+
+  // The game tells us which level song is on (or null when none): shown on the ticker + handheld
+  useEffect(() => {
+    const onLevelSong = (e: Event) => {
+      const song = (e as CustomEvent<GameSong | null>).detail;
+      const wasOff = !gameSongRef.current;
+      gameSongRef.current = song;
+      setGameSong(song);
+      // a new level song started (or the level just began): show its name in the purple box for 3.5s
+      if (!song) gameSongShownRef.current = null;
+      else if (!song.paused && song.title !== gameSongShownRef.current) {
+        gameSongShownRef.current = song.title;
+        showOsd({ kind: "text", value: 0, text: `♪ ${song.title}` }, 3500);
+      }
+      // first time a level song shows up: give it your volume
+      if (song && wasOff) {
+        window.dispatchEvent(new CustomEvent("pinkmane-level-control", { detail: { volume: songRef.current?.volume ?? 0.5 } }));
+      }
+    };
+    window.addEventListener("pinkmane-level-song", onLevelSong);
+    return () => window.removeEventListener("pinkmane-level-song", onLevelSong);
   }, []);
 
   const playScrollSound = () => {
@@ -557,26 +1024,39 @@ export default function Home() {
   };
 
   const goUp = () => {
-    if (playing) return;
+    if (playing || exiting) return;
     playScrollSound();
     setSelected((prev) => (prev === 0 ? items.length - 1 : prev - 1));
   };
 
   const goDown = () => {
-    if (playing) return;
+    if (playing || exiting) return;
     playScrollSound();
     setSelected((prev) => (prev + 1) % items.length);
   };
 
   const goBack = () => {
+    if (exiting) return; // already powering off
     playSelectSound();
+    trace("goBack", `playing=${playing} menu=${menu}`);
     if (playing) {
       setPlaying(false);
-      setMenu("games");
-      setSelected({ super: 0, hex: 1, maze: 2, vortex: 3, snake: 4, bird: 5, pinkrun: 6 }[activeGame]);
+      if (activeGame === "super") {
+        // Pinkmane Void is the first row in Games
+        setMenu("games");
+        setSelected(0);
+      } else {
+        setMenu("minigames");
+        setSelected({ hex: 0, maze: 1, vortex: 2, snake: 3, bird: 4, pinkrun: 5 }[activeGame]);
+      }
       return;
     }
-    // Games lives on the main menu now; Releases lives inside Socials
+    // Mini Games lives inside Games; Games lives on the main menu; Releases lives inside Socials
+    if (menu === "minigames") {
+      setMenu("games");
+      setSelected(1);
+      return;
+    }
     if (menu === "games") {
       setMenu("main");
       setSelected(3);
@@ -592,6 +1072,7 @@ export default function Home() {
   };
 
   const navigateToShop = () => {
+    if (exiting) return; // already on the way, don't start a second trip
     playSelectSound();
     setExiting(true);
     setTimeout(() => {
@@ -599,14 +1080,16 @@ export default function Home() {
     }, 3000);
   };
 
-  const selectItem = () => {
+  // pick = which row to open (when a row is tapped on a phone). Without it: the highlighted row.
+  const selectItem = (pick?: unknown) => {
+    if (exiting) return; // powering off: ignore presses
     // Inside the game, OK means jump
     if (playing) {
       setJumpSignal((n) => n + 1);
       return;
     }
 
-    const item = items[selected];
+    const item = items[typeof pick === "number" ? pick : selected];
 
     if (menu === "main" && item === "Merch") {
       navigateToShop();
@@ -671,6 +1154,19 @@ export default function Home() {
     }
 
     if (menu === "games") {
+      if (item === "Pinkmane Void") {
+        spinRef.current = 0;
+        setActiveGame("super");
+        setPlaying(true);
+      }
+      if (item === "Mini Games") {
+        setMenu("minigames");
+        setSelected(0);
+      }
+      if (item === "Back") goBack();
+    }
+
+    if (menu === "minigames") {
       if (item === "Pink Run") {
         setActiveGame("pinkrun");
         setPlaying(true);
@@ -699,16 +1195,46 @@ export default function Home() {
         setActiveGame("maze");
         setPlaying(true);
       }
-      if (item === "Super Pinkmane") {
-        spinRef.current = 0;
-        setActiveGame("super");
-        setPlaying(true);
-      }
       if (item === "Back") goBack();
     }
   };
 
+  // ---------- PHONES: the iPod screen itself works by touch ----------
+  // Tap a menu row = open it (the same as highlighting it and pressing OK).
+  // Swipe up / down on the screen = move through the menu (the same as turning the wheel).
+  // Only on touch screens; on a computer the screen doesn't react to clicks, like before.
+  const SWIPE_STEP = 24; // how far your finger has to slide to move one row (bigger = slower)
+  const swipeRef = useRef({ y: 0, acc: 0, moved: false, on: false });
+  const swipeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    swipeRef.current = { y: e.clientY, acc: 0, moved: false, on: true };
+  };
+  const swipeMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const sw = swipeRef.current;
+    if (!sw.on) return;
+    sw.acc += e.clientY - sw.y;
+    sw.y = e.clientY;
+    while (sw.acc <= -SWIPE_STEP) {
+      goDown(); // finger slides up = further down the menu
+      sw.acc += SWIPE_STEP;
+      sw.moved = true;
+    }
+    while (sw.acc >= SWIPE_STEP) {
+      goUp();
+      sw.acc -= SWIPE_STEP;
+      sw.moved = true;
+    }
+  };
+  const swipeEnd = () => {
+    swipeRef.current.on = false;
+  };
+  const tapRow = (index: number) => {
+    if (swipeRef.current.moved) return; // that was a swipe, not a tap
+    setSelected(index);
+    selectItem(index);
+  };
+
   const toggleMute = () => {
+    setVolTipFade(true); // they found it: hide the volume tip
     setIsMuted((prev) => {
       const next = !prev;
       if (songRef.current) {
@@ -727,6 +1253,21 @@ export default function Home() {
       clearTimeout(removeTimer);
     };
   }, []);
+
+  // Show the volume tip once the boot screen is gone, then fade it out after VOLUME_TIP_SECONDS
+  useEffect(() => {
+    if (showBoot) return;
+    setVolTip(true);
+    const fade = setTimeout(() => setVolTipFade(true), VOLUME_TIP_SECONDS * 1000);
+    return () => clearTimeout(fade);
+  }, [showBoot]);
+
+  // Fully remove it once it has faded
+  useEffect(() => {
+    if (!volTipFade) return;
+    const t = setTimeout(() => setVolTip(false), 500);
+    return () => clearTimeout(t);
+  }, [volTipFade]);
 
   // Glitch flicker whenever the menu screen changes
   useEffect(() => {
@@ -780,8 +1321,14 @@ export default function Home() {
       }
       if (e.key === "ArrowUp") goUp();
       if (e.key === "ArrowDown") goDown();
+      // W / S move up and down in the menus too (in the games they do their own thing)
+      if (!playing && (e.key === "w" || e.key === "W")) goUp();
+      if (!playing && (e.key === "s" || e.key === "S")) goDown();
       if (e.key === "Enter") selectItem();
-      if (e.key === "Backspace") goBack();
+      if (e.key === "Backspace") {
+        trace("key", `Backspace trusted=${e.isTrusted}`); // trusted=false means the game sent it (its HOME choice), not a real key
+        goBack();
+      }
     };
 
     const handleWheel = (e: WheelEvent) => {
@@ -828,6 +1375,208 @@ export default function Home() {
     setGlyphs(generated);
   }, []);
 
+  // BEAT CLOCK: about 60 times a second, reads exactly where the song is and turns that into
+  // numbers the CSS uses to move things:
+  //   --kick  jumps to 1 on every beat, then drops back to 0
+  //   --hat   same, but twice per beat (8th notes)
+  //   --sway  swings from 1 to -1 and back, landing on the beats (for side-to-side / up-down wiggles)
+  //   bass    jumps up when the bass actually hits in the song (the browser listens to the low end),
+  //           which makes the border around the screen shake
+  // When the music is paused or muted, things breathe slowly instead.
+  // BASS QUAKE always starts at QUAKE_DEFAULT (3) when the website opens, so nothing is loaded here
+
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let frame = 0;
+    let prev = performance.now();
+    let lastAudioTime = -1;
+    let lastAudioAt = 0;
+    let kick = 0;
+    let hat = 0;
+    let sway = 0;
+    // Smoke puffs: --phase goes 0 -> 1 during each beat (0 = right on the beat)
+    let smoke = 0;
+    const shown: Record<string, string> = {};
+
+    // Bass listener. It only switches on once the browser allows sound, so the music never goes quiet.
+    // If anything about it fails, the background just trembles on the beat instead.
+    let ctx: AudioContext | null = null;
+    let analyser: AnalyserNode | null = null;
+    let bins = new Uint8Array(0);
+    let hookedTo: HTMLAudioElement | null = null;
+    let hooking = false;
+    let giveUp = false;
+    let lastTry = -10000;
+    let bass = 0;
+    // Recent bass loudness, so a hit = "much louder than a split second ago"
+    const recent: { at: number; level: number }[] = [];
+    // Hits wait here until the moment you actually hear them (speakers lag behind a bit)
+    const waiting: { at: number; strength: number }[] = [];
+    const hookUpBass = async (audio: HTMLAudioElement) => {
+      hooking = true;
+      try {
+        const AC =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!AC) {
+          giveUp = true;
+          return;
+        }
+        if (!ctx) ctx = new AC();
+        if (ctx.state !== "running") await ctx.resume();
+        // Browser isn't allowing sound yet: don't touch the song, try again in a bit
+        if (ctx.state !== "running" || hookedTo) return;
+        const source = ctx.createMediaElementSource(audio);
+        const node = ctx.createAnalyser();
+        node.fftSize = 1024;
+        node.smoothingTimeConstant = 0;
+        source.connect(node);
+        node.connect(ctx.destination);
+        analyser = node;
+        bins = new Uint8Array(node.frequencyBinCount);
+        hookedTo = audio;
+        trace("bass-hook", "ok");
+      } catch {
+        trace("bass-hook", "failed");
+        giveUp = true;
+      } finally {
+        hooking = false;
+      }
+    };
+
+    // How loud the 808 range (about 30-100 Hz) is right now, 0 to 1
+    const bassLevel = () => {
+      if (!analyser || !ctx) return 0;
+      analyser.getByteFrequencyData(bins);
+      const hz = ctx.sampleRate / analyser.fftSize;
+      const lo = Math.max(1, Math.floor(30 / hz));
+      const hi = Math.max(lo, Math.floor(100 / hz));
+      let sum = 0;
+      for (let i = lo; i <= hi; i++) sum += bins[i];
+      return sum / ((hi - lo + 1) * 255);
+    };
+    const put = (name: string, value: string) => {
+      if (phoneGameRef.current) return; // (the phone game is covering the iPod: nothing to redraw behind it)
+      if (shown[name] !== value) {
+        shown[name] = value;
+        el.style.setProperty(name, value);
+      }
+    };
+
+    const tick = (now: number) => {
+      const dt = Math.min(0.1, (now - prev) / 1000);
+      prev = now;
+      const audio = songRef.current;
+      const track = tracksRef.current[trackRef.current] ?? TRACKS[0];
+      const secondsPerBeat = 60 / (track.bpm && track.bpm > 0 ? track.bpm : DEFAULT_BPM);
+      put("--beat", `${secondsPerBeat.toFixed(4)}s`);
+
+      const live = !!audio && !audio.paused && !audio.ended && !audio.muted && audio.readyState >= 2 && !calm.matches;
+
+      // Switch the bass listener on (tries again every 2 seconds until the browser allows it)
+      if (audio && !audio.paused && !giveUp && !hooking && hookedTo !== audio && now - lastTry > 2000) {
+        lastTry = now;
+        if (hookedTo) {
+          giveUp = true; // the song player was swapped out; stick with the beat
+        } else {
+          void hookUpBass(audio);
+        }
+      }
+      // Phones can pause the sound engine (e.g. after a call); wake it back up so the music keeps playing
+      if (ctx && hookedTo && audio && !audio.paused && ctx.state !== "running" && now - lastTry > 1000) {
+        lastTry = now;
+        ctx.resume().catch(() => {});
+      }
+      if (live && audio) {
+        // The browser only updates the song position every few milliseconds, so fill in the gaps smoothly
+        if (audio.currentTime !== lastAudioTime) {
+          lastAudioTime = audio.currentTime;
+          lastAudioAt = now;
+        }
+        const t = lastAudioTime + ((now - lastAudioAt) / 1000) * audio.playbackRate - (track.offset ?? 0) - SYNC_NUDGE;
+        const beats = t / secondsPerBeat;
+        if (beats >= 0) {
+          const phase = beats - Math.floor(beats); // 0 = right on the beat
+          smoke = phase;
+          const phase8 = beats * 2 - Math.floor(beats * 2);
+          kick = Math.pow(1 - phase, 3);
+          hat = Math.pow(1 - phase8, 4);
+          sway = Math.cos(beats * Math.PI);
+        } else {
+          // Before the first beat (intro silence): hold still
+          kick += (0 - kick) * Math.min(1, dt * 10);
+          hat += (0 - hat) * Math.min(1, dt * 10);
+          sway += (0 - sway) * Math.min(1, dt * 4);
+        }
+      } else if (calm.matches) {
+        // Visitor asked their device for less motion: keep everything still
+        kick = 0;
+        hat = 0;
+        sway = 0;
+      } else {
+        // Paused or muted: slow, gentle breathing
+        const s = now / 1000;
+        const breathe = (0.5 + 0.5 * Math.sin(s * 4.5)) * 0.35;
+        kick += (breathe - kick) * Math.min(1, dt * 6);
+        hat += (0 - hat) * Math.min(1, dt * 6);
+        sway += (Math.sin(s * 2.2) * 0.6 - sway) * Math.min(1, dt * 4);
+      }
+
+      // 808 hits: the low end jumps way up compared to the last ~70 milliseconds = an 808 just hit
+      const level10 = calm.matches ? 0 : quakeRef.current;
+      let hit = 0;
+      if (live && level10 > 0) {
+        if (analyser && ctx && hookedTo === audio) {
+          const level = bassLevel();
+          recent.push({ at: now, level });
+          while (recent.length && recent[0].at < now - 70) recent.shift();
+          let low = level;
+          for (const r of recent) low = Math.min(low, r.level);
+          const rise = level - low;
+          const strength = level > 0.2 ? Math.min(1, Math.max(0, (rise - 0.07) * 4.5)) : 0;
+          // Show it when it reaches your ears, not when the browser first sees it
+          const lag = ((ctx.baseLatency || 0) + ((ctx as AudioContext & { outputLatency?: number }).outputLatency || 0) + SYNC_NUDGE) * 1000;
+          if (strength > 0) waiting.push({ at: now + Math.min(400, Math.max(0, lag)), strength });
+        } else {
+          hit = kick * 0.6; // no bass listener: shake on the beat instead
+        }
+      } else {
+        recent.length = 0;
+        waiting.length = 0;
+      }
+      while (waiting.length && waiting[0].at <= now) hit = Math.max(hit, waiting.shift()!.strength);
+      // Moving the slider gives one test shake, even with the music paused
+      if (now - quakeTestRef.current < 60) hit = 1;
+      // kicks in on the hit, then settles quickly
+      bass = Math.max(hit, bass * Math.exp(-dt * 8));
+      if (bass < 0.01) bass = 0;
+
+      put("--kick", kick.toFixed(3));
+      put("--hat", hat.toFixed(3));
+      put("--sway", sway.toFixed(3));
+      // No music (or before the first beat): the smoke keeps drifting up slowly on its own
+      if (!live || !audio || audio.currentTime - (track.offset ?? 0) - SYNC_NUDGE < 0) {
+        smoke = calm.matches ? 0.4 : (smoke + dt * 0.5) % 1;
+      }
+      put("--phase", smoke.toFixed(3));
+      put("--phase2", ((smoke + 0.5) % 1).toFixed(3));
+      beatRef.current.kick = kick;
+      beatRef.current.sway = sway;
+      beatRef.current.bass = bass;
+      beatRef.current.quake = level10 / 10;
+      beatRef.current.live = live;
+      frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(frame);
+      ctx?.close().catch(() => {});
+    };
+  }, []);
+
   useEffect(() => {
     const audio = new Audio(TRACKS[0].file);
     let startVolume = 0.5;
@@ -839,7 +1588,10 @@ export default function Home() {
     } catch {}
     audio.volume = startVolume;
     setVolume(startVolume);
-    const onEnded = () => loadAndPlay(trackRef.current + 1);
+    const onEnded = () => {
+      trace("song-ended", `#${trackRef.current}`);
+      loadAndPlay(trackRef.current + 1);
+    };
     const onPlay = () => setIsPaused(false);
     const onPause = () => setIsPaused(true);
     const onPlaying = () => {
@@ -847,7 +1599,8 @@ export default function Home() {
     };
     // If a song file is missing, skip it (but don't loop forever)
     const onError = () => {
-      if (errorCountRef.current < TRACKS.length) {
+      if (errorCountRef.current < tracksRef.current.length) {
+        trace("song-error", `#${trackRef.current}`);
         errorCountRef.current += 1;
         loadAndPlay(trackRef.current + 1);
       }
@@ -863,7 +1616,8 @@ export default function Home() {
     selectSoundRef.current = new Audio("/sounds/select.mp3");
 
     const tryStartSong = () => {
-      if (hasStartedSong.current || !songRef.current) return;
+      // (not while the game is holding your music off, e.g. in a level with its own songs)
+      if (hasStartedSong.current || gameHoldRef.current || !songRef.current) return;
       songRef.current
         .play()
         .then(() => {
@@ -960,9 +1714,21 @@ export default function Home() {
     e.preventDefault();
   };
 
+  const changeQuake = (value: number) => {
+    const v = Math.max(0, Math.min(10, Math.round(value)));
+    setQuake(v);
+    quakeRef.current = v;
+    quakeTestRef.current = performance.now(); // shake once so you can feel the new level
+    try {
+      localStorage.removeItem("pinkmane-quake"); // old saved level from before, not used any more
+    } catch {}
+  };
+
   const changeVolume = (value: number) => {
+    setVolTipFade(true); // they found it: hide the volume tip
     setVolume(value);
     if (songRef.current) songRef.current.volume = value;
+    window.dispatchEvent(new CustomEvent("pinkmane-level-control", { detail: { volume: value } }));
     try {
       localStorage.setItem("pinkmane-volume", String(value));
     } catch {}
@@ -983,6 +1749,8 @@ activeGame === "maze" ? (
                   spinRef={spinRef}
                   fontFamily={pixelFont.style.fontFamily}
                   muted={isMuted}
+                  touchPad={isTouch}
+                  beatRef={beatRef}
                 />
               ) : activeGame === "hex" ? (
                 <HexGame
@@ -1029,9 +1797,47 @@ activeGame === "maze" ? (
     return () => clearTimeout(t);
   }, [handheld]);
 
+  // Pinkmane Void: once the boot screen is gone, point at the keys for 5 seconds
+  useEffect(() => {
+    if (!handheld || activeGame !== "super" || handheldBoot) {
+      setKeyTip(false);
+      return;
+    }
+    setKeyTip(true);
+    const t = setTimeout(() => setKeyTip(false), 5000);
+    return () => clearTimeout(t);
+  }, [handheld, activeGame, handheldBoot]);
+
+  // Load the background mode picked last time
+  useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem("pinkmane-bgmode"));
+      if (saved >= 0 && saved < BG_MODES.length) setBgMode(saved);
+      const savedHh = Number(localStorage.getItem("pinkmane-hh-bgmode"));
+      if (savedHh >= 0 && savedHh < HH_BG_MODES.length) setHhBgMode(savedHh);
+    } catch {}
+  }, []);
+
+  const pickBgMode = (i: number) => {
+    playSelectSound();
+    setBgMode(i);
+    try {
+      localStorage.setItem("pinkmane-bgmode", String(i));
+    } catch {}
+  };
+
+  const pickHhBgMode = (i: number) => {
+    playSelectSound();
+    setHhBgMode(i);
+    try {
+      localStorage.setItem("pinkmane-hh-bgmode", String(i));
+    } catch {}
+  };
+
   // HOME on the handheld: leave the game and go all the way back to the main menu
   const goHome = () => {
     playSelectSound();
+    trace("goHome", `playing=${playing}`);
     setPlaying(false);
     setMenu("main");
     setSelected(0);
@@ -1065,10 +1871,10 @@ activeGame === "maze" ? (
   // Popup on the handheld screen when you change volume, mute or skip
   const [osd, setOsd] = useState<{ kind: "vol" | "text"; value: number; text: string } | null>(null);
   const osdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showOsd = (next: { kind: "vol" | "text"; value: number; text: string }) => {
+  const showOsd = (next: { kind: "vol" | "text"; value: number; text: string }, ms = 1300) => {
     setOsd(next);
     if (osdTimer.current) clearTimeout(osdTimer.current);
-    osdTimer.current = setTimeout(() => setOsd(null), 1300);
+    osdTimer.current = setTimeout(() => setOsd(null), ms);
   };
   const hhVolume = (delta: number) => {
     const v = Math.round(Math.max(0, Math.min(1, volume + delta)) * 20) / 20;
@@ -1080,13 +1886,20 @@ activeGame === "maze" ? (
     toggleMute();
   };
   const hhSong = (dir: 1 | -1) => {
-    const idx = (((trackRef.current + dir) % TRACKS.length) + TRACKS.length) % TRACKS.length;
+    if (gameSongRef.current) {
+      // a level song is on: skip that one (the new song's name pops up in the purple box by itself)
+      gameMusic(dir > 0 ? "next" : "prev");
+      return;
+    }
+    const list = tracksRef.current;
+    const idx = (((trackRef.current + dir) % list.length) + list.length) % list.length;
     if (dir > 0) nextTrack();
     else prevTrack();
-    showOsd({ kind: "text", value: 0, text: `♪ ${TRACKS[dir > 0 ? idx : trackRef.current].title.toUpperCase()}` });
+    showOsd({ kind: "text", value: 0, text: `♪ ${(list[dir > 0 ? idx : trackRef.current] ?? TRACKS[0]).title.toUpperCase()}` });
   };
   const hhPlay = () => {
-    showOsd({ kind: "text", value: 0, text: isPaused ? "PLAY" : "PAUSE" });
+    const paused = gameSongRef.current ? gameSongRef.current.paused : isPaused;
+    showOsd({ kind: "text", value: 0, text: paused ? "PLAY" : "PAUSE" });
     togglePlay();
   };
 
@@ -1111,15 +1924,76 @@ activeGame === "maze" ? (
     stickKey.current = null;
   };
 
-  const tickerText = `${isPaused ? "PAUSED" : "NOW PLAYING"}: ${TRACKS[trackIndex].title.toUpperCase()} ✦   `;
+  // ---------- PHONES + TABLETS: the big thumb buttons ----------
+  // A tiny buzz when a button is pressed (Android phones; iPhones don't allow it)
+  const buzz = () => {
+    try {
+      navigator.vibrate?.(8);
+    } catch {}
+  };
+  // Left thumb. Pinkmane Void: two squares, left and right. Pink Maze: a round pad with all four directions.
+  // Either way it holds the arrow key for the side your thumb is on, and you can slide across without lifting.
+  const tpKey = useRef<string | null>(null);
+  const tpSet = (key: string | null) => {
+    if (key === tpKey.current) return;
+    if (tpKey.current) padKey(tpKey.current, "keyup");
+    if (key) {
+      padKey(key, "keydown");
+      buzz();
+    }
+    tpKey.current = key;
+    setPadDir(key);
+  };
+  const tpMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const dx = e.clientX - (r.left + r.width / 2);
+    const dy = e.clientY - (r.top + r.height / 2);
+    let key = tpKey.current; // in the little dead spot in the middle: keep going the way you were
+    if (Math.max(Math.abs(dx), Math.abs(dy)) > r.width * 0.1) {
+      const sideways = Math.abs(dx) >= Math.abs(dy);
+      key = sideways ? (dx > 0 ? "ArrowRight" : "ArrowLeft") : dy > 0 ? "ArrowDown" : "ArrowUp";
+    }
+    tpSet(key);
+  };
+  // Leaving the game lets go of everything
+  useEffect(() => {
+    if (handheld) return;
+    tpKey.current = null;
+    setPadDir(null);
+    setTpAOn(false);
+    setTpBOn(false);
+  }, [handheld]);
+  // The two squares (Pinkmane Void): left half = walk left, right half = walk right
+  const tpWalk = (e: React.PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    tpSet(e.clientX < r.left + r.width / 2 ? "ArrowLeft" : "ArrowRight");
+  };
+  // A: Pinkmane Void gets it straight away (jump the moment you touch, hold = fly). Pink Maze: start.
+  const tpA = (down: boolean) => {
+    setTpAOn(down);
+    if (activeGame === "super") {
+      window.dispatchEvent(new CustomEvent("pinkmane-pad", { detail: { btn: "a", down } }));
+    } else if (down) {
+      selectItem();
+    }
+    if (down) buzz();
+  };
+  // S (FIRE/DOWN): the same as the S / down arrow key (shoot, or go down into the Void when you're standing on a well)
+  const tpB = (down: boolean) => {
+    setTpBOn(down);
+    padKey("ArrowDown", down ? "keydown" : "keyup");
+    if (down) buzz();
+  };
+
+  // While a game level plays its own song, the ticker and the play/pause buttons show that song
+  const musicPaused = gameSong ? gameSong.paused : isPaused;
+  const tickerSong = gameSong ? `${gameSong.artist} - ${gameSong.title}` : (tracks[trackIndex] ?? TRACKS[0]).title.toUpperCase();
+  const tickerText = `${musicPaused ? "PAUSED" : "NOW PLAYING"}: ${tickerSong} ✦   `;
 
   return (
     <main
+      ref={mainRef}
       style={{
-        backgroundImage: "url('/topshelf.png')",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
         minHeight: "100dvh",
         width: "100%",
         display: "flex",
@@ -1129,9 +2003,53 @@ activeGame === "maze" ? (
         overflow: "hidden",
         padding: "20px",
         boxSizing: "border-box",
-        "--beat": `${BEAT_SECONDS}s`,
+        isolation: "isolate",
+        // iPod screen colour for the picked background mode (used by the screen, loading bar and lights)
+        "--screen": BG_MODES[bgMode].screen,
+        "--screen-rgb": BG_MODES[bgMode].screenRgb,
+        // glow colour of the handheld (PSP) for its picked background mode
+        "--hh-glow": HH_BG_MODES[hhBgMode].glow,
       } as React.CSSProperties}
     >
+      {/* The background picture, on its own layer so it can wiggle and shake */}
+      <div
+        className="bg-shake"
+        aria-hidden="true"
+        style={{
+          backgroundImage: BG_MODES[bgMode].sources.map((src) => `url('${src}')`).join(", "),
+          backgroundPosition: `center ${BG_MODES[bgMode].focus * 100}%`,
+        }}
+      >
+        <LiquidBg sources={BG_MODES[bgMode].sources} beat={beatRef} active={!handheld} focus={BG_MODES[bgMode].focus} />
+      </div>
+
+      {/* BASS QUAKE slider on the iPod view too (bottom left) */}
+      {!handheld && (
+        <div className={`quake quake-page ${pixelFont.className}`}>
+          <span className="quake-dude quake-dude-trippy" aria-hidden="true" />
+          <div className="quake-main">
+            <label className="quake-title" htmlFor="quake-ipod">
+              BASS QUAKE <span className="quake-num">{quake === 0 ? "OFF" : quake}</span>
+            </label>
+            <input
+              id="quake-ipod"
+              type="range"
+              min={0}
+              max={10}
+              step={1}
+              value={quake}
+              aria-label="How hard the screen border shakes on the 808s"
+              className="quake-slider"
+              style={{ "--fill": `${quake * 10}%` } as React.CSSProperties}
+              onChange={(e) => changeQuake(Number(e.target.value))}
+              onPointerUp={(e) => e.currentTarget.blur()}
+              onTouchEnd={(e) => e.currentTarget.blur()}
+            />
+          </div>
+          <span className="quake-dude quake-dude-chill" aria-hidden="true" />
+        </div>
+      )}
+
       {/* SEO: "I'm a musician" label for Google (invisible) */}
       <script
         type="application/ld+json"
@@ -1142,7 +2060,8 @@ activeGame === "maze" ? (
       <div className="sr-only">
         <h1>PINKMANE</h1>
         <p>
-          PINKMANE is a cloud rap and trap artist. Releases include TOPSHELF.
+          PINKMANE is an artist and producer who codes and makes music in their
+          free time. Cloud rap and trap, made mostly with Serum 2. Releases include TOPSHELF.
           Stream PINKMANE on Spotify, Apple Music and SoundCloud, get the music
           on Bandcamp, follow on Instagram and Twitch, and shop official merch.
         </p>
@@ -1196,8 +2115,24 @@ activeGame === "maze" ? (
         ))}
       </div>
 
+      {/* iPod column: background mode buttons on top, the iPod, then the keys you can use */}
+      <div className="ipod-col">
+      <div className={`bg-modes ${pixelFont.className}`} role="group" aria-label="Background mode">
+        {BG_MODES.map((m, i) => (
+          <button
+            key={m.label}
+            className={`bg-mode-btn ${bgMode === i ? "bg-mode-on" : ""}`}
+            onClick={() => pickBgMode(i)}
+            onMouseDown={noFocus}
+            aria-pressed={bgMode === i}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+
       <div
-        className="ipod-shell"
+        className={`ipod-shell ${!playing && !musicPaused && !isMuted ? "beat-thump" : ""}`}
         style={{
           background: "#cfcfcf",
           width: "min(540px, 100%)",
@@ -1209,16 +2144,19 @@ activeGame === "maze" ? (
         }}
       >
         <div className="top-controls">
+          {volTip && (
+            <div
+              className={`${tipFont.className} vol-tip ${volTipFade ? "vol-tip-fade" : ""}`}
+              aria-hidden="true"
+            >
+              {/* the long text on bigger screens, the short one on small phones */}
+              <span className="vol-tip-text vol-tip-long">CONTROL VOLUME HERE!</span>
+              <span className="vol-tip-text vol-tip-short">VOLUME HERE!</span>
+              <TipArrow />
+            </div>
+          )}
           <BatteryIcon />
-          <VuBars active={!isMuted && !isPaused} />
-          <button
-            onClick={toggleMute}
-            onMouseDown={noFocus}
-            aria-label={isMuted ? "Unmute music" : "Mute music"}
-            className="mute-btn"
-          >
-            <SpeakerIcon muted={isMuted} />
-          </button>
+          <VuBars active={!isMuted && !musicPaused} />
           <input
             type="range"
             min={0}
@@ -1231,12 +2169,21 @@ activeGame === "maze" ? (
             onPointerUp={(e) => e.currentTarget.blur()}
             onTouchEnd={(e) => e.currentTarget.blur()}
           />
+          <button
+            onClick={toggleMute}
+            onMouseDown={noFocus}
+            aria-label={isMuted ? "Unmute music" : "Mute music"}
+            className="mute-btn"
+          >
+            <SpeakerIcon muted={isMuted} />
+          </button>
         </div>
 
         <div
           className={pixelFont.className}
           style={{
-            background: "#d7efbc",
+            background: "var(--screen, #d7efbc)",
+            transition: "background 0.4s ease",
             aspectRatio: "540 / 420",
             borderRadius: "8px",
             overflow: "hidden",
@@ -1299,10 +2246,12 @@ activeGame === "maze" ? (
                   : activeGame === "maze"
                   ? "PINK MAZE"
                   : activeGame === "super"
-                  ? "SUPER PINKMANE"
+                  ? "PINKMANE VOID"
                   : "PINK RUN"
                 : menu === "main"
                 ? "PINKMANE"
+                : menu === "minigames"
+                ? "MINI GAMES"
                 : menu.toUpperCase()}
             </h2>
           </div>
@@ -1358,26 +2307,42 @@ activeGame === "maze" ? (
             </div>
           ) : (
             <div
+              onPointerDown={isTouch ? swipeStart : undefined}
+              onPointerMove={isTouch ? swipeMove : undefined}
+              onPointerUp={isTouch ? swipeEnd : undefined}
+              onPointerCancel={isTouch ? swipeEnd : undefined}
               style={{
                 padding: "clamp(14px, 4vw, 20px)",
                 overflow: "hidden",
                 flex: 1,
                 position: "relative",
+                // phones: a finger sliding on the menu moves through it instead of scrolling the page
+                touchAction: isTouch ? "none" : undefined,
+                // the rows share whatever height the screen has, so the last one can never fall off the bottom
+                display: "flex",
+                flexDirection: "column",
               }}
             >
               {visibleItems.map((item, i) => {
                 const index = listStart + i;
-                const isMane = item === "Super Pinkmane";
+                const isMane = item === "Pinkmane Void";
                 return (
                 <div
                   key={`${menu}-${index}`}
                   className={isMane ? "mane-highlight" : undefined}
+                  onClick={isTouch ? () => tapRow(index) : undefined}
                   style={{
                     position: "relative",
-                    padding: "10px",
-                    paddingRight: "44px",
-                    fontSize: "clamp(11px, 3.2vw, 14px)",
-                    lineHeight: "1.6",
+                    // as tall as it used to be on a computer (44px); on a phone the rows shrink together to fit
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    maxHeight: "44px",
+                    boxSizing: "border-box",
+                    display: "flex",
+                    alignItems: "center",
+                    padding: "0 44px 0 10px",
+                    fontSize: "clamp(10px, 3vw, 14px)",
+                    lineHeight: "1.3",
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
@@ -1392,10 +2357,27 @@ activeGame === "maze" ? (
                         : "none",
                   }}
                 >
-                  {selected === index ? "> " : ""}
-                  {isMane ? "✦ " : ""}
-                  {item}
-                  {isMane ? " ✦" : ""}
+                  {rowTag(item) ? (
+                    <span style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: "10px", rowGap: "1px", minWidth: 0 }}>
+                      <span style={{ whiteSpace: "nowrap" }}>
+                        {selected === index ? "> " : ""}
+                        {isMane ? "✦ " : ""}
+                        {item}
+                        {isMane ? " ✦" : ""}
+                      </span>
+                      {/* [ MAIN GAME ] for Pinkmane Void, [mini game] for all the others */}
+                      <span style={{ fontSize: "0.55em", opacity: 0.85, whiteSpace: "nowrap" }}>
+                        {rowTag(item)}
+                      </span>
+                    </span>
+                  ) : (
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {selected === index ? "> " : ""}
+                      {isMane ? "✦ " : ""}
+                      {item}
+                      {isMane ? " ✦" : ""}
+                    </span>
+                  )}
 
                   {selected === index && ITEM_ICONS[item] && (
                     <img
@@ -1423,12 +2405,12 @@ activeGame === "maze" ? (
               })}
 
               {/* Little scrollbar on the right when the menu is longer than the screen */}
-              {items.length > VISIBLE_ROWS && (
+              {items.length > visibleRows && (
                 <div className="list-scroll">
                   <div
                     className="list-thumb"
                     style={{
-                      height: `${(VISIBLE_ROWS / items.length) * 100}%`,
+                      height: `${(visibleRows / items.length) * 100}%`,
                       top: `${(listStart / items.length) * 100}%`,
                     }}
                   />
@@ -1437,8 +2419,17 @@ activeGame === "maze" ? (
             </div>
           )}
 
-          {/* Now-playing ticker */}
-          <div className="ticker-wrap">
+          {/* Now-playing ticker: click it to open that song on SoundCloud */}
+          <a
+            className="ticker-wrap"
+            href={trackLink(tracks[trackIndex] ?? TRACKS[0])}
+            target="_blank"
+            rel="noopener noreferrer"
+            onMouseDown={noFocus}
+            onClick={(e) => e.currentTarget.blur()}
+            aria-label={`Listen to ${(tracks[trackIndex] ?? TRACKS[0]).title} on SoundCloud`}
+            title="Listen on SoundCloud"
+          >
             <div
               className="ticker-track"
               style={{ animationDuration: `${Math.max(8, tickerText.length * 0.28)}s` }}
@@ -1446,7 +2437,7 @@ activeGame === "maze" ? (
               <span>{tickerText}</span>
               <span>{tickerText}</span>
             </div>
-          </div>
+          </a>
         </div>
 
         <div
@@ -1458,7 +2449,7 @@ activeGame === "maze" ? (
         >
           <div
             ref={wheelRef}
-            className={`click-wheel ${!isMuted && !isPaused ? "wheel-led-pulse" : ""}`}
+            className={`click-wheel ${!isMuted && !musicPaused ? "wheel-led-pulse" : ""}`}
             onPointerDown={handleWheelPointerDown}
             onPointerMove={handleWheelPointerMove}
             onPointerUp={handleWheelPointerUp}
@@ -1537,7 +2528,7 @@ activeGame === "maze" ? (
               onClick={togglePlay}
               onPointerDown={stopWheelDrag}
               onMouseDown={noFocus}
-              aria-label={isPaused ? "Play music" : "Pause music"}
+              aria-label={musicPaused ? "Play music" : "Pause music"}
               style={{
                 position: "absolute",
                 bottom: "15px",
@@ -1551,7 +2542,7 @@ activeGame === "maze" ? (
                 alignItems: "center",
               }}
             >
-              {isPaused ? <PlayIcon /> : <PauseIcon />}
+              {musicPaused ? <PlayIcon /> : <PauseIcon />}
             </button>
 
             <button
@@ -1578,6 +2569,7 @@ activeGame === "maze" ? (
           </div>
         </div>
 
+        {/* Grey hint text on the iPod: only on phones/tablets now (computers get the white key legend instead) */}
         <div className={`${pixelFont.className} controls-hint`}>
           <span className="hint-touch">
             {playing
@@ -1596,29 +2588,229 @@ activeGame === "maze" ? (
                 : "tap screen or OK to jump · ◀▶ songs"
               : "swipe wheel to scroll · ◀▶ songs"}
           </span>
-          <span className="hint-keys">
-            {playing
-              ? activeGame === "maze"
-                ? "arrows / WASD steer · space start · M mute · backspace exit"
-                : activeGame === "super"
-                ? "← → walk · space / ↑ jump · M mute · backspace exit"
-                : activeGame === "hex"
-                ? "← → / A D move · space start · M mute · backspace exit"
-                : activeGame === "bird"
-                ? "space / ↑ flap · M mute · backspace exit"
-                : activeGame === "snake"
-                ? "arrows / WASD steer · space start · backspace exit"
-                : activeGame === "vortex"
-                ? "scroll / ↑↓ spin · space launch · backspace exit"
-                : "space jump · ◀▶ songs · backspace exit"
-              : "scroll or drag wheel · enter select · ◀▶ songs · backspace back"}
-          </span>
         </div>
       </div>
 
-      {/* The PINKMANE handheld: a wide screen for Pink Maze and Super Pinkmane */}
-      {handheld && (
-        <div className="hh-overlay">
+      {/* Keys you can use, drawn as white key outlines like under the handheld (only on computers) */}
+      <div className={`hh-keys ipod-keys ${pixelFont.className}`}>
+        {(!playing
+          ? [
+              [["↑", "↓", "W", "S"], "move"],
+              [["ENTER"], "ok"],
+              [["MOUSE WHEEL"], "scroll"],
+              [["BACKSPACE"], "back"],
+              [["←", "→"], "songs"],
+            ]
+          : activeGame === "hex"
+          ? [
+              [["←", "→", "A", "D"], "move"],
+              [["SPACE"], "start"],
+              [["M"], "mute"],
+              [["BACKSPACE"], "exit"],
+            ]
+          : activeGame === "bird"
+          ? [
+              [["SPACE", "↑"], "flap"],
+              [["M"], "mute"],
+              [["BACKSPACE"], "exit"],
+            ]
+          : activeGame === "snake"
+          ? [
+              [["↑", "↓", "←", "→"], "steer"],
+              [["SPACE"], "start"],
+              [["BACKSPACE"], "exit"],
+            ]
+          : activeGame === "vortex"
+          ? [
+              [["MOUSE WHEEL", "↑", "↓"], "spin"],
+              [["SPACE"], "launch"],
+              [["BACKSPACE"], "exit"],
+            ]
+          : [
+              [["SPACE"], "jump"],
+              [["←", "→"], "songs"],
+              [["BACKSPACE"], "exit"],
+            ]
+        ).map(([keys, label]) => (
+          <span className="hh-keygroup" key={label as string}>
+            {(keys as string[]).map((k) => (
+              <span className="hh-key" key={k}>
+                {k}
+              </span>
+            ))}
+            <span className="hh-keylabel">{label as string}</span>
+          </span>
+        ))}
+      </div>
+      </div>
+
+      {/* PHONES + TABLETS: the game fills the screen, with big see-through thumb buttons on top */}
+      {handheld && isTouch && (
+        <div className={`tp-overlay ${pixelFont.className}`} onContextMenu={(e) => e.preventDefault()}>
+          {/* Background picture (still, to save battery) */}
+          <div
+            className="hh-bg"
+            aria-hidden="true"
+            style={{
+              backgroundImage: HH_BG_MODES[hhBgMode].sources.map((src) => `url('${src}')`).join(", "),
+              backgroundPosition: `center ${HH_BG_MODES[hhBgMode].focus * 100}%`,
+            }}
+          />
+
+          {/* The game */}
+          <div className="tp-screen">
+            {gameElement}
+            {handheldBoot && (
+              <div className="screen-overlay">
+                <div className="hh-boot-dude" />
+                <div className="screen-overlay-label">PINKMANE</div>
+                <div className="screen-overlay-loading">LOADING...</div>
+                <SegmentedBar duration={1.4} active={handheldBoot} />
+              </div>
+            )}
+            {osd && (
+              <div className="hh-osd">
+                <span>{osd.kind === "vol" ? `VOL ${Math.round(osd.value * 10)}` : osd.text}</span>
+              </div>
+            )}
+            <div className="crt-overlay" />
+          </div>
+
+          {/* Small buttons, top left: leave the game, pause */}
+          <div className="tp-corner tp-corner-l">
+            <button className="tp-small" onClick={goBack} aria-label="Leave the game">
+              EXIT
+            </button>
+            {activeGame === "super" && (
+              <button className="tp-small" onClick={() => tapKey("Escape")} aria-label="Pause">
+                PAUSE
+              </button>
+            )}
+            {fsc.show && (
+              <button className="tp-small" onClick={fsc.toggle} aria-label={fsc.isFullscreen ? "Leave full screen" : "Full screen"}>
+                {fsc.isFullscreen ? "SMALL" : "FULL"}
+              </button>
+            )}
+          </div>
+
+          {/* Small buttons, top right: your music */}
+          <div className="tp-corner tp-corner-r">
+            <button className="tp-small" onClick={hhPlay} aria-label="Play or pause music">
+              <PixelIcon name={musicPaused ? "play" : "pause"} />
+            </button>
+            <button className="tp-small" onClick={() => hhSong(1)} aria-label="Next song">
+              <PixelIcon name="next" />
+            </button>
+            <button className="tp-small" onClick={hhMute} aria-label={isMuted ? "Unmute music" : "Mute music"}>
+              <PixelIcon name={isMuted ? "muted" : "sound"} />
+            </button>
+          </div>
+
+          {/* Left thumb. Pinkmane Void: two squares, walk left and walk right (slide between them without lifting).
+              Pink Maze needs all four directions, so it keeps the round pad. */}
+          {activeGame === "super" ? (
+            <div
+              className="tp-walk"
+              role="group"
+              aria-label="Walk left or right"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                tpWalk(e);
+              }}
+              onPointerMove={(e) => {
+                if (e.currentTarget.hasPointerCapture(e.pointerId)) tpWalk(e);
+              }}
+              onPointerUp={() => tpSet(null)}
+              onPointerCancel={() => tpSet(null)}
+              onLostPointerCapture={() => tpSet(null)}
+            >
+              <span className={`tp-sq ${padDir === "ArrowLeft" ? "tp-on" : ""}`}>
+                <DpadArrow dir="left" />
+              </span>
+              <span className={`tp-sq ${padDir === "ArrowRight" ? "tp-on" : ""}`}>
+                <DpadArrow dir="right" />
+              </span>
+            </div>
+          ) : (
+            <div
+              className="tp-dpad"
+              role="group"
+              aria-label="Direction pad"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                tpMove(e);
+              }}
+              onPointerMove={(e) => {
+                if (e.currentTarget.hasPointerCapture(e.pointerId)) tpMove(e);
+              }}
+              onPointerUp={() => tpSet(null)}
+              onPointerCancel={() => tpSet(null)}
+              onLostPointerCapture={() => tpSet(null)}
+            >
+              {(["up", "down", "left", "right"] as const).map((d) => (
+                <span key={d} className={`tp-arrow tp-arrow-${d} ${padDir === TP_KEYS[d] ? "tp-on" : ""}`}>
+                  <DpadArrow dir={d} />
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Right thumb: A = jump (hold it to fly with the jetpack) / OK in the menus,
+              S = shoot, or go down into the Void (the game's hints say PRESS S TO SHOOT, so the button says S) */}
+          {activeGame === "super" && (
+            <button
+              className={`tp-btn tp-b ${tpBOn ? "tp-on" : ""}`}
+              aria-label="Shoot, or go down into the Void"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                tpB(true);
+              }}
+              onPointerUp={() => tpB(false)}
+              onPointerCancel={() => tpB(false)}
+              onLostPointerCapture={() => tpB(false)}
+            >
+              <span>S</span>
+              <small>FIRE/DOWN</small>
+            </button>
+          )}
+          <button
+            className={`tp-btn tp-a ${tpAOn ? "tp-on" : ""}`}
+            aria-label={activeGame === "super" ? "Jump" : "Start"}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.currentTarget.setPointerCapture(e.pointerId);
+              tpA(true);
+            }}
+            onPointerUp={() => tpA(false)}
+            onPointerCancel={() => tpA(false)}
+            onLostPointerCapture={() => tpA(false)}
+          >
+            <span>A</span>
+            <small>{activeGame === "super" ? "JUMP" : "START"}</small>
+          </button>
+
+          <div className="tp-rotate">TURN YOUR PHONE SIDEWAYS FOR A BIGGER SCREEN</div>
+        </div>
+      )}
+
+      {/* The PINKMANE handheld: a wide screen for Pink Maze and Pinkmane Void */}
+      {handheld && !isTouch && (
+        <div className={`hh-overlay ${twitchMode ? "hh-twitch-on" : ""}`}>
+          {/* Background picture: wiggles, and its border shakes on the 808s */}
+          <div
+            className="hh-bg"
+            aria-hidden="true"
+            style={{
+              backgroundImage: HH_BG_MODES[hhBgMode].sources.map((src) => `url('${src}')`).join(", "),
+              backgroundPosition: `center ${HH_BG_MODES[hhBgMode].focus * 100}%`,
+            }}
+          >
+            <LiquidBg sources={HH_BG_MODES[hhBgMode].sources} beat={beatRef} active focus={HH_BG_MODES[hhBgMode].focus} />
+          </div>
+
           {/* Flying PINKMANEs with jetpacks in the background, some going right, some going left */}
           <div className="hh-glyphs">
             {glyphs.slice(0, 8).map((g) => (
@@ -1640,6 +2832,46 @@ activeGame === "maze" ? (
                 />
               </div>
             ))}
+          </div>
+
+          {/* Background mode buttons for the handheld view */}
+          <div className={`bg-modes hh-bg-modes ${pixelFont.className}`} role="group" aria-label="Background mode">
+            {HH_BG_MODES.map((m, i) => (
+              <button
+                key={m.label}
+                className={`bg-mode-btn ${hhBgMode === i ? "bg-mode-on" : ""}`}
+                onClick={() => pickHhBgMode(i)}
+                onMouseDown={noFocus}
+                aria-pressed={hhBgMode === i}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {/* BASS QUAKE: how hard the screen border shakes on the 808s (above the handheld) */}
+          <div className={`quake quake-top ${pixelFont.className}`}>
+            <span className="quake-dude quake-dude-trippy" aria-hidden="true" />
+            <div className="quake-main">
+              <label className="quake-title" htmlFor="quake-hh">
+                BASS QUAKE <span className="quake-num">{quake === 0 ? "OFF" : quake}</span>
+              </label>
+              <input
+                id="quake-hh"
+                type="range"
+                min={0}
+                max={10}
+                step={1}
+                value={quake}
+                aria-label="How hard the screen border shakes on the 808s"
+                className="quake-slider"
+                style={{ "--fill": `${quake * 10}%` } as React.CSSProperties}
+                onChange={(e) => changeQuake(Number(e.target.value))}
+                onPointerUp={(e) => e.currentTarget.blur()}
+                onTouchEnd={(e) => e.currentTarget.blur()}
+              />
+            </div>
+            <span className="quake-dude quake-dude-chill" aria-hidden="true" />
           </div>
 
           <div className={`hh-device ${pixelFont.className}`}>
@@ -1682,7 +2914,7 @@ activeGame === "maze" ? (
             </div>
 
             {/* Light that pulses to the beat while music plays */}
-            <div className={`hh-led2 ${!isPaused && !isMuted ? "hh-led-on" : ""}`} style={hhBox(2, 24, 2, 24)} />
+            <div className={`hh-led2 ${!musicPaused && !isMuted ? "hh-led-on" : ""}`} style={hhBox(2, 24, 2, 24)} />
 
             {/* Invisible buttons on top of the drawn ones */}
             <button className="hh-hit" style={hhBox(5, 9, 10, 13)} aria-label="Up" {...padProps("ArrowUp")} />
@@ -1734,7 +2966,7 @@ activeGame === "maze" ? (
               <PixelIcon name="prev" />
             </button>
             <button className="hh-hit hh-bar" style={hhBox(64, 34, 67, 38)} onClick={hhPlay} onMouseDown={noFocus} aria-label="Play or pause music">
-              <PixelIcon name={isPaused ? "play" : "pause"} />
+              <PixelIcon name={musicPaused ? "play" : "pause"} />
             </button>
             <button className="hh-hit hh-bar" style={hhBox(68, 34, 72, 38)} onClick={() => hhSong(1)} onMouseDown={noFocus} aria-label="Next song">
               <PixelIcon name="next" />
@@ -1782,6 +3014,76 @@ activeGame === "maze" ? (
             </div>
           </div>
 
+          {/* TWITCH MODE (localhost only): rate the song you're listening to */}
+          {twitchMode && (
+            <div className={`twitch-panel ${pixelFont.className}`}>
+              <div className="twitch-slider">
+                <label className="quake-title" htmlFor="tw-mix">
+                  MIX <span className="quake-num">{twMix}%</span>
+                </label>
+                <input
+                  id="tw-mix"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={twMix}
+                  aria-label="Mix rating"
+                  className="quake-slider"
+                  style={{ "--fill": `${twMix}%` } as React.CSSProperties}
+                  onChange={(e) => setTwMix(Number(e.target.value))}
+                  onPointerUp={(e) => e.currentTarget.blur()}
+                  onTouchEnd={(e) => e.currentTarget.blur()}
+                />
+              </div>
+              <div className="twitch-slider">
+                <label className="quake-title" htmlFor="tw-vibe">
+                  OVERALL VIBE <span className="quake-num">{twVibe}%</span>
+                </label>
+                <input
+                  id="tw-vibe"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={twVibe}
+                  aria-label="Overall vibe rating"
+                  className="quake-slider"
+                  style={{ "--fill": `${twVibe}%` } as React.CSSProperties}
+                  onChange={(e) => setTwVibe(Number(e.target.value))}
+                  onPointerUp={(e) => e.currentTarget.blur()}
+                  onTouchEnd={(e) => e.currentTarget.blur()}
+                />
+              </div>
+              <div className="twitch-replay">
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={twReplay}
+                  className={`twitch-box ${twReplay ? "twitch-box-on" : ""}`}
+                  onClick={() => setTwReplay((v) => !v)}
+                  onMouseDown={noFocus}
+                >
+                  {twReplay ? "✔" : ""}
+                </button>
+                <span className="twitch-replay-text">REPLAY-ABLE?</span>
+                {twReplay && <span className="twitch-verified">VERIFIED</span>}
+              </div>
+              <button
+                type="button"
+                className="twitch-reset"
+                onClick={() => {
+                  setTwMix(0);
+                  setTwVibe(0);
+                  setTwReplay(false);
+                }}
+                onMouseDown={noFocus}
+              >
+                NEXT SONG
+              </button>
+            </div>
+          )}
+
           {/* Volume slider + what the buttons do */}
           <div className={`hh-under ${pixelFont.className}`}>
             <span>VOL</span>
@@ -1800,13 +3102,25 @@ activeGame === "maze" ? (
           </div>
 
           {/* Keys you use, drawn as white key outlines (only on computers) */}
+          <div className="hh-keys-wrap">
+          {keyTip && (
+            <div className={`key-tip ${pixelFont.className}`} aria-hidden="true">
+              <span className="key-tip-text">CONTROL W THESE!</span>
+              <span className="key-tip-arrows">
+                <span>▼</span>
+                <span>▼</span>
+                <span>▼</span>
+              </span>
+            </div>
+          )}
           <div className={`hh-keys ${pixelFont.className}`}>
             {(activeGame === "super"
               ? [
-                  [["←", "→"], "walk"],
-                  [["SPACE", "↑"], "jump"],
-                  [["S"], "shoot / pipe"],
+                  [["A", "D", "←", "→"], "walk"],
+                  [["W", "↑", "SPACE"], "jump"],
+                  [["S", "↓"], "shoot / enter"],
                   [["M"], "sounds"],
+                  [["ESC"], "pause"],
                   [["BACKSPACE"], "menu"],
                 ]
               : [
@@ -1826,22 +3140,274 @@ activeGame === "maze" ? (
               </span>
             ))}
           </div>
+          </div>
 
           <div className={`hh-hint ${pixelFont.className}`}>
             best played on a laptop with a keyboard ·{" "}
             {activeGame === "super"
-              ? "d-pad / stick = walk · bottom button = jump · left button = fire · d-pad down = go into pipes · right button = back"
+              ? "d-pad / stick = walk · bottom button = jump · left button = fire · d-pad down = go into the Void · right button = back"
               : "d-pad / stick = move · bottom button = start · right button = back · top button = play/pause"}
             <span className="hh-rotate"> · turn your phone sideways for a bigger screen</span>
           </div>
         </div>
       )}
 
+      {showTrace && <TraceOverlay />}
+      {/* FULL SCREEN: a small corner button on the menus (phones + tablets), and the "how to" popup where the browser can't do it itself */}
+      {isTouch && !handheld && fsc.show && (
+        <FullscreenCornerButton onClick={fsc.toggle} isFullscreen={fsc.isFullscreen} className={pixelFont.className} />
+      )}
+      {fsc.helpOpen && <InstallHelp onClose={fsc.closeHelp} isIOS={fsc.isIOS} className={pixelFont.className} />}
+
       <style jsx global>{`
         html,
         body {
           overflow-x: hidden;
           margin: 0;
+        }
+
+        /* PHONES: holding a finger on a button used to pop up "Copy" and select its text.
+           Nothing on the site can be selected any more (boxes you type in still work),
+           no grey flash when you tap, and no zooming in by double-tapping. */
+        main {
+          -webkit-user-select: none;
+          user-select: none;
+          -webkit-touch-callout: none;
+          -webkit-tap-highlight-color: transparent;
+          touch-action: manipulation;
+        }
+        main input,
+        main textarea {
+          -webkit-user-select: text;
+          user-select: text;
+        }
+
+        /* ---------- PHONES + TABLETS: full-screen game with thumb buttons ----------
+           Sideways: the game fills the screen, buttons sit see-through on top of its corners.
+           Upright: the game is across the top, buttons underneath.
+           Sizes you might want to change are marked SIZE. */
+        .tp-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 50;
+          overflow: hidden;
+          background: #000;
+          touch-action: none;
+          overscroll-behavior: none;
+          animation: hhFadeIn 0.25s ease-out;
+        }
+        .tp-screen {
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          transform: translate(-50%, -50%);
+          /* as big as fits, leaving a thin strip each side for the small buttons */
+          height: min(100vh, calc((100vw - 116px) * 30 / 64));
+          height: min(100dvh, calc((100vw - 116px) * 30 / 64));
+          width: min(calc(100vh * 64 / 30), calc(100vw - 116px));
+          width: min(calc(100dvh * 64 / 30), calc(100vw - 116px));
+          background: #242842;
+          overflow: hidden;
+        }
+        .tp-corner {
+          position: absolute;
+          top: max(6px, env(safe-area-inset-top));
+          z-index: 3;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .tp-corner-l {
+          left: max(6px, env(safe-area-inset-left));
+        }
+        .tp-corner-r {
+          right: max(6px, env(safe-area-inset-right));
+          align-items: flex-end;
+        }
+        .tp-small {
+          min-width: 46px;
+          height: 32px;
+          padding: 0 6px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: inherit;
+          font-size: 7px;
+          color: #fff;
+          background: rgba(17, 17, 17, 0.6);
+          border: 2px solid rgba(255, 255, 255, 0.75);
+          border-radius: 0;
+          touch-action: manipulation;
+        }
+        .tp-small:active {
+          background: #d63cc8;
+        }
+        /* The round pad, bottom left */
+        .tp-dpad {
+          position: absolute;
+          left: max(10px, env(safe-area-inset-left));
+          bottom: max(12px, env(safe-area-inset-bottom));
+          width: min(38vh, 144px); /* SIZE of the round pad (sideways) */
+          aspect-ratio: 1;
+          z-index: 3;
+          border-radius: 50%;
+          background: rgba(17, 17, 17, 0.32);
+          border: 2px solid rgba(255, 255, 255, 0.55);
+          touch-action: none;
+        }
+        .tp-arrow {
+          position: absolute;
+          width: 34%;
+          height: 34%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: rgba(255, 255, 255, 0.85);
+          pointer-events: none;
+        }
+        .tp-arrow-up {
+          left: 33%;
+          top: 3%;
+        }
+        .tp-arrow-down {
+          left: 33%;
+          bottom: 3%;
+        }
+        .tp-arrow-left {
+          left: 3%;
+          top: 33%;
+        }
+        .tp-arrow-right {
+          right: 3%;
+          top: 33%;
+        }
+        .tp-arrow .hh-arrow {
+          width: 80%;
+          height: 80%;
+        }
+        /* Pinkmane Void: two squares, bottom left */
+        .tp-walk {
+          position: absolute;
+          left: max(10px, env(safe-area-inset-left));
+          bottom: max(12px, env(safe-area-inset-bottom));
+          z-index: 3;
+          display: flex;
+          gap: 8px;
+          touch-action: none;
+        }
+        .tp-sq {
+          width: min(22vh, 78px); /* SIZE of each square (sideways) */
+          aspect-ratio: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: rgba(255, 255, 255, 0.9);
+          background: rgba(17, 17, 17, 0.32);
+          border: 2px solid rgba(255, 255, 255, 0.6);
+          pointer-events: none;
+        }
+        .tp-sq .hh-arrow {
+          width: 50%;
+          height: 50%;
+        }
+        .tp-sq.tp-on {
+          color: #fff;
+          background: rgba(255, 143, 240, 0.9);
+        }
+        .tp-arrow.tp-on {
+          color: #ff8ff0;
+          opacity: 1;
+        }
+        /* A and B, bottom right */
+        .tp-btn {
+          position: absolute;
+          z-index: 3;
+          aspect-ratio: 1;
+          padding: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+          font-family: inherit;
+          font-size: 16px;
+          color: #fff;
+          text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.6);
+          border: 2px solid rgba(255, 255, 255, 0.65);
+          border-radius: 50%;
+          touch-action: none;
+        }
+        .tp-btn small {
+          font-size: 7px;
+        }
+        .tp-b small {
+          font-size: 6px; /* FIRE/DOWN is a long word for a round button */
+        }
+        .tp-a {
+          right: max(10px, env(safe-area-inset-right));
+          bottom: max(12px, env(safe-area-inset-bottom));
+          width: min(26vh, 96px); /* SIZE of the A button (sideways) */
+          background: rgba(214, 60, 200, 0.45);
+        }
+        .tp-b {
+          right: calc(max(10px, env(safe-area-inset-right)) + min(15vh, 56px));
+          bottom: calc(max(12px, env(safe-area-inset-bottom)) + min(27vh, 100px));
+          width: min(23vh, 84px); /* SIZE of the S (fire / down) button (sideways) */
+          font-size: 13px;
+          background: rgba(138, 31, 134, 0.45);
+        }
+        .tp-btn.tp-on {
+          background: rgba(255, 143, 240, 0.9);
+          scale: 0.94;
+        }
+        .tp-rotate {
+          display: none;
+        }
+        /* Upright phones: game across the top, small buttons in a row above it, thumb buttons at the bottom */
+        @media (orientation: portrait) {
+          .tp-screen {
+            top: calc(max(6px, env(safe-area-inset-top)) + 40px);
+            transform: translateX(-50%);
+            width: 100vw;
+            height: calc(100vw * 30 / 64);
+          }
+          .tp-corner {
+            flex-direction: row;
+          }
+          .tp-dpad {
+            left: 14px;
+            bottom: max(30px, env(safe-area-inset-bottom));
+            width: min(44vw, 180px); /* SIZE of the round pad (upright) */
+          }
+          .tp-walk {
+            left: 14px;
+            bottom: max(30px, env(safe-area-inset-bottom));
+          }
+          .tp-sq {
+            width: min(22vw, 90px); /* SIZE of each square (upright) */
+          }
+          .tp-a {
+            right: 14px;
+            bottom: max(30px, env(safe-area-inset-bottom));
+            width: min(27vw, 108px); /* SIZE of the A button (upright) */
+          }
+          .tp-b {
+            right: calc(14px + min(21vw, 84px));
+            bottom: calc(max(30px, env(safe-area-inset-bottom)) + min(24vw, 96px));
+            width: min(23vw, 90px); /* SIZE of the S (fire / down) button (upright) */
+          }
+          .tp-rotate {
+            display: block;
+            position: absolute;
+            left: 10px;
+            right: 10px;
+            top: calc(max(6px, env(safe-area-inset-top)) + 40px + 100vw * 30 / 64 + 14px);
+            text-align: center;
+            font-size: 7px;
+            line-height: 1.7;
+            color: #fff;
+            text-shadow: 1px 1px 0 #000;
+          }
         }
 
         /* SEO: hides content visually but keeps it readable for Google and screen readers */
@@ -1927,7 +3493,7 @@ activeGame === "maze" ? (
         }
 
         .screen-overlay-loading {
-          color: #d7efbc;
+          color: var(--screen, #d7efbc);
           font-size: clamp(8px, 2.6vw, 12px);
           letter-spacing: 1px;
         }
@@ -1957,7 +3523,7 @@ activeGame === "maze" ? (
         }
 
         .segment-filled {
-          background: #d7efbc;
+          background: var(--screen, #d7efbc);
         }
 
         .controls-hint {
@@ -1972,16 +3538,10 @@ activeGame === "maze" ? (
           display: inline;
         }
 
-        .hint-keys {
-          display: none;
-        }
-
+        /* Computers: the white key legend under the iPod explains the controls, so hide the grey text */
         @media (hover: hover) and (pointer: fine) {
-          .hint-touch {
+          .controls-hint {
             display: none;
-          }
-          .hint-keys {
-            display: inline;
           }
         }
 
@@ -1997,6 +3557,83 @@ activeGame === "maze" ? (
           z-index: 2;
         }
 
+        /* "CONTROL VOLUME HERE!" tip, to the left of the volume controls, with an arrow pointing at them */
+        .vol-tip {
+          position: absolute;
+          right: 100%;
+          top: 50%;
+          margin-right: 6px;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          white-space: nowrap;
+          pointer-events: none;
+          transform: translateY(-50%);
+          animation: volTipIn 0.3s ease-out;
+          transition: opacity 0.4s ease;
+        }
+
+        .vol-tip-fade {
+          opacity: 0;
+        }
+
+        .vol-tip-text {
+          color: #d63cc8;
+          font-size: 10px;
+          line-height: 1;
+          letter-spacing: 0.5px;
+          /* the Minecraft look: a hard dark shadow one pixel down-right */
+          text-shadow: 1px 1px 0 #4a1447;
+        }
+
+        .vol-tip-short {
+          display: none;
+        }
+
+        .vol-tip-arrow {
+          width: 8px;
+          height: 10px;
+          animation: volTipNudge 0.6s ease-in-out infinite;
+        }
+
+        @keyframes volTipIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+
+        /* the arrow pokes towards the volume controls */
+        @keyframes volTipNudge {
+          0%,
+          100% {
+            transform: translateX(0);
+          }
+          50% {
+            transform: translateX(3px);
+          }
+        }
+
+        /* Small phones: the short text, so it fits next to the controls */
+        @media (max-width: 420px) {
+          .vol-tip-long {
+            display: none;
+          }
+          .vol-tip-short {
+            display: inline;
+          }
+        }
+
+        /* Visitors who asked their device for less motion: no poking arrow */
+        @media (prefers-reduced-motion: reduce) {
+          .vol-tip,
+          .vol-tip-arrow {
+            animation: none;
+          }
+        }
+
         /* ---------- PINKMANE handheld ---------- */
         .hh-overlay {
           position: fixed;
@@ -2010,11 +3647,306 @@ activeGame === "maze" ? (
           padding: 12px;
           box-sizing: border-box;
           overflow: hidden;
-          /* Your handheld background: public/handheld-bg.png (or .jpg). Until it's there, the normal one shows. */
+          animation: hhFadeIn 0.25s ease-out;
+        }
+
+        /* Your handheld background: public/handheld-bg.png (or .jpg). Until it's there, the normal one shows.
+           It sits on its own layer so it can wiggle and shake. */
+        .hh-bg {
+          position: absolute;
+          inset: 0;
+          z-index: -1;
+          pointer-events: none;
           background-image: url("/handheld-bg.png"), url("/handheld-bg.jpg"), url("/topshelf.png");
           background-size: cover;
           background-position: center;
-          animation: hhFadeIn 0.25s ease-out;
+        }
+
+        /* The wiggling background drawn on top of the still picture (fades in once it's ready) */
+        .liquid-bg {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          display: block;
+          opacity: 0;
+          transition: opacity 0.6s ease;
+        }
+        .liquid-bg.liquid-on {
+          opacity: 1;
+        }
+        .liquid-canvas {
+          display: block;
+          width: 100%;
+          height: 100%;
+        }
+
+        /* BASS QUAKE slider, bottom left, with a PINKMANE on each side */
+        .quake {
+          position: absolute;
+          left: clamp(12px, 2.5vw, 32px);
+          bottom: clamp(12px, 2.5vh, 28px);
+          z-index: 3;
+          display: flex;
+          align-items: flex-end;
+          gap: 10px;
+          color: #fff;
+          text-shadow: 2px 2px 0 #000;
+        }
+        .quake-main {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          width: clamp(150px, 16vw, 230px);
+        }
+        /* The little PINKMANEs: as tall as the BASS QUAKE title + slider.
+           The sprite sheets have 3 frames side by side; the 3rd one is standing with the joint. */
+        .quake-dude {
+          flex: none;
+          height: 40px;
+          width: 27px;
+          background-image: url("/game/pinkdude.png");
+          background-size: 300% 100%;
+          background-position: right;
+          background-repeat: no-repeat;
+          image-rendering: pixelated;
+          filter: drop-shadow(2px 2px 0 #000);
+        }
+        /* Left one: TRIPPY PINKMANE (the outfit from Pinkmane Void) */
+        .quake-dude-trippy {
+          background-image: url("/game/pinkdude-pinkfit.png");
+        }
+        /* Smoke from the joint: a new puff on every beat, rising until the next one.
+           If the smoke doesn't start at the joint, move it with --smoke-x / --smoke-y
+           (how far across / down the little PINKMANE it starts). */
+        .quake-dude {
+          position: relative;
+          --smoke-x: 78%;
+          --smoke-y: 36%;
+        }
+        .quake-dude::before,
+        .quake-dude::after {
+          content: "";
+          position: absolute;
+          left: var(--smoke-x);
+          top: var(--smoke-y);
+          width: 3px;
+          height: 3px;
+          background: #e8e0ee;
+          pointer-events: none;
+        }
+        .quake-dude::before {
+          translate: calc(var(--phase, 0) * 3px) calc(var(--phase, 0) * -18px);
+          scale: calc(1 + var(--phase, 0) * 0.8);
+          opacity: calc(0.9 - var(--phase, 0) * 0.9);
+        }
+        .quake-dude::after {
+          translate: calc(var(--phase2, 0) * -2px) calc(var(--phase2, 0) * -18px);
+          scale: calc(0.7 + var(--phase2, 0) * 0.8);
+          opacity: calc(0.6 - var(--phase2, 0) * 0.6);
+        }
+        /* Right one: chilling, turned to face the slider */
+        .quake-dude-chill {
+          scale: -1 1;
+        }
+        .quake-title {
+          display: flex;
+          justify-content: space-between;
+          font-size: 9px;
+          letter-spacing: 1px;
+        }
+        .quake-num {
+          color: #ff8ff0;
+        }
+        .quake-slider {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 100%;
+          height: 14px;
+          margin: 0;
+          cursor: pointer;
+          border: 2px solid #111;
+          background: linear-gradient(90deg, #d63cc8 var(--fill, 50%), rgba(0, 0, 0, 0.45) var(--fill, 50%));
+          box-shadow: 0 3px 0 #111;
+        }
+        .quake-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 16px;
+          height: 24px;
+          background: #fff;
+          border: 2px solid #111;
+          box-shadow: inset -3px -3px 0 #c7bdd1;
+        }
+        .quake-slider::-moz-range-thumb {
+          width: 14px;
+          height: 22px;
+          border-radius: 0;
+          background: #fff;
+          border: 2px solid #111;
+          box-shadow: inset -3px -3px 0 #c7bdd1;
+        }
+        .quake-slider:focus-visible {
+          outline: 2px solid #ff8ff0;
+          outline-offset: 3px;
+        }
+        /* On the handheld: centred above the device */
+        .quake-top {
+          position: relative;
+          left: auto;
+          bottom: auto;
+        }
+        .quake-top .quake-main {
+          width: clamp(180px, 22vw, 280px);
+        }
+        /* Upright phones: sit in the page flow instead of in the corner */
+        @media (orientation: portrait) {
+          .quake {
+            position: relative;
+            left: auto;
+            bottom: auto;
+          }
+          .quake .quake-main,
+          .quake-top .quake-main {
+            width: min(58vw, 240px);
+          }
+          .quake-page {
+            display: none;
+          }
+        }
+
+        /* iPod column: mode buttons, iPod, key legend stacked */
+        .ipod-col {
+          position: relative;
+          z-index: 1;
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 14px;
+        }
+        /* The 3 pixel BACKGROUND MODE buttons above the iPod */
+        .bg-modes {
+          display: flex;
+          gap: 10px;
+          justify-content: center;
+          flex-wrap: wrap;
+        }
+        .bg-mode-btn {
+          font-family: inherit;
+          font-size: 9px;
+          padding: 7px 10px;
+          color: #fff;
+          background: rgba(0, 0, 0, 0.45);
+          border: 2px solid #fff;
+          border-radius: 0;
+          box-shadow: 0 3px 0 #fff;
+          text-shadow: 1px 1px 0 #000;
+          cursor: pointer;
+          image-rendering: pixelated;
+        }
+        .bg-mode-btn:hover {
+          background: rgba(214, 60, 200, 0.5);
+        }
+        .bg-mode-btn:active {
+          transform: translateY(2px);
+          box-shadow: 0 1px 0 #fff;
+        }
+        .bg-mode-on {
+          background: #d63cc8;
+          border-color: #fff;
+        }
+        .bg-mode-btn:focus-visible {
+          outline: 2px solid #ff8ff0;
+          outline-offset: 3px;
+        }
+        /* Mode buttons on the handheld view sit above everything else in the overlay */
+        .hh-bg-modes {
+          position: relative;
+          z-index: 1;
+        }
+        /* The key legend under the iPod */
+        .ipod-keys {
+          max-width: min(560px, 96vw);
+        }
+
+        /* CONTROL W THESE! arrows pointing at the keys (Pinkmane Void, first 5 seconds) */
+        .hh-keys-wrap {
+          position: relative;
+          z-index: 2;
+          display: flex;
+          justify-content: center;
+        }
+        .key-tip {
+          position: absolute;
+          bottom: 100%;
+          left: 50%;
+          transform: translateX(-50%);
+          margin-bottom: 4px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 2px;
+          pointer-events: none;
+          white-space: nowrap;
+          animation: keyTipIn 0.3s ease-out;
+        }
+        .key-tip-text {
+          font-size: 11px;
+          padding: 4px 8px;
+          border: 2px solid #000;
+          animation: keyTipBlink 0.25s steps(1) infinite;
+        }
+        .key-tip-arrows {
+          display: flex;
+          gap: 60px;
+          font-size: 18px;
+          color: #fff;
+          text-shadow: 2px 2px 0 #000;
+          animation: keyTipBounce 0.5s ease-in-out infinite alternate;
+        }
+        @keyframes keyTipBlink {
+          0% {
+            background: #d63cc8;
+            color: #fff;
+          }
+          50% {
+            background: #fff;
+            color: #d63cc8;
+          }
+        }
+        @keyframes keyTipBounce {
+          from {
+            transform: translateY(0);
+          }
+          to {
+            transform: translateY(6px);
+          }
+        }
+        @keyframes keyTipIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+        /* Touch screens have no key legend, so no arrows either */
+        @media (hover: none) {
+          .key-tip {
+            display: none;
+          }
+        }
+
+        /* The main background picture (wiggles, border shakes on the 808s) */
+        .bg-shake {
+          position: absolute;
+          inset: 0;
+          z-index: -1;
+          pointer-events: none;
+          background-size: cover;
+          background-position: center;
+          background-repeat: no-repeat;
         }
 
         .hh-glyphs {
@@ -2060,6 +3992,15 @@ activeGame === "maze" ? (
           }
         }
 
+        @keyframes hhJetBob {
+          from {
+            translate: 0 -10px;
+          }
+          to {
+            translate: 0 10px;
+          }
+        }
+
         @keyframes hhJetLeft {
           from {
             transform: translateX(110vw);
@@ -2069,14 +4010,6 @@ activeGame === "maze" ? (
           }
         }
 
-        @keyframes hhJetBob {
-          from {
-            translate: 0 -10px;
-          }
-          to {
-            translate: 0 10px;
-          }
-        }
 
         @keyframes hhFadeIn {
           from {
@@ -2093,9 +4026,9 @@ activeGame === "maze" ? (
         .hh-device {
           position: relative;
           z-index: 1;
-          width: min(96vw, 1300px, calc((100dvh - 120px) * 2.41));
+          width: min(96vw, 1300px, calc((100dvh - 170px) * 2.41));
           aspect-ratio: 94 / 39;
-          filter: drop-shadow(0 12px 0 rgba(0, 0, 0, 0.3)) drop-shadow(0 0 24px rgba(214, 60, 200, 0.45));
+          filter: drop-shadow(0 12px 0 rgba(0, 0, 0, 0.3)) drop-shadow(0 0 24px rgba(var(--hh-glow, 214, 60, 200), 0.55));
         }
         .hh-art {
           position: absolute;
@@ -2134,8 +4067,7 @@ activeGame === "maze" ? (
         }
         .hh-led2.hh-led-on {
           background: #d63cc8;
-          box-shadow: 0 0 8px #d63cc8;
-          animation: wheelGlow var(--beat) ease-in-out infinite;
+          box-shadow: 0 0 calc(var(--kick, 0) * 14px) calc(var(--kick, 0) * 4px) rgba(var(--hh-glow, 215, 239, 188), calc(var(--kick, 0) * 0.55));
         }
         /* Invisible buttons over the drawn ones; they flash pink when pressed */
         .hh-hit {
@@ -2204,6 +4136,73 @@ activeGame === "maze" ? (
         .hh-osd-bar span.on {
           background: #d63cc8;
         }
+        /* TWITCH MODE panel under the handheld (localhost only). The handheld gets a bit smaller to make room. */
+        .hh-twitch-on .hh-device {
+          width: min(96vw, 1300px, calc((100dvh - 250px) * 2.41));
+        }
+        .twitch-panel {
+          position: relative;
+          z-index: 1;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: flex-end;
+          justify-content: center;
+          gap: 12px 26px;
+          padding: 10px 16px 12px;
+          color: #fff;
+          text-shadow: 2px 2px 0 #000;
+          background: rgba(0, 0, 0, 0.45);
+          border: 2px solid #fff;
+          box-shadow: 0 3px 0 #fff;
+        }
+        .twitch-slider {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          width: clamp(160px, 22vw, 260px);
+        }
+        .twitch-replay {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 9px;
+          padding-bottom: 2px;
+        }
+        .twitch-box {
+          width: 22px;
+          height: 22px;
+          padding: 0;
+          font-family: inherit;
+          font-size: 14px;
+          line-height: 1;
+          color: #fff;
+          background: rgba(0, 0, 0, 0.45);
+          border: 2px solid #fff;
+          box-shadow: 0 2px 0 #fff;
+          cursor: pointer;
+        }
+        .twitch-box-on {
+          background: #1fae4b;
+        }
+        .twitch-verified {
+          color: #5dff8a;
+          text-shadow: 1px 1px 0 #000, 0 0 8px rgba(93, 255, 138, 0.8);
+        }
+        .twitch-reset {
+          font-family: inherit;
+          font-size: 8px;
+          padding: 6px 8px;
+          color: #fff;
+          background: rgba(214, 60, 200, 0.5);
+          border: 2px solid #fff;
+          box-shadow: 0 3px 0 #fff;
+          cursor: pointer;
+        }
+        .twitch-reset:active {
+          transform: translateY(2px);
+          box-shadow: 0 1px 0 #fff;
+        }
+
         .hh-under {
           position: relative;
           z-index: 1;
@@ -2289,7 +4288,7 @@ activeGame === "maze" ? (
           width: 48px;
           height: 70px;
           background-image: url("/game/pinkdude.png");
-          background-size: 200% 100%;
+          background-size: 300% 100%;
           background-position: left;
           image-rendering: pixelated;
           animation: bootPulse 1s ease-in-out infinite;
@@ -2422,8 +4421,7 @@ activeGame === "maze" ? (
         }
         .hh-led-on {
           background: #d63cc8;
-          box-shadow: 0 0 0 2px #111, 0 0 8px #d63cc8;
-          animation: wheelGlow var(--beat) ease-in-out infinite;
+          box-shadow: 0 0 calc(var(--kick, 0) * 14px) calc(var(--kick, 0) * 4px) rgba(var(--hh-glow, 215, 239, 188), calc(var(--kick, 0) * 0.55));
         }
 
         .hh-grill {
@@ -2644,30 +4642,18 @@ activeGame === "maze" ? (
           border-radius: 1px;
         }
 
+        /* the little bars jump with the kick and the hi-hats */
         .vu-active.vu-bar-0 {
-          animation: vuPulse var(--beat) ease-in-out infinite;
+          height: calc(3px + var(--kick, 0) * 9px);
         }
         .vu-active.vu-bar-1 {
-          animation: vuPulse var(--beat) ease-in-out infinite;
-          animation-delay: calc(var(--beat) * 0.15);
+          height: calc(3px + var(--hat, 0) * 7px);
         }
         .vu-active.vu-bar-2 {
-          animation: vuPulse var(--beat) ease-in-out infinite;
-          animation-delay: calc(var(--beat) * 0.3);
+          height: calc(3px + var(--kick, 0) * 5px + var(--hat, 0) * 4px);
         }
         .vu-active.vu-bar-3 {
-          animation: vuPulse var(--beat) ease-in-out infinite;
-          animation-delay: calc(var(--beat) * 0.08);
-        }
-
-        @keyframes vuPulse {
-          0%,
-          100% {
-            height: 3px;
-          }
-          50% {
-            height: 12px;
-          }
+          height: calc(3px + var(--kick, 0) * 7px + var(--hat, 0) * 2px);
         }
 
         /* CRT scanlines + vignette */
@@ -2718,12 +4704,24 @@ activeGame === "maze" ? (
 
         /* Now-playing ticker */
         .ticker-wrap {
+          display: block;
           overflow: hidden;
           white-space: nowrap;
           background: rgba(0, 0, 0, 0.06);
           border-top: 1px solid rgba(0, 0, 0, 0.15);
           padding: 4px 0;
           flex-shrink: 0;
+          text-decoration: none;
+          cursor: pointer;
+          position: relative;
+          z-index: 3; /* above the scanline overlay so it can be clicked */
+          transition: background 0.15s ease;
+        }
+        .ticker-wrap:hover {
+          background: rgba(214, 60, 200, 0.18);
+        }
+        .ticker-wrap:hover .ticker-track span {
+          text-decoration: underline;
         }
 
         .ticker-track {
@@ -2747,38 +4745,25 @@ activeGame === "maze" ? (
           }
         }
 
-        /* The mane game (Super Pinkmane) in the Games menu: pink, glowing, unmissable */
+        /* The mane game (Pinkmane Void) in the Games menu: pink, glowing, unmissable */
         .mane-highlight::after {
           content: "";
           position: absolute;
           inset: 0;
           pointer-events: none;
           box-shadow: inset 0 0 0 2px #ff8ff0, 0 0 10px 2px rgba(214, 60, 200, 0.65);
-          animation: manePulse 1.4s ease-in-out infinite;
-        }
-        @keyframes manePulse {
-          0%,
-          100% {
-            opacity: 0.55;
-          }
-          50% {
-            opacity: 1;
-          }
+          opacity: calc(0.55 + var(--kick, 0) * 0.45);
         }
 
         /* Click wheel LED pulse, synced to the beat */
         .wheel-led-pulse {
-          animation: wheelGlow var(--beat) ease-in-out infinite;
+          box-shadow: 0 0 calc(var(--kick, 0) * 14px) calc(var(--kick, 0) * 4px) rgba(var(--screen-rgb, 215, 239, 188), calc(var(--kick, 0) * 0.55));
         }
 
-        @keyframes wheelGlow {
-          0%,
-          100% {
-            box-shadow: 0 0 0px rgba(215, 239, 188, 0);
-          }
-          50% {
-            box-shadow: 0 0 14px 4px rgba(215, 239, 188, 0.55);
-          }
+        /* The iPod gives a tiny speaker-thump on every beat (only in the menus, not during games)
+           Bigger number = bigger pulse (was 0.008) */
+        .beat-thump {
+          scale: calc(1 + var(--kick, 0) * 0.004);
         }
       `}</style>
     </main>
