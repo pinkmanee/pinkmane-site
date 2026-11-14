@@ -198,6 +198,8 @@ const EDGE_MAX_SHAKE_PX = 10;
 //   Paste each song's link between the quotes, e.g. link: "https://soundcloud.com/pinkmanee/wet-socks"
 //   If a link is left empty (""), clicking searches SoundCloud for that song instead.
 const TRACKS: { title: string; file: string; bpm?: number; offset?: number; link?: string }[] = [
+  // NEW RELEASE: plays first when someone opens the website
+  { title: "ender pearls", file: "/music/ender-pearls.mp3", bpm: 142, offset: 0, link: "https://youtu.be/4bEcW1DbpPI?si=IeLJc2SR1EGG5woh" },
   { title: "pinkmane's random ass beat", file: "/sounds/song.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
   { title: "wet socks (w/ o1m4de)", file: "/music/06.mp3", bpm: 82, offset: 0, link: "https://soundcloud.com/pinkmanee/wet-socks" },
   { title: "hurricane of blades", file: "/music/07.mp3", bpm: 77, offset: 0, link: "https://soundcloud.com/pinkmanee/hurricane-of-blades" },
@@ -209,7 +211,7 @@ const TRACKS: { title: string; file: string; bpm?: number; offset?: number; link
   { title: "gods psp (ft. TOMBFELL)", file: "/music/09.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee/gods-psp" },
 ];
 
-// PINKMANE VOID beats. These 5 join your songs in the music player ONLY while you're playing PINKMANE VOID on the handheld (PSP);
+// PINKMANE VOID beats. These 5 join your songs in the music player while you're playing ANY game;
 // they leave the player again when you go back to the menu. Put the mp3 files in public/music/ with exactly these names
 // (until a file is there, that beat is simply skipped). Rename them, set the real bpm, add a SoundCloud link whenever you like.
 const VOID_BEATS: typeof TRACKS = [
@@ -218,6 +220,14 @@ const VOID_BEATS: typeof TRACKS = [
   { title: "pinkmane's random ass beat 4", file: "/music/beat-4.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
   { title: "pinkmane's random ass beat 5", file: "/music/beat-5.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
   { title: "pinkmane's random ass beat 6", file: "/music/beat-6.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
+];
+
+// RELEASES (iPod: Socials > Releases). Newest first. The highlighted one shows its cover on the iPod screen,
+// and clicking the cover (or pressing OK / Enter) opens its link.
+//   name  = the row in the menu   cover = the picture in public/   link = where it goes
+const RELEASES: { name: string; cover: string; link: string }[] = [
+  { name: "ENDER PEARLS", cover: "/ender-pearls.jpg", link: "https://youtu.be/4bEcW1DbpPI?si=IeLJc2SR1EGG5woh" },
+  { name: "TOPSHELF", cover: "/topshelf.png", link: "https://soundcloud.com/pinkmanee/top-shelf" },
 ];
 
 // Where clicking the now-playing text goes: the song's own link, or a SoundCloud search for it
@@ -309,7 +319,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     preview: "/previews/vortex.gif",
     blurb: "Spin the paddle around the vortex, keep the ball in and break the rings.",
     how: "mouse wheel / up / down = spin",
-    psp: false,
+    psp: true,
   },
   {
     name: "Pink Snake",
@@ -317,7 +327,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     preview: "/previews/snake.gif",
     blurb: "Eat, grow longer, don't bite yourself.",
     how: "arrows steer",
-    psp: false,
+    psp: true,
   },
   {
     name: "Pink Bird",
@@ -325,7 +335,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     preview: "/previews/bird.gif",
     blurb: "Flap through the gaps between the pipes. One touch and you're out.",
     how: "space / tap = flap",
-    psp: false,
+    psp: true,
   },
   {
     name: "Pink Run",
@@ -942,14 +952,15 @@ export default function Home() {
   // Which game is open, and how far the click wheel was turned (for Pink Vortex)
   const [activeGame, setActiveGame] = useState<GameId>("pinkrun");
   const spinRef = useRef(0);
-  // Pink Maze, Pinkmane Void, Pink Jungle and Pink Hell play on a wide handheld instead of the iPod
-  const hhGame = playing && (activeGame === "maze" || activeGame === "super" || activeGame === "jungle" || activeGame === "hell");
+  // Every game plays on the wide handheld (PSP), except Pink Hexagon and Pink Run, which stay on the iPod
+  const hhGame = playing && activeGame !== "hex" && activeGame !== "pinkrun";
   // Games menu: the PSP turns on and shows the game list with previews
   const gamePicker = !playing && menu === "games";
   // The PSP is on: playing one of its games, or picking a game
   const handheld = hhGame || gamePicker;
   // The song list. In PINKMANE VOID on the handheld the VOID_BEATS are added after your songs (your songs keep their places in the list).
-  const inVoid = hhGame && activeGame === "super";
+  // (now in EVERY game, on the PSP and on the iPod: the beats join the player while any game is open)
+  const inVoid = playing;
   const tracks = inVoid ? [...TRACKS, ...VOID_BEATS] : TRACKS;
   const tracksRef = useRef(tracks);
   tracksRef.current = tracks;
@@ -1048,7 +1059,7 @@ export default function Home() {
     main: ["Music", "Socials", "Merch", "Games"],
     music: ["SoundCloud", "Spotify", "Apple Music", "Bandcamp", "Back"],
     socials: ["Instagram", "Twitch", "Releases", "Back"],
-    releases: ["TOPSHELF", "Back"],
+    releases: [...RELEASES.map((r) => r.name), "Back"],
     // Games: the main game first, the rest live one step deeper in Mini Games
     // Games: shown on the PSP as a list with previews (see PICKER_GAMES)
     games: [...PICKER_GAMES.map((g) => g.name), "Back"],
@@ -1331,6 +1342,8 @@ export default function Home() {
     }
 
     if (menu === "releases") {
+      const release = RELEASES.find((r) => r.name === item);
+      if (release) window.open(release.link, "_blank");
       if (item === "Back") goBack();
     }
 
@@ -2241,7 +2254,7 @@ activeGame === "hell" ? (
         <h1>PINKMANE</h1>
         <p>
           PINKMANE is an artist and producer who codes and makes music in their
-          free time. Cloud rap and trap, made mostly with Serum 2. Releases include TOPSHELF.
+          free time. Cloud rap and trap, made mostly with Serum 2. Releases include ENDER PEARLS and TOPSHELF.
           Stream PINKMANE on Spotify, Apple Music and SoundCloud, get the music
           on Bandcamp, follow on Instagram and Twitch, and shop official merch.
         </p>
@@ -2254,11 +2267,11 @@ activeGame === "hell" ? (
                 </a>
               </li>
             ))}
-            <li>
-              <a href="https://soundcloud.com/pinkmanee/top-shelf">
-                TOPSHELF by PINKMANE
-              </a>
-            </li>
+            {RELEASES.map((r) => (
+              <li key={r.name}>
+                <a href={r.link}>{r.name} by PINKMANE</a>
+              </li>
+            ))}
             <li>
               <a href="/shop">PINKMANE merch shop</a>
             </li>
@@ -2453,14 +2466,9 @@ activeGame === "hell" ? (
                 gameElement
               )}
             </div>
-          ) : menu === "releases" && selected === 0 ? (
+          ) : menu === "releases" && selected < RELEASES.length ? (
             <div
-              onClick={() =>
-                window.open(
-                  "https://soundcloud.com/pinkmanee/top-shelf",
-                  "_blank"
-                )
-              }
+              onClick={() => window.open(RELEASES[selected].link, "_blank")}
               style={{
                 position: "relative",
                 flex: 1,
@@ -2473,7 +2481,7 @@ activeGame === "hell" ? (
                 style={{
                   position: "absolute",
                   inset: 0,
-                  backgroundImage: "url('/topshelf.png')",
+                  backgroundImage: `url('${RELEASES[selected].cover}')`,
                   backgroundSize: "cover",
                   backgroundPosition: "center",
                   filter: "blur(20px) saturate(1.4) brightness(0.9)",
@@ -2481,8 +2489,9 @@ activeGame === "hell" ? (
                 }}
               />
               <Image
-                src="/topshelf.png"
-                alt="TOPSHELF"
+                key={RELEASES[selected].cover}
+                src={RELEASES[selected].cover}
+                alt={RELEASES[selected].name}
                 fill
                 style={{ objectFit: "contain", zIndex: 1 }}
               />
@@ -2988,7 +2997,7 @@ activeGame === "hell" ? (
             onLostPointerCapture={() => tpA(false)}
           >
             <span>A</span>
-            <small>{activeGame === "super" ? "JUMP" : "START"}</small>
+            <small>{activeGame === "super" ? "JUMP" : activeGame === "bird" ? "FLAP" : activeGame === "vortex" ? "LAUNCH" : "START"}</small>
           </button>
           )}
 
@@ -3338,6 +3347,24 @@ activeGame === "hell" ? (
                   [["ESC"], "pause"],
                   [["BACKSPACE"], "menu"],
                 ]
+              : activeGame === "vortex"
+              ? [
+                  [["MOUSE WHEEL", "↑", "↓"], "spin"],
+                  [["SPACE"], "launch"],
+                  [["BACKSPACE"], "menu"],
+                ]
+              : activeGame === "snake"
+              ? [
+                  [["↑", "↓", "←", "→"], "steer"],
+                  [["SPACE"], "start"],
+                  [["BACKSPACE"], "menu"],
+                ]
+              : activeGame === "bird"
+              ? [
+                  [["SPACE", "↑"], "flap"],
+                  [["M"], "mute"],
+                  [["BACKSPACE"], "menu"],
+                ]
               : activeGame === "hell"
               ? [
                   [["W", "A", "S", "D"], "move"],
@@ -3374,6 +3401,12 @@ activeGame === "hell" ? (
               ? "d-pad / stick = walk · bottom button = jump · left button = fire · d-pad down = go into the Void · right button = back"
               : activeGame === "jungle"
               ? "d-pad left/right = change lane · up = jump · down = slide · bottom button = start / jump · right button = back"
+              : activeGame === "vortex"
+              ? "d-pad up/down or drag the screen = spin · bottom button = launch · right button = back"
+              : activeGame === "snake"
+              ? "d-pad or swipe the screen = steer · bottom button = start · right button = back"
+              : activeGame === "bird"
+              ? "bottom button or tap the screen = flap · right button = back"
               : activeGame === "hell"
               ? "pink joystick = move · hold FIRE = shoot (it aims for you) · GUN = switch weapon · PAUSE + EXIT at the top"
               : "d-pad / stick = move · bottom button = start · right button = back · top button = play/pause"}
