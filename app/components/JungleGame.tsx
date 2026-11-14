@@ -2229,9 +2229,10 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
   // ---------- touch: swipe to move, tap to pick / jump ----------
   // PHONES (touch = true): swipe ANYWHERE on the screen (the page's small EXIT / PAUSE / music buttons still work).
   //   Other touch screens: the swipe has to start on the game picture (or just next to it).
-  // One finger can do several moves in a row: swipe left, keep the finger down, swipe up = lane + jump.
+  // One swipe = one move (a long swipe still moves only one lane). Without lifting, a swipe in a DIFFERENT direction
+  // is another move: swipe left, keep the finger down, swipe up = lane + jump.
   // A tap on the game picture goes to whatever is under the finger (shop row, RESUME...), elsewhere it = jump / start.
-  const swipe = useRef({ x: 0, y: 0, on: false, fired: false, id: -1 });
+  const swipe = useRef({ x: 0, y: 0, on: false, fired: false, id: -1, last: "" });
   const SWIPE_PX = 18; // how far the finger has to slide for one move (in screen pixels)
 
   // which way a slide went, or null if it's still too short
@@ -2266,7 +2267,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
         const M = 40;
         if (!r || t.clientX < r.left - M || t.clientX > r.right + M || t.clientY < r.top - M || t.clientY > r.bottom + M) return;
       }
-      swipe.current = { x: t.clientX, y: t.clientY, on: true, fired: false, id: t.identifier };
+      swipe.current = { x: t.clientX, y: t.clientY, on: true, fired: false, id: t.identifier, last: "" };
       if (e.cancelable) e.preventDefault(); // no double-tap zoom / long-press menu
     };
     const find = (e: TouchEvent) => {
@@ -2282,10 +2283,14 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       if (e.cancelable) e.preventDefault(); // don't scroll the page while swiping
       const dir = swipeDir(t.clientX - sw.x, t.clientY - sw.y);
       if (!dir) return;
+      // measure again from here, so the same finger can do ANOTHER move...
+      sw.x = t.clientX;
+      sw.y = t.clientY;
+      // ...but only in a different direction: one long swipe = exactly one lane (so you can stop in the middle)
+      if (dir === sw.last) return;
+      sw.last = dir;
       inputRef.current?.(dir);
       sw.fired = true;
-      sw.x = t.clientX; // measure again from here, so the same finger can swipe again
-      sw.y = t.clientY;
     };
     const end = (e: TouchEvent) => {
       const sw = swipe.current;
@@ -2318,7 +2323,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       onPointerDown={(e) => {
         if (e.pointerType !== "mouse") return;
         e.stopPropagation();
-        swipe.current = { x: e.clientX, y: e.clientY, on: true, fired: false, id: -1 };
+        swipe.current = { x: e.clientX, y: e.clientY, on: true, fired: false, id: -1, last: "" };
       }}
       onPointerMove={(e) => {
         const sw = swipe.current;

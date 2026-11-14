@@ -14,8 +14,6 @@ const HexGame = dynamic(() => import("./components/HexGame"), { ssr: false });
 const MazeGame = dynamic(() => import("./components/MazeGame"), { ssr: false });
 const SuperGame = dynamic(() => import("./components/SuperGame"), { ssr: false });
 const JungleGame = dynamic(() => import("./components/JungleGame"), { ssr: false });
-const HellGame = dynamic(() => import("./components/HellGame"), { ssr: false });
-const HellPad = dynamic(() => import("./components/HellPad"), { ssr: false });
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
 import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
 
@@ -172,7 +170,6 @@ const ITEM_ICONS: Record<string, string> = {
   "Pink Bird": "/icons/pinkbird.gif",
   "Pink Snake": "/icons/pinksnake.gif",
   "Pink Jungle": "/icons/pinkjungle.gif",
-  "Pink Hell": "/icons/pinkhell.gif",
   Back: "/icons/arrow.gif",
 };
 
@@ -256,6 +253,189 @@ const STRUCTURED_DATA = {
     "PINKMANE is an artist and producer who codes and makes music in their free time. Cloud rap and trap, made mostly with Serum 2. Music on Spotify, Apple Music, SoundCloud and Bandcamp.",
   sameAs: ARTIST_LINKS.map((link) => link.url),
 };
+
+// ---------- GAMES on the PSP ----------
+// Clicking "Games" on the iPod turns on the PSP with this list. The highlighted game shows a little moving preview
+// (public/previews/<file>.gif, a few seconds recorded from the real game) with what it is and how to play.
+// The order here = the order on the PSP. Rename / reorder freely; "name" must match ITEM_ICONS for the icon.
+type GameId = "pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle";
+const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; how: string; psp: boolean }[] = [
+  {
+    name: "Pink Jungle",
+    id: "jungle",
+    preview: "/previews/jungle.gif",
+    blurb: "Run down the old jungle path. Dodge rocks, roots and branches, BEARMANPIG is right behind you!",
+    how: "left/right = lane · up = jump · down = duck",
+    psp: true,
+  },
+  {
+    name: "Pinkmane Void",
+    id: "super",
+    preview: "/previews/void.gif",
+    blurb: "The main game. Run, jump and shoot through the Void, beat the bosses, stack your gold.",
+    how: "left/right = walk · up = jump · down = shoot",
+    psp: true,
+  },
+  {
+    name: "Pink Hexagon",
+    id: "hex",
+    preview: "/previews/hex.gif",
+    blurb: "The walls close in. Spin around the middle and slip through the gaps as long as you can.",
+    how: "left/right = spin",
+    psp: false,
+  },
+  {
+    name: "Pink Maze",
+    id: "maze",
+    preview: "/previews/maze.gif",
+    blurb: "Eat every dot in the maze and don't let the skulls catch you.",
+    how: "arrows steer",
+    psp: true,
+  },
+  {
+    name: "Pink Vortex",
+    id: "vortex",
+    preview: "/previews/vortex.gif",
+    blurb: "Spin the paddle around the vortex, keep the ball in and break the rings.",
+    how: "mouse wheel / up / down = spin",
+    psp: false,
+  },
+  {
+    name: "Pink Snake",
+    id: "snake",
+    preview: "/previews/snake.gif",
+    blurb: "Eat, grow longer, don't bite yourself.",
+    how: "arrows steer",
+    psp: false,
+  },
+  {
+    name: "Pink Bird",
+    id: "bird",
+    preview: "/previews/bird.gif",
+    blurb: "Flap through the gaps between the pipes. One touch and you're out.",
+    how: "space / tap = flap",
+    psp: false,
+  },
+  {
+    name: "Pink Run",
+    id: "pinkrun",
+    preview: "/previews/pinkrun.gif",
+    blurb: "Jump over everything in your way. How far can you get?",
+    how: "space / tap = jump",
+    psp: false,
+  },
+];
+
+// The game list on the PSP screen: rows on the left, the highlighted game's preview on the right.
+// Keys / D-pad / wheel move the highlight (the page does that), OK / A plays.
+// Mouse + touch: tap a row = highlight it (see its preview), tap it again or tap the preview = play. Swipe up / down = scroll.
+function GamePicker({
+  selected,
+  onHighlight,
+  onOpen,
+  onStep,
+}: {
+  selected: number;
+  onHighlight: (i: number) => void;
+  onOpen: (i: number) => void;
+  onStep: (dir: 1 | -1) => void;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const drag = useRef({ y: 0, acc: 0, moved: false, on: false });
+  const rows = [...PICKER_GAMES.map((g) => g.name), "Back"];
+  const game = PICKER_GAMES[selected];
+
+  // keep the highlighted row in view
+  useEffect(() => {
+    const list = listRef.current;
+    const row = list?.children[selected] as HTMLElement | undefined;
+    if (!list || !row) return;
+    const top = row.offsetTop - list.clientHeight / 2 + row.offsetHeight / 2;
+    list.scrollTo({ top, behavior: "smooth" });
+  }, [selected]);
+
+  const STEP = 28; // how far a finger slides for one row
+  return (
+    <div className="gp">
+      <div
+        className="gp-list"
+        ref={listRef}
+        onPointerDown={(e) => {
+          drag.current = { y: e.clientY, acc: 0, moved: false, on: true };
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current;
+          if (!d.on || e.pointerType === "mouse") return;
+          d.acc += e.clientY - d.y;
+          d.y = e.clientY;
+          while (d.acc <= -STEP) {
+            onStep(1);
+            d.acc += STEP;
+            d.moved = true;
+          }
+          while (d.acc >= STEP) {
+            onStep(-1);
+            d.acc -= STEP;
+            d.moved = true;
+          }
+        }}
+        onPointerUp={() => {
+          drag.current.on = false;
+        }}
+        onPointerCancel={() => {
+          drag.current.on = false;
+        }}
+      >
+        {rows.map((name, i) => (
+          <button
+            key={name}
+            className={`gp-row ${i === selected ? "gp-on" : ""}`}
+            onClick={() => {
+              if (drag.current.moved) return; // that was a swipe, not a tap
+              if (i === selected) onOpen(i);
+              else onHighlight(i);
+            }}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            {ITEM_ICONS[name] && (
+              <img
+                src={ITEM_ICONS[name]}
+                alt=""
+                className="gp-icon"
+                draggable={false}
+                onError={(e) => (e.currentTarget.style.visibility = "hidden")} // a missing icon file: leave the space empty
+              />
+            )}
+            <span className="gp-name">{name}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="gp-side">
+        {game ? (
+          <>
+            <button className="gp-preview" onClick={() => onOpen(selected)} onMouseDown={(e) => e.preventDefault()} aria-label={`Play ${game.name}`}>
+              {/* key = the game, so the GIF starts from its first frame when you move to it */}
+              <img key={game.id} src={game.preview} alt={`${game.name} preview`} draggable={false} />
+            </button>
+            <div className="gp-title">
+              {game.name.toUpperCase()}
+              <span className="gp-tag">{game.psp ? "PSP" : "IPOD"}</span>
+            </div>
+            <div className="gp-blurb">{game.blurb}</div>
+            <div className="gp-how">{game.how}</div>
+            <div className="gp-play">▶ A / ENTER / TAP = PLAY</div>
+          </>
+        ) : (
+          <div className="gp-back">
+            <div className="gp-title">BACK</div>
+            <div className="gp-blurb">Turn off the PSP and go back to the iPod menu.</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 type Glyph = {
   id: number;
@@ -749,12 +929,16 @@ export default function Home() {
   const [playing, setPlaying] = useState(false);
   const [jumpSignal, setJumpSignal] = useState(0);
   // Which game is open, and how far the click wheel was turned (for Pink Vortex)
-  const [activeGame, setActiveGame] = useState<"pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle" | "hell">("pinkrun");
+  const [activeGame, setActiveGame] = useState<GameId>("pinkrun");
   const spinRef = useRef(0);
-  // Pink Maze, Pinkmane Void, Pink Jungle and Pink Hell play on a wide handheld instead of the iPod
-  const handheld = playing && (activeGame === "maze" || activeGame === "super" || activeGame === "jungle" || activeGame === "hell");
+  // Pink Maze, Pinkmane Void and Pink Jungle play on a wide handheld instead of the iPod
+  const hhGame = playing && (activeGame === "maze" || activeGame === "super" || activeGame === "jungle");
+  // Games menu: the PSP turns on and shows the game list with previews
+  const gamePicker = !playing && menu === "games";
+  // The PSP is on: playing one of its games, or picking a game
+  const handheld = hhGame || gamePicker;
   // The song list. In PINKMANE VOID on the handheld the VOID_BEATS are added after your songs (your songs keep their places in the list).
-  const inVoid = handheld && activeGame === "super";
+  const inVoid = hhGame && activeGame === "super";
   const tracks = inVoid ? [...TRACKS, ...VOID_BEATS] : TRACKS;
   const tracksRef = useRef(tracks);
   tracksRef.current = tracks;
@@ -855,18 +1039,8 @@ export default function Home() {
     socials: ["Instagram", "Twitch", "Releases", "Back"],
     releases: ["TOPSHELF", "Back"],
     // Games: the main game first, the rest live one step deeper in Mini Games
-    games: ["Pinkmane Void", "Mini Games", "Back"],
-    minigames: [
-      "Pink Jungle",
-      "Pink Hell",
-      "Pink Hexagon",
-      "Pink Maze",
-      "Pink Vortex",
-      "Pink Snake",
-      "Pink Bird",
-      "Pink Run",
-      "Back",
-    ],
+    // Games: shown on the PSP as a list with previews (see PICKER_GAMES)
+    games: [...PICKER_GAMES.map((g) => g.name), "Back"],
   };
 
   const items = menus[menu as keyof typeof menus];
@@ -887,8 +1061,7 @@ export default function Home() {
   // The small label next to a menu row (null = no label)
   const rowTag = (item: string) => {
     if (item === "Pinkmane Void") return "[ MAIN GAME ]";
-    if (item === "Mini Games") return `[${menus.minigames.length - 1} games]`;
-    if (menu === "minigames" && item !== "Back") return "[mini game]";
+    if (menu === "games" && item !== "Back") return "[mini game]";
     return null;
   };
 
@@ -1048,22 +1221,12 @@ export default function Home() {
     trace("goBack", `playing=${playing} menu=${menu}`);
     if (playing) {
       setPlaying(false);
-      if (activeGame === "super") {
-        // Pinkmane Void is the first row in Games
-        setMenu("games");
-        setSelected(0);
-      } else {
-        setMenu("minigames");
-        setSelected({ jungle: 0, hell: 1, hex: 2, maze: 3, vortex: 4, snake: 5, bird: 6, pinkrun: 7 }[activeGame]);
-      }
-      return;
-    }
-    // Mini Games lives inside Games; Games lives on the main menu; Releases lives inside Socials
-    if (menu === "minigames") {
+      // back to the PSP game list, on the game you just played
       setMenu("games");
-      setSelected(1);
+      setSelected(Math.max(0, PICKER_GAMES.findIndex((g) => g.id === activeGame)));
       return;
     }
+    // Games lives on the main menu; Releases lives inside Socials
     if (menu === "games") {
       setMenu("main");
       setSelected(3);
@@ -1161,55 +1324,10 @@ export default function Home() {
     }
 
     if (menu === "games") {
-      if (item === "Pinkmane Void") {
+      const game = PICKER_GAMES.find((g) => g.name === item);
+      if (game) {
         spinRef.current = 0;
-        setActiveGame("super");
-        setPlaying(true);
-      }
-      if (item === "Mini Games") {
-        setMenu("minigames");
-        setSelected(0);
-      }
-      if (item === "Back") goBack();
-    }
-
-    if (menu === "minigames") {
-      if (item === "Pink Run") {
-        setActiveGame("pinkrun");
-        setPlaying(true);
-      }
-      if (item === "Pink Vortex") {
-        spinRef.current = 0;
-        setActiveGame("vortex");
-        setPlaying(true);
-      }
-      if (item === "Pink Snake") {
-        spinRef.current = 0;
-        setActiveGame("snake");
-        setPlaying(true);
-      }
-      if (item === "Pink Bird") {
-        setActiveGame("bird");
-        setPlaying(true);
-      }
-      if (item === "Pink Hexagon") {
-        spinRef.current = 0;
-        setActiveGame("hex");
-        setPlaying(true);
-      }
-      if (item === "Pink Maze") {
-        spinRef.current = 0;
-        setActiveGame("maze");
-        setPlaying(true);
-      }
-      if (item === "Pink Jungle") {
-        spinRef.current = 0;
-        setActiveGame("jungle");
-        setPlaying(true);
-      }
-      if (item === "Pink Hell") {
-        spinRef.current = 0;
-        setActiveGame("hell");
+        setActiveGame(game.id);
         setPlaying(true);
       }
       if (item === "Back") goBack();
@@ -1322,7 +1440,7 @@ export default function Home() {
       // In Pink Snake the arrow keys steer (the game handles them itself)
       if (
         playing &&
-        (activeGame === "snake" || activeGame === "hex" || activeGame === "maze" || activeGame === "super" || activeGame === "jungle" || activeGame === "hell") &&
+        (activeGame === "snake" || activeGame === "hex" || activeGame === "maze" || activeGame === "super" || activeGame === "jungle") &&
         e.key.startsWith("Arrow")
       )
         return;
@@ -1349,8 +1467,6 @@ export default function Home() {
     };
 
     const handleWheel = (e: WheelEvent) => {
-      // In Pink Hell the game uses the mouse wheel itself (switch weapon)
-      if (playing && activeGame === "hell") return;
       // In Pink Vortex the mouse wheel spins the paddle, in Pink Snake it turns the snake
       if (playing && activeGame === "vortex") {
         spinRef.current += e.deltaY > 0 ? 14 : -14;
@@ -1699,8 +1815,7 @@ export default function Home() {
         activeGame === "hex" ||
         activeGame === "maze" ||
         activeGame === "super" ||
-        activeGame === "jungle" ||
-        activeGame === "hell")
+        activeGame === "jungle")
     ) {
       spinRef.current += delta;
       return;
@@ -1757,19 +1872,13 @@ export default function Home() {
 
   // The game that's open right now (shown on the iPod, or on the handheld for Maze / Super)
   const gameElement = !playing ? null : (
-activeGame === "hell" ? (
-                <HellGame
-                  actionSignal={jumpSignal}
-                  spinRef={spinRef}
-                  fontFamily={pixelFont.style.fontFamily}
-                  muted={isMuted}
-                />
-              ) : activeGame === "jungle" ? (
+activeGame === "jungle" ? (
                 <JungleGame
                   actionSignal={jumpSignal}
                   spinRef={spinRef}
                   fontFamily={pixelFont.style.fontFamily}
                   muted={isMuted}
+                  touch={isTouch}
                 />
               ) : activeGame === "maze" ? (
                 <MazeGame
@@ -1824,6 +1933,21 @@ activeGame === "hell" ? (
               )
   );
 
+  // What the PSP screen shows: the game list, or the game
+  const screenElement = gamePicker ? (
+    <GamePicker
+      selected={selected}
+      onHighlight={(i) => {
+        playSelectSound();
+        setSelected(i);
+      }}
+      onOpen={(i) => selectItem(i)}
+      onStep={(dir) => (dir > 0 ? goDown() : goUp())}
+    />
+  ) : (
+    gameElement
+  );
+
   // Turning the handheld on: show the PINKMANE boot screen for a moment
   useEffect(() => {
     if (!handheld) return;
@@ -1834,14 +1958,14 @@ activeGame === "hell" ? (
 
   // Pinkmane Void: once the boot screen is gone, point at the keys for 5 seconds
   useEffect(() => {
-    if (!handheld || activeGame !== "super" || handheldBoot) {
+    if (!hhGame || activeGame !== "super" || handheldBoot) {
       setKeyTip(false);
       return;
     }
     setKeyTip(true);
     const t = setTimeout(() => setKeyTip(false), 5000);
     return () => clearTimeout(t);
-  }, [handheld, activeGame, handheldBoot]);
+  }, [hhGame, activeGame, handheldBoot]);
 
   // Load the background mode picked last time
   useEffect(() => {
@@ -2284,13 +2408,9 @@ activeGame === "hell" ? (
                   ? "PINKMANE VOID"
                   : activeGame === "jungle"
                   ? "PINK JUNGLE"
-                  : activeGame === "hell"
-                  ? "PINK HELL"
                   : "PINK RUN"
                 : menu === "main"
                 ? "PINKMANE"
-                : menu === "minigames"
-                ? "MINI GAMES"
                 : menu.toUpperCase()}
             </h2>
           </div>
@@ -2625,9 +2745,7 @@ activeGame === "hell" ? (
                 : activeGame === "vortex"
                 ? "turn wheel or drag screen · OK launch · ◀▶ songs"
                 : activeGame === "jungle"
-                ? "swipe to move / jump / slide · tap to jump"
-                : activeGame === "hell"
-                ? "left stick = move · right stick = aim + shoot · pause at the top"
+                ? "swipe to change lane / jump / duck · tap to jump · PAUSE top left"
                 : "tap screen or OK to jump · ◀▶ songs"
               : "swipe wheel to scroll · ◀▶ songs"}
           </span>
@@ -2674,6 +2792,7 @@ activeGame === "hell" ? (
               [["←", "→"], "lane"],
               [["↑", "SPACE"], "jump"],
               [["↓"], "slide"],
+              [["ESC"], "pause"],
               [["BACKSPACE"], "exit"],
             ]
           : [
@@ -2709,7 +2828,7 @@ activeGame === "hell" ? (
 
           {/* The game */}
           <div className="tp-screen">
-            {gameElement}
+            {screenElement}
             {handheldBoot && (
               <div className="screen-overlay">
                 <div className="hh-boot-dude" />
@@ -2731,7 +2850,7 @@ activeGame === "hell" ? (
             <button className="tp-small" onClick={goBack} aria-label="Leave the game">
               EXIT
             </button>
-            {(activeGame === "super" || activeGame === "hell") && (
+            {!gamePicker && (activeGame === "super" || activeGame === "jungle") && (
               <button className="tp-small" onClick={() => tapKey("Escape")} aria-label="Pause">
                 PAUSE
               </button>
@@ -2756,12 +2875,9 @@ activeGame === "hell" ? (
             </button>
           </div>
 
-          {/* Left thumb. Pinkmane Void: two squares, walk left and walk right (slide between them without lifting).
+          {/* Left thumb. Pink Jungle: nothing (you swipe). Pinkmane Void: two squares, walk left and walk right (slide between them without lifting).
               Pink Maze needs all four directions, so it keeps the round pad. */}
-          {activeGame === "hell" ? (
-            // Pink Hell: a walk stick on the left, an aim + shoot stick on the right, and a GUN button (components/HellPad.tsx)
-            <HellPad onWeapon={() => tapKey("q")} />
-          ) : activeGame === "super" ? (
+          {gamePicker || activeGame === "jungle" ? null : activeGame === "super" ? (
             <div
               className="tp-walk"
               role="group"
@@ -2812,7 +2928,7 @@ activeGame === "hell" ? (
 
           {/* Right thumb: A = jump (hold it to fly with the jetpack) / OK in the menus,
               S = shoot, or go down into the Void (the game's hints say PRESS S TO SHOOT, so the button says S) */}
-          {activeGame === "super" && (
+          {!gamePicker && activeGame === "super" && (
             <button
               className={`tp-btn tp-b ${tpBOn ? "tp-on" : ""}`}
               aria-label="Shoot, or go down into the Void"
@@ -2829,7 +2945,8 @@ activeGame === "hell" ? (
               <small>FIRE/DOWN</small>
             </button>
           )}
-          {activeGame !== "hell" && (
+          {/* Pink Jungle on phones has no thumb buttons: you swipe on the screen instead */}
+          {!gamePicker && activeGame !== "jungle" && (
           <button
             className={`tp-btn tp-a ${tpAOn ? "tp-on" : ""}`}
             aria-label={activeGame === "super" ? "Jump" : "Start"}
@@ -2843,7 +2960,7 @@ activeGame === "hell" ? (
             onLostPointerCapture={() => tpA(false)}
           >
             <span>A</span>
-            <small>{activeGame === "super" || activeGame === "jungle" ? "JUMP" : "START"}</small>
+            <small>{activeGame === "super" ? "JUMP" : "START"}</small>
           </button>
           )}
 
@@ -2935,7 +3052,7 @@ activeGame === "hell" ? (
 
             {/* The game, inside the screen you drew */}
             <div className="hh-screen" style={hhBox(15, 4, 78, 33)}>
-              {gameElement}
+              {screenElement}
               {handheldBoot && (
                 <div className="screen-overlay">
                   <div className="hh-boot-dude" />
@@ -3169,7 +3286,14 @@ activeGame === "hell" ? (
             </div>
           )}
           <div className={`hh-keys ${pixelFont.className}`}>
-            {(activeGame === "super"
+            {(gamePicker
+              ? [
+                  [["↑", "↓", "W", "S"], "choose"],
+                  [["ENTER"], "play"],
+                  [["MOUSE"], "click"],
+                  [["BACKSPACE"], "back"],
+                ]
+              : activeGame === "super"
               ? [
                   [["A", "D", "←", "→"], "walk"],
                   [["W", "↑", "SPACE"], "jump"],
@@ -3183,14 +3307,6 @@ activeGame === "hell" ? (
                   [["A", "D", "←", "→"], "lane"],
                   [["W", "↑", "SPACE"], "jump"],
                   [["S", "↓"], "slide"],
-                  [["BACKSPACE"], "menu"],
-                ]
-              : activeGame === "hell"
-              ? [
-                  [["W", "A", "S", "D"], "move"],
-                  [["MOUSE"], "aim"],
-                  [["CLICK"], "shoot"],
-                  [["1", "2", "Q"], "weapon"],
                   [["ESC"], "pause"],
                   [["BACKSPACE"], "menu"],
                 ]
@@ -3215,12 +3331,12 @@ activeGame === "hell" ? (
 
           <div className={`hh-hint ${pixelFont.className}`}>
             best played on a laptop with a keyboard ·{" "}
-            {activeGame === "super"
+            {gamePicker
+              ? "d-pad up/down = choose a game · bottom button = play · right button = back"
+              : activeGame === "super"
               ? "d-pad / stick = walk · bottom button = jump · left button = fire · d-pad down = go into the Void · right button = back"
               : activeGame === "jungle"
               ? "d-pad left/right = change lane · up = jump · down = slide · bottom button = start / jump · right button = back"
-              : activeGame === "hell"
-              ? "left stick = move · right stick = aim + shoot (it helps you aim) · GUN = switch weapon · PAUSE + EXIT at the top"
               : "d-pad / stick = move · bottom button = start · right button = back · top button = play/pause"}
             <span className="hh-rotate"> · turn your phone sideways for a bigger screen</span>
           </div>
@@ -3255,6 +3371,133 @@ activeGame === "hell" ? (
         main textarea {
           -webkit-user-select: text;
           user-select: text;
+        }
+
+        /* ---------- THE GAME LIST ON THE PSP (GamePicker) ----------
+           Sizes use cqh / cqw = % of the PSP screen, so it looks the same on the drawn PSP and on phones */
+        .gp {
+          position: absolute;
+          inset: 0;
+          container-type: size;
+          display: grid;
+          grid-template-columns: 42% 1fr;
+          gap: 3cqh;
+          padding: 4cqh;
+          box-sizing: border-box;
+          background: radial-gradient(circle at 70% 30%, #3a1240 0%, #170a1e 60%, #0c0610 100%);
+          color: #f3d7f0;
+          font-family: inherit;
+          touch-action: none;
+          user-select: none;
+          -webkit-user-select: none;
+        }
+        .gp-list {
+          display: flex;
+          flex-direction: column;
+          gap: 1.6cqh;
+          overflow: hidden;
+          padding: 1cqh 0.5cqw;
+        }
+        .gp-row {
+          flex: 0 0 auto;
+          display: flex;
+          align-items: center;
+          gap: 2.4cqh;
+          height: 13cqh;
+          padding: 0 2.4cqh;
+          border: 0.6cqh solid #4a1447;
+          background: rgba(20, 8, 26, 0.85);
+          color: #e6b8e0;
+          font-family: inherit;
+          font-size: 4.6cqh;
+          text-align: left;
+          cursor: pointer;
+          box-shadow: 0.8cqh 0.8cqh 0 #000;
+          transition: transform 0.08s;
+        }
+        .gp-row.gp-on {
+          background: #d63cc8;
+          border-color: #fff;
+          color: #fff;
+          text-shadow: 0.5cqh 0.5cqh 0 #4a1447;
+          transform: translateX(1.5cqh);
+        }
+        .gp-icon {
+          height: 8.5cqh;
+          width: 8.5cqh;
+          object-fit: contain;
+          image-rendering: pixelated;
+          flex: 0 0 auto;
+        }
+        .gp-name {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .gp-side {
+          display: flex;
+          flex-direction: column;
+          gap: 2cqh;
+          min-width: 0;
+        }
+        .gp-preview {
+          flex: 0 0 auto;
+          height: 56cqh;
+          padding: 0;
+          border: 0.8cqh solid #fff;
+          background: #000;
+          box-shadow: 0 0 0 0.6cqh #d63cc8, 1.2cqh 1.2cqh 0 #000;
+          cursor: pointer;
+          overflow: hidden;
+        }
+        .gp-preview img {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+          image-rendering: pixelated;
+          display: block;
+        }
+        .gp-title {
+          font-size: 5.4cqh;
+          color: #fff;
+          text-shadow: 0.6cqh 0.6cqh 0 #d63cc8;
+          display: flex;
+          align-items: center;
+          gap: 2cqh;
+        }
+        .gp-tag {
+          font-size: 3cqh;
+          padding: 0.6cqh 1.2cqh;
+          background: #4a1447;
+          color: #ffb3f4;
+          text-shadow: none;
+        }
+        .gp-blurb {
+          font-size: 3.3cqh;
+          line-height: 1.45;
+          color: #e6b8e0;
+        }
+        .gp-how {
+          font-size: 3.3cqh;
+          color: #9df59a;
+        }
+        .gp-play {
+          margin-top: auto;
+          font-size: 3.4cqh;
+          color: #fff;
+          animation: gpBlink 1s steps(2, start) infinite;
+        }
+        .gp-back {
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          gap: 3cqh;
+          height: 100%;
+        }
+        @keyframes gpBlink {
+          to {
+            visibility: hidden;
+          }
         }
 
         /* ---------- PHONES + TABLETS: full-screen game with thumb buttons ----------
