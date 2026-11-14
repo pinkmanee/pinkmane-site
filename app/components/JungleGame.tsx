@@ -8,6 +8,8 @@ import { useEffect, useRef } from "react";
 //   ↑ / W / SPACE / OK (or swipe up)     = jump
 //   ↓ / S (or swipe down)                = slide
 // Hit something once = you stumble and BEARMANPIG catches up. Stumble again while he's close = he gets you.
+// Every 1000 score the world changes: GREEN JUNGLE -> ORANGE JUNGLE -> BLUE GRASS (no trees, tall grass) -> green again...
+// The game is drawn wide (like PINKMANE VOID), so it fills the PINKMANE handheld screen.
 
 type Props = {
   // Goes up by 1 every time the player presses OK / Enter / Space (= start / jump)
@@ -33,10 +35,12 @@ const SAFE_START = 45; // first meters with no obstacles at all
 const CHASE_DECAY = 0.065; // how fast BEARMANPIG falls back after a stumble (bigger = easier)
 const CHASE_DEADLY = 0.3; // stumble while he's closer than this = caught
 const START_PIXELS = 4; // how chunky the picture is at the start (it sharpens to 1 in the first seconds)
+const ZONE_SCORE = 1000; // every this many points the background changes to the next world
 
 // ---------- Screen + camera ----------
-const W = 192;
-const H = 144;
+// wide picture, the same shape as the handheld screen (64 : 30)
+const W = 320;
+const H = 150;
 const HOR = 46; // horizon line
 const F = 196; // focal length (how "zoomed in" the 3D is)
 const PZ = 3; // how far in front of the camera the player runs
@@ -49,7 +53,6 @@ const FH = H - HOR;
 const GREEN = "#7dff6a";
 const GREEN_DARK = "#1d6b2a";
 const PINK = "#ff5fd2";
-const FOG: [number, number, number] = [12, 40, 22];
 const BRICKS: [number, number, number][] = [
   [78, 98, 72],
   [88, 110, 78],
@@ -59,11 +62,109 @@ const BRICKS: [number, number, number][] = [
 const MORTAR: [number, number, number] = [34, 50, 32];
 const EDGE: [number, number, number] = [52, 70, 48];
 const EDGE_DARK: [number, number, number] = [40, 56, 38];
-const JUNGLE: [number, number, number][] = [
-  [20, 62, 28],
-  [26, 76, 34],
-  [16, 52, 24],
-  [34, 92, 40],
+
+// ---------- The 3 worlds (the background changes every ZONE_SCORE points) ----------
+// name      = the text that pops up when you get there
+// fog       = the colour far away
+// ground    = 4 colours for the ground next to the path
+// sky       = 4 colour bands of the sky, top to bottom
+// far       = the dark line of trees / hills at the horizon
+// canopy    = the leaves hanging from the top of the screen (canopyAmt 0 = open sky with stars)
+// leaves    = 4 colours for the tree leaves (or the tall grass), dark to light
+// vine      = hanging vines + moss on the pillars (dark, light)
+// side      = "trees" or "grass" (tall grass instead of trees)
+type RGB = [number, number, number];
+type Theme = {
+  name: string;
+  title: string;
+  fog: RGB;
+  ground: RGB[];
+  sky: RGB[];
+  far: RGB;
+  canopy: RGB;
+  canopyAmt: number;
+  leaves: string[];
+  vine: string;
+  vineLight: string;
+  firefly: string;
+  side: "trees" | "grass";
+};
+const THEMES: Theme[] = [
+  {
+    name: "GREEN JUNGLE",
+    title: "#7dff6a",
+    fog: [12, 40, 22],
+    ground: [
+      [20, 62, 28],
+      [26, 76, 34],
+      [16, 52, 24],
+      [34, 92, 40],
+    ],
+    sky: [
+      [5, 20, 10],
+      [8, 32, 15],
+      [11, 42, 20],
+      [12, 48, 24],
+    ],
+    far: [14, 53, 25],
+    canopy: [4, 17, 10],
+    canopyAmt: 1,
+    leaves: ["#0f3a17", "#17521f", "#1f6b28", "#2c8a33"],
+    vine: "#1f6b28",
+    vineLight: "#2c8a33",
+    firefly: "#d8ff6a",
+    side: "trees",
+  },
+  {
+    name: "ORANGE JUNGLE",
+    title: "#ffa23a",
+    fog: [52, 24, 8],
+    ground: [
+      [92, 44, 12],
+      [112, 56, 16],
+      [78, 36, 10],
+      [138, 72, 20],
+    ],
+    sky: [
+      [26, 10, 4],
+      [42, 18, 6],
+      [58, 26, 8],
+      [72, 34, 10],
+    ],
+    far: [70, 30, 8],
+    canopy: [22, 9, 3],
+    canopyAmt: 1,
+    leaves: ["#5a2408", "#8a3a0c", "#c2560f", "#f08a1c"],
+    vine: "#a8480e",
+    vineLight: "#e07a1a",
+    firefly: "#ffd36a",
+    side: "trees",
+  },
+  {
+    name: "BLUE GRASS",
+    title: "#6ab4ff",
+    fog: [8, 18, 46],
+    ground: [
+      [14, 34, 78],
+      [18, 44, 98],
+      [12, 28, 64],
+      [26, 62, 128],
+    ],
+    sky: [
+      [3, 8, 24],
+      [6, 16, 38],
+      [10, 24, 54],
+      [12, 32, 70],
+    ],
+    far: [10, 26, 64],
+    canopy: [3, 8, 24],
+    canopyAmt: 0,
+    leaves: ["#0f2a5a", "#17408a", "#1f5cc2", "#4a8cf0"],
+    vine: "#1f5cc2",
+    vineLight: "#4a8cf0",
+    firefly: "#a8d8ff",
+    side: "grass",
+  },
 ];
 
 // ---------- Pixel sprites ----------
@@ -224,8 +325,8 @@ function hash(a: number, b: number) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-// A jungle tree (24 x 48 pixels)
-function buildTree(seed: number) {
+// A jungle tree (24 x 48 pixels). greens = 4 leaf colours (dark to light), vine = the hanging vines
+function buildTree(seed: number, greens: string[], vine: string) {
   const r = seeded(seed);
   const cv = document.createElement("canvas");
   cv.width = 24;
@@ -239,7 +340,6 @@ function buildTree(seed: number) {
   g.fillStyle = "#6a4423";
   for (let y = 20; y < 48; y += 4) g.fillRect(10 + ((y / 4) % 2), y, 2, 1);
   // leafy blobs
-  const greens = ["#0f3a17", "#17521f", "#1f6b28", "#2c8a33"];
   for (let i = 0; i < 14; i++) {
     const cx = 4 + r() * 16;
     const cy = 3 + r() * 18;
@@ -256,7 +356,7 @@ function buildTree(seed: number) {
       }
   }
   // hanging vines
-  g.fillStyle = "#2c8a33";
+  g.fillStyle = vine;
   for (let i = 0; i < 3; i++) {
     const x = 3 + Math.floor(r() * 18);
     const len = 6 + Math.floor(r() * 12);
@@ -265,8 +365,30 @@ function buildTree(seed: number) {
   return cv;
 }
 
+// A clump of tall grass (28 x 22 pixels), used instead of trees in the BLUE GRASS world
+function buildGrass(seed: number, colors: string[]) {
+  const r = seeded(seed);
+  const cv = document.createElement("canvas");
+  cv.width = 28;
+  cv.height = 22;
+  const g = cv.getContext("2d")!;
+  for (let i = 0; i < 26; i++) {
+    const x = 2 + r() * 24;
+    const h = 9 + r() * 13;
+    const lean = (r() - 0.5) * 7;
+    const base = Math.floor(r() * 3); // darker blades at the back, lighter at the front
+    for (let y = 0; y < h; y++) {
+      const v = y / h; // 0 at the ground .. 1 at the tip
+      const px = Math.round(x + lean * v * v);
+      g.fillStyle = colors[Math.min(3, base + (v > 0.7 ? 1 : 0))];
+      g.fillRect(px, 21 - y, v < 0.55 ? 2 : 1, 1);
+    }
+  }
+  return cv;
+}
+
 // An old temple pillar with moss (12 x 36 pixels)
-function buildPillar(seed: number) {
+function buildPillar(seed: number, moss: string, mossDark: string) {
   const r = seeded(seed);
   const cv = document.createElement("canvas");
   cv.width = 12;
@@ -283,13 +405,13 @@ function buildPillar(seed: number) {
     }
   }
   // moss on top + dripping down
-  g.fillStyle = "#2c8a33";
+  g.fillStyle = moss;
   g.fillRect(0, 0, 12, 3);
   for (let x = 0; x < 12; x++) {
     const len = Math.floor(r() * 9);
     g.fillRect(x, 3, 1, len);
   }
-  g.fillStyle = "#1f6b28";
+  g.fillStyle = mossDark;
   for (let x = 0; x < 12; x += 2) g.fillRect(x, 3, 1, Math.floor(r() * 5));
   return cv;
 }
@@ -327,8 +449,11 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
     const tail = { px: BMP_TAIL, color: "#ff8fb8" };
     const bmp = [buildSprite(BMP_HALF, BMP_COLORS, BMP_LEGS, 1, tail), buildSprite(BMP_HALF, BMP_COLORS, BMP_LEGS, 2, tail)];
     const face = buildSprite(FACE_HALF, FACE_COLORS, 99, 0);
-    const trees = [buildTree(7), buildTree(21), buildTree(99)];
-    const pillars = [buildPillar(3), buildPillar(11)];
+    // one set of trees (or tall grass) and pillars for each world
+    const trees = THEMES.map((th) =>
+      [7, 21, 99].map((seed) => (th.side === "grass" ? buildGrass(seed, th.leaves) : buildTree(seed, th.leaves, th.vineLight)))
+    );
+    const pillars = THEMES.map((th) => [buildPillar(3, th.vineLight, th.vine), buildPillar(11, th.vineLight, th.vine)]);
 
     // small canvas used for the "pixelated at the start" effect
     const pix = document.createElement("canvas");
@@ -375,6 +500,11 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         tone(330, 660, 0.1, "square", 0.05);
         tone(660, 990, 0.12, "square", 0.05, 0.1);
       },
+      zone: () => {
+        tone(520, 780, 0.1, "square", 0.05);
+        tone(780, 1040, 0.1, "square", 0.05, 0.1);
+        tone(1040, 1560, 0.16, "square", 0.05, 0.2);
+      },
     };
 
     // ---------- best score ----------
@@ -408,6 +538,9 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       pops: [] as Popup[],
       curve: 0,
       newBest: false,
+      zone: 0, // how many times the world has changed in this run
+      // where each world starts (distance) and which one it is. The new world comes towards you from the horizon.
+      zones: [{ from: -1e9, theme: 0 }] as { from: number; theme: number }[],
     };
 
     const reset = () => {
@@ -431,6 +564,8 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       s.parts = [];
       s.pops = [];
       s.newBest = false;
+      s.zone = 0;
+      s.zones = [{ from: -1e9, theme: 0 }];
       // a little line of gems to start with
       for (let i = 0; i < 8; i++) s.gemList.push({ at: 14 + i * 1.6, lane: 0, taken: false });
       sfx.start();
@@ -572,6 +707,37 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
     };
     const fogAt = (z: number) => Math.min(1, Math.max(0, (z - 4) / (FAR - 4)));
 
+    // ---------- worlds ----------
+    // which world a spot on the path belongs to
+    const themeIndexAt = (at: number) => {
+      let t = s.zones[0].theme;
+      for (const z of s.zones) if (z.from <= at) t = z.theme;
+      return t;
+    };
+    const mix = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+    const css = (c: RGB) => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+    // the sky + fog colours right now (they blend slowly while the next world gets closer)
+    const look = {
+      fog: THEMES[0].fog,
+      sky: THEMES[0].sky,
+      far: THEMES[0].far,
+      canopy: THEMES[0].canopy,
+      canopyAmt: THEMES[0].canopyAmt,
+      near: THEMES[0],
+    };
+    const updateLook = () => {
+      const cur = THEMES[themeIndexAt(s.dist)];
+      const last = s.zones[s.zones.length - 1];
+      const next = THEMES[last.theme];
+      const t = next === cur ? 0 : Math.min(1, Math.max(0, 1 - (last.from - s.dist) / FAR));
+      look.fog = mix(cur.fog, next.fog, t);
+      look.sky = cur.sky.map((c, i) => mix(c, next.sky[i], t));
+      look.far = mix(cur.far, next.far, t);
+      look.canopy = mix(cur.canopy, next.canopy, t);
+      look.canopyAmt = cur.canopyAmt + (next.canopyAmt - cur.canopyAmt) * t;
+      look.near = t < 0.5 ? cur : next;
+    };
+
     const text = (str: string, x: number, y: number, color: string, size = 8, align: CanvasTextAlign = "center") => {
       ctx.font = `${size}px ${fontFamily}`;
       ctx.textAlign = align;
@@ -680,6 +846,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
 
     const drawFloor = () => {
       const dist = s.dist;
+      const FOG = look.fog;
       for (let y = 0; y < FH; y++) {
         const z = F / (y + 0.5);
         const fog = Math.pow(fogAt(z), 0.7);
@@ -690,6 +857,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         const bfr = wz * 1.7 - brow;
         const grow = Math.floor(wz * 1.1);
         const mort = Math.min(0.3, 0.1 + z * 0.004);
+        const JUNGLE = THEMES[themeIndexAt(wz)].ground; // this row's world
         for (let x = 0; x < W; x++) {
           const wx = (x + 0.5 - cx) * inv;
           const ax = Math.abs(wx);
@@ -715,15 +883,35 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
     };
 
     const drawSky = (t: number) => {
-      const bands = ["#05140a", "#08200f", "#0b2a14", "#0c3018"];
+      const bands = look.sky;
       const bh = Math.ceil(HOR / bands.length);
       bands.forEach((c, i) => {
-        ctx.fillStyle = c;
+        ctx.fillStyle = css(c);
         ctx.fillRect(0, i * bh, W, bh);
       });
       const shift = s.curve * 90;
+      // open sky (BLUE GRASS): stars and a moon, fading in as the leaves above go away
+      const open = 1 - look.canopyAmt;
+      if (open > 0.02) {
+        ctx.globalAlpha = open;
+        for (let i = 0; i < 34; i++) {
+          const sx = ((hash(i, 11) * W + shift * 0.2) % W + W) % W;
+          const sy = 2 + hash(i, 12) * (HOR - 16);
+          if (Math.sin(t * 2 + i * 2.3) < -0.75) continue; // twinkle
+          ctx.fillStyle = hash(i, 13) > 0.7 ? "#ffffff" : "#9cc4ff";
+          ctx.fillRect(Math.round(sx), Math.round(sy), 1, 1);
+        }
+        const mx = Math.round((((W * 0.78 + shift * 0.2) % W) + W) % W);
+        ctx.fillStyle = "#e8f2ff";
+        ctx.fillRect(mx - 3, 7, 6, 8);
+        ctx.fillRect(mx - 4, 8, 8, 6);
+        ctx.fillStyle = "#b8d0f0";
+        ctx.fillRect(mx - 1, 9, 2, 2);
+        ctx.fillRect(mx + 1, 12, 1, 1);
+        ctx.globalAlpha = 1;
+      }
       // far tree line
-      ctx.fillStyle = "#0e3519";
+      ctx.fillStyle = css(look.far);
       for (let x = 0; x < W; x++) {
         const xx = x + shift * 0.5;
         const h = 10 + Math.sin(xx * 0.07) * 4 + Math.sin(xx * 0.19) * 2 + Math.sin(xx * 0.5) * 1;
@@ -732,24 +920,25 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       // canopy hanging from the top + vines
       for (let x = 0; x < W; x++) {
         const xx = x + shift;
-        const h = 7 + Math.sin(xx * 0.11) * 4 + Math.sin(xx * 0.31) * 2;
-        ctx.fillStyle = "#04110a";
+        const h = (7 + Math.sin(xx * 0.11) * 4 + Math.sin(xx * 0.31) * 2) * look.canopyAmt;
+        if (h < 1) continue; // no leaves above in the open worlds
+        ctx.fillStyle = css(look.canopy);
         ctx.fillRect(x, 0, 1, Math.round(h));
         const xi = Math.floor(xx);
         if (((xi % 13) + 13) % 13 === 0) {
-          const len = 8 + Math.floor(hash(xi, 5) * 22);
-          ctx.fillStyle = "#1f6b28";
+          const len = Math.round((8 + Math.floor(hash(xi, 5) * 22)) * look.canopyAmt);
+          ctx.fillStyle = look.near.vine;
           ctx.fillRect(x, Math.round(h), 1, len);
-          ctx.fillStyle = "#2c8a33";
+          ctx.fillStyle = look.near.vineLight;
           for (let y = Math.round(h) + 3; y < h + len; y += 4) ctx.fillRect(x + 1, y, 1, 1);
         }
       }
       // fireflies
-      for (let i = 0; i < 7; i++) {
+      for (let i = 0; i < 12; i++) {
         const fx = ((hash(i, 1) * W + t * (6 + i) + shift) % W + W) % W;
         const fy = 10 + hash(i, 2) * (HOR - 4) + Math.sin(t * 2 + i) * 3;
         if (Math.sin(t * 3 + i * 1.7) > 0.2) {
-          ctx.fillStyle = "#d8ff6a";
+          ctx.fillStyle = look.near.firefly;
           ctx.fillRect(Math.round(fx), Math.round(fy), 1, 1);
         }
       }
@@ -765,23 +954,32 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       for (let k = k0; k <= k1; k++) {
         for (const side of [-1, 1]) {
           const h = hash(k, side + 7);
-          if (h < 0.15) continue;
           const z = k * SPACING - s.dist + PZ;
           if (z < 1.6 || z > FAR) continue;
-          const isPillar = h < 0.38;
-          const wx = side * (PATHW + (isPillar ? 0.45 : 0.9) + hash(k, side + 3) * 0.8);
-          items.push({
-            z,
-            draw: () => {
-              const q = proj(wx, z);
-              const img = isPillar ? pillars[k & 1] : trees[Math.abs(k) % 3];
-              const ww = (isPillar ? 0.8 : 1.8) * q.s;
-              const hh = (isPillar ? 2.4 : 3.6) * q.s;
-              ctx.globalAlpha = 1 - Math.pow(fogAt(z), 1.4);
-              ctx.drawImage(img, Math.round(q.x - ww / 2), Math.round(q.y - hh), Math.round(ww), Math.round(hh));
-              ctx.globalAlpha = 1;
-            },
-          });
+          // which world this spot is in: trees (green / orange) or tall grass (blue)
+          const ti = themeIndexAt(k * SPACING);
+          const grass = THEMES[ti].side === "grass";
+          if (!grass && h < 0.15) continue; // a gap between the trees (the grass has no gaps)
+          const isPillar = grass ? h < 0.1 : h < 0.38;
+          const wx = side * (PATHW + (isPillar ? 0.45 : grass ? 0.6 : 0.9) + hash(k, side + 3) * 0.8);
+          const add = (x: number, img: HTMLCanvasElement, w: number, tall: number) =>
+            items.push({
+              z,
+              draw: () => {
+                const q = proj(x, z);
+                const ww = w * q.s;
+                const hh = tall * q.s;
+                ctx.globalAlpha = 1 - Math.pow(fogAt(z), 1.4);
+                ctx.drawImage(img, Math.round(q.x - ww / 2), Math.round(q.y - hh), Math.round(ww), Math.round(hh));
+                ctx.globalAlpha = 1;
+              },
+            });
+          if (isPillar) add(wx, pillars[ti][k & 1], 0.8, 2.4);
+          else if (grass) {
+            // tall grass: a clump next to the path and another one behind it
+            add(wx + side * 1.3, trees[ti][Math.abs(k + 1) % 3], 1.9, 1.5);
+            add(wx, trees[ti][Math.abs(k) % 3], 1.8, 1.3);
+          } else add(wx, trees[ti][Math.abs(k) % 3], 1.8, 3.6);
         }
       }
       for (const o of s.obs) {
@@ -874,8 +1072,8 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
 
     const pixelate = (f: number) => {
       if (f <= 1) return;
-      const w = W / f;
-      const h = H / f;
+      const w = Math.round(W / f);
+      const h = Math.round(H / f);
       if (pix.width !== w) {
         pix.width = w;
         pix.height = h;
@@ -959,6 +1157,16 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
         s.gemList = s.gemList.filter((g) => g.at > s.dist - 3);
         s.gemList.sort((a, b) => a.at - b.at);
         s.score = Math.floor(s.dist) + s.gems * 5;
+        // every ZONE_SCORE points: the next world starts at the horizon and comes towards you
+        const zone = Math.floor(s.score / ZONE_SCORE);
+        if (zone > s.zone) {
+          s.zone = zone;
+          const ti = zone % THEMES.length;
+          s.zones.push({ from: s.dist + FAR, theme: ti });
+          if (s.zones.length > 4) s.zones.shift();
+          s.pops.push({ x: W / 2, y: 46, text: THEMES[ti].name, life: 2.2, color: THEMES[ti].title });
+          sfx.zone();
+        }
       } else if (s.mode === "ready") {
         s.chase = 0.55 + Math.sin(clock * 1.5) * 0.1; // he's lurking
       }
@@ -983,6 +1191,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
     };
 
     const render = () => {
+      updateLook();
       ctx.save();
       if (s.shake > 0) ctx.translate(Math.round((Math.random() - 0.5) * 4), Math.round((Math.random() - 0.5) * 4));
       drawFloor();
