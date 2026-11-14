@@ -854,13 +854,13 @@ export default function Home() {
     // Games: the main game first, the rest live one step deeper in Mini Games
     games: ["Pinkmane Void", "Mini Games", "Back"],
     minigames: [
+      "Pink Jungle",
       "Pink Hexagon",
       "Pink Maze",
       "Pink Vortex",
       "Pink Snake",
       "Pink Bird",
       "Pink Run",
-      "Pink Jungle",
       "Back",
     ],
   };
@@ -1050,7 +1050,7 @@ export default function Home() {
         setSelected(0);
       } else {
         setMenu("minigames");
-        setSelected({ hex: 0, maze: 1, vortex: 2, snake: 3, bird: 4, pinkrun: 5, jungle: 6 }[activeGame]);
+        setSelected({ jungle: 0, hex: 1, maze: 2, vortex: 3, snake: 4, bird: 5, pinkrun: 6 }[activeGame]);
       }
       return;
     }
@@ -2604,7 +2604,7 @@ activeGame === "jungle" ? (
                 : activeGame === "vortex"
                 ? "turn wheel or drag screen · OK launch · ◀▶ songs"
                 : activeGame === "jungle"
-                ? "swipe to move / jump / slide · tap to jump"
+                ? "◀▶ change lane · A jump · ↓ duck · PAUSE top left"
                 : "tap screen or OK to jump · ◀▶ songs"
               : "swipe wheel to scroll · ◀▶ songs"}
           </span>
@@ -2651,6 +2651,7 @@ activeGame === "jungle" ? (
               [["←", "→"], "lane"],
               [["↑", "SPACE"], "jump"],
               [["↓"], "slide"],
+              [["ESC"], "pause"],
               [["BACKSPACE"], "exit"],
             ]
           : [
@@ -2708,7 +2709,7 @@ activeGame === "jungle" ? (
             <button className="tp-small" onClick={goBack} aria-label="Leave the game">
               EXIT
             </button>
-            {activeGame === "super" && (
+            {(activeGame === "super" || activeGame === "jungle") && (
               <button className="tp-small" onClick={() => tapKey("Escape")} aria-label="Pause">
                 PAUSE
               </button>
@@ -2735,11 +2736,11 @@ activeGame === "jungle" ? (
 
           {/* Left thumb. Pinkmane Void: two squares, walk left and walk right (slide between them without lifting).
               Pink Maze needs all four directions, so it keeps the round pad. */}
-          {activeGame === "super" ? (
+          {activeGame === "super" || activeGame === "jungle" ? (
             <div
               className="tp-walk"
               role="group"
-              aria-label="Walk left or right"
+              aria-label={activeGame === "jungle" ? "Change lane left or right" : "Walk left or right"}
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.currentTarget.setPointerCapture(e.pointerId);
@@ -2786,10 +2787,10 @@ activeGame === "jungle" ? (
 
           {/* Right thumb: A = jump (hold it to fly with the jetpack) / OK in the menus,
               S = shoot, or go down into the Void (the game's hints say PRESS S TO SHOOT, so the button says S) */}
-          {activeGame === "super" && (
+          {(activeGame === "super" || activeGame === "jungle") && (
             <button
               className={`tp-btn tp-b ${tpBOn ? "tp-on" : ""}`}
-              aria-label="Shoot, or go down into the Void"
+              aria-label={activeGame === "jungle" ? "Duck" : "Shoot, or go down into the Void"}
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.currentTarget.setPointerCapture(e.pointerId);
@@ -2799,8 +2800,8 @@ activeGame === "jungle" ? (
               onPointerCancel={() => tpB(false)}
               onLostPointerCapture={() => tpB(false)}
             >
-              <span>S</span>
-              <small>FIRE/DOWN</small>
+              <span>{activeGame === "jungle" ? "↓" : "S"}</span>
+              <small>{activeGame === "jungle" ? "DUCK" : "FIRE/DOWN"}</small>
             </button>
           )}
           <button
@@ -3155,6 +3156,7 @@ activeGame === "jungle" ? (
                   [["A", "D", "←", "→"], "lane"],
                   [["W", "↑", "SPACE"], "jump"],
                   [["S", "↓"], "slide"],
+                  [["ESC"], "pause"],
                   [["BACKSPACE"], "menu"],
                 ]
               : [

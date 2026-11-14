@@ -786,6 +786,10 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
     const shop = { col: 0, row: 0, from: "ready" as "ready" | "caught" };
 
     // ---------- game state ----------
+    // the pause menu (ESC). row 0 = RESUME, 1 = RESTART
+    const pause = { on: false, row: 0 };
+    let pauseClock = 0;
+
     const s = {
       mode: "ready" as Mode,
       t: 0, // time in this mode
@@ -1020,6 +1024,19 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
     };
 
     inputRef.current = (a) => {
+      // PAUSED: up / down picks RESUME or RESTART, OK / SPACE / A / tap picks it
+      if (pause.on) {
+        if (a === "jump" || a === "slide" || a === "left" || a === "right") {
+          pause.row = pause.row === 0 ? 1 : 0;
+          sfx.lane();
+        }
+        if (a === "go") {
+          pause.on = false;
+          if (pause.row === 1) reset();
+          else sfx.lane();
+        }
+        return;
+      }
       if (s.mode === "shop") {
         shopInput(a);
         return;
@@ -1065,12 +1082,29 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat) return;
       const k = e.key;
+      // ESC (or the PAUSE button on phones) = pause / resume, only while running
+      if (k === "Escape" || k === "p" || k === "P") {
+        if (s.mode === "running") {
+          pause.on = !pause.on;
+          pause.row = 0;
+          sfx.lane();
+        }
+        return;
+      }
       if (k === "ArrowLeft" || k === "a" || k === "A") inputRef.current?.("left");
       else if (k === "ArrowRight" || k === "d" || k === "D") inputRef.current?.("right");
       else if (k === "ArrowUp" || k === "w" || k === "W") inputRef.current?.("jump");
       else if (k === "ArrowDown" || k === "s" || k === "S") inputRef.current?.("slide");
     };
     window.addEventListener("keydown", onKey);
+    // switching apps / tabs pauses the run, so BEARMANPIG doesn't get you while you're away
+    const onHidden = () => {
+      if (document.hidden && s.mode === "running" && !pause.on) {
+        pause.on = true;
+        pause.row = 0;
+      }
+    };
+    document.addEventListener("visibilitychange", onHidden);
 
     // ---------- drawing helpers ----------
     const off = (z: number) => (z <= PZ ? 0 : s.curve * (z - PZ) * (z - PZ) * 0.02);
@@ -1981,6 +2015,24 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
       s.pops = s.pops.filter((p) => p.life > 0);
     };
 
+    const drawPause = () => {
+      ctx.fillStyle = "rgba(0,15,5,0.72)";
+      ctx.fillRect(0, 0, W, H);
+      text("PAUSED", W / 2, 22, GREEN, 16);
+      const opts = ["RESUME", "RESTART"];
+      opts.forEach((o, i) => {
+        const y = 62 + i * 18;
+        const on = pause.row === i;
+        if (on) {
+          ctx.fillStyle = GREEN_DARK;
+          ctx.fillRect(W / 2 - 46, y - 4, 92, 15);
+        }
+        text(on ? `> ${o} <` : o, W / 2, y, on ? "#ffffff" : "#9ad19a");
+      });
+      text(`${Math.floor(s.dist)}M  ${s.gems} GEMS`, W / 2, 110, "#b6ffb0");
+      if (Math.floor(pauseClock * 2) % 2 === 0) text("ESC / PAUSE = RESUME", W / 2, 128, GREEN);
+    };
+
     const render = () => {
       updateLook();
       ctx.save();
@@ -2041,8 +2093,12 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
     const loop = (now: number) => {
       const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
       last = now;
-      step(dt);
+      if (pause.on) {
+        pauseClock += dt; // only for the blinking text
+        spinRef.current = 0; // ignore the click wheel while paused
+      } else step(dt);
       render();
+      if (pause.on) drawPause();
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -2050,6 +2106,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted }:
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("keydown", onKey);
+      document.removeEventListener("visibilitychange", onHidden);
       inputRef.current = null;
       try {
         ac?.close();
