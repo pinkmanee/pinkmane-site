@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
-// PINK HELL on phones + tablets: two thumb sticks over the game.
-//   LEFT stick  = walk (any direction, push further = walk faster)
-//   RIGHT stick = aim, and Pinkmane keeps shooting while you hold it (a little aim help points at the nearest demon)
-//   GUN button  = switch weapon
-// The sticks talk to HellGame with a "pinkmane-hell-stick" event: { stick: "move" | "aim", x, y, on }
+// PINK HELL on phones + tablets: the thumb controls over the game.
+//   LEFT  = a pink joystick: walk (push it further = walk faster). Pinkmane looks the way you walk.
+//   RIGHT = one big button: START before the game, FIRE while you play (hold it, it aims at the nearest demon for you)
+//   GUN   = switch weapon (only shows while you play)
+// They talk to HellGame with a "pinkmane-hell-stick" event: { stick: "move" | "fire", x, y, on }
+// and HellGame tells them what's going on with a "pinkmane-hell-state" event: { mode: "ready" | "play" | "dead", paused }
 
 type Props = {
   onWeapon: () => void;
@@ -17,30 +18,35 @@ const buzz = () => {
     navigator.vibrate?.(8);
   } catch {}
 };
+const send = (stick: "move" | "fire", x: number, y: number, on: boolean) =>
+  window.dispatchEvent(new CustomEvent("pinkmane-hell-stick", { detail: { stick, x, y, on } }));
 
-function Stick({ which }: { which: "move" | "aim" }) {
+function Joystick() {
   const knob = useRef<HTMLSpanElement>(null);
-  const send = (x: number, y: number, on: boolean) => {
-    window.dispatchEvent(new CustomEvent("pinkmane-hell-stick", { detail: { stick: which, x, y, on } }));
-    if (knob.current) knob.current.style.transform = `translate(calc(-50% + ${x * 32}%), calc(-50% + ${y * 32}%))`;
+  const move = (x: number, y: number, on: boolean) => {
+    send("move", x, y, on);
+    if (knob.current) {
+      knob.current.style.transform = `translate(calc(-50% + ${x * 60}%), calc(-50% + ${y * 60}%))`;
+      knob.current.classList.toggle("hp-knob-on", on);
+    }
   };
   const update = (e: React.PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
-    let x = (e.clientX - (r.left + r.width / 2)) / (r.width / 2);
-    let y = (e.clientY - (r.top + r.height / 2)) / (r.height / 2);
+    let x = (e.clientX - (r.left + r.width / 2)) / (r.width * 0.4);
+    let y = (e.clientY - (r.top + r.height / 2)) / (r.height * 0.4);
     const l = Math.hypot(x, y);
     if (l > 1) {
       x /= l;
       y /= l;
     }
-    send(x, y, true);
+    move(x, y, true);
   };
-  const release = () => send(0, 0, false);
+  const release = () => move(0, 0, false);
   return (
     <div
-      className={`hp-stick hp-${which}`}
+      className="hp-joy"
       role="group"
-      aria-label={which === "move" ? "Walk" : "Aim and shoot"}
+      aria-label="Joystick: walk"
       onPointerDown={(e) => {
         e.preventDefault();
         try {
@@ -56,79 +62,140 @@ function Stick({ which }: { which: "move" | "aim" }) {
       onPointerCancel={release}
       onLostPointerCapture={release}
     >
-      <span className="hp-label">{which === "move" ? "MOVE" : "AIM + FIRE"}</span>
       <span className="hp-knob" ref={knob} />
     </div>
   );
 }
 
 export default function HellPad({ onWeapon }: Props) {
+  const [state, setState] = useState<{ mode: string; paused: boolean }>({ mode: "ready", paused: false });
+  const [firing, setFiring] = useState(false);
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ mode: string; paused: boolean }>).detail;
+      if (d) setState(d);
+    };
+    window.addEventListener("pinkmane-hell-state", on);
+    return () => window.removeEventListener("pinkmane-hell-state", on);
+  }, []);
+  const playing = state.mode === "play" && !state.paused;
+  const label = state.paused ? "PLAY" : state.mode === "play" ? "FIRE" : state.mode === "dead" ? "AGAIN" : "START";
+  const fire = (on: boolean) => {
+    if (on === firing) return;
+    setFiring(on);
+    send("fire", 0, 0, on);
+    if (on) buzz();
+  };
+
   return (
     <>
-      <Stick which="move" />
-      <Stick which="aim" />
+      <Joystick />
       <button
-        className="hp-gun"
-        aria-label="Switch weapon"
+        className={`hp-fire ${firing ? "hp-on" : ""} ${playing ? "" : "hp-start"}`}
+        aria-label={label}
         onPointerDown={(e) => {
           e.preventDefault();
-          buzz();
-          onWeapon();
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {}
+          fire(true);
         }}
+        onPointerUp={() => fire(false)}
+        onPointerCancel={() => fire(false)}
+        onLostPointerCapture={() => fire(false)}
+        onContextMenu={(e) => e.preventDefault()}
       >
-        <span>GUN</span>
+        <span>{label}</span>
       </button>
+      {playing && (
+        <button
+          className="hp-gun"
+          aria-label="Switch weapon"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            buzz();
+            onWeapon();
+          }}
+        >
+          <span>GUN</span>
+        </button>
+      )}
       <style>{`
-        .hp-stick {
+        /* the pink joystick, bottom left */
+        .hp-joy {
           position: absolute;
+          left: max(10px, env(safe-area-inset-left));
           bottom: max(12px, env(safe-area-inset-bottom));
-          width: min(40vh, 150px); /* SIZE of the sticks (sideways) */
+          width: min(36vh, 140px); /* SIZE of the joystick (sideways) */
           aspect-ratio: 1;
           z-index: 3;
           border-radius: 50%;
-          background: rgba(17, 17, 17, 0.32);
-          border: 2px solid rgba(255, 255, 255, 0.55);
+          background: radial-gradient(circle, rgba(60, 10, 50, 0.55) 0%, rgba(20, 4, 18, 0.55) 70%);
+          border: 3px solid #ff5fd2;
+          box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.5), inset 0 0 18px rgba(255, 95, 210, 0.35);
           touch-action: none;
-        }
-        .hp-move {
-          left: max(10px, env(safe-area-inset-left));
-        }
-        .hp-aim {
-          right: max(10px, env(safe-area-inset-right));
-          border-color: rgba(255, 60, 60, 0.75);
         }
         .hp-knob {
           position: absolute;
           left: 50%;
           top: 50%;
-          width: 42%;
+          width: 46%;
           aspect-ratio: 1;
           border-radius: 50%;
           transform: translate(-50%, -50%);
-          background: rgba(214, 60, 200, 0.6);
-          border: 2px solid rgba(255, 255, 255, 0.8);
+          background: radial-gradient(circle at 35% 30%, #ffc2f0 0%, #ff5fd2 35%, #d63cc8 70%, #8a1f86 100%);
+          border: 3px solid #111;
+          box-shadow: 0 4px 0 rgba(0, 0, 0, 0.55);
           pointer-events: none;
         }
-        .hp-aim .hp-knob {
-          background: rgba(255, 42, 42, 0.6);
+        .hp-knob-on {
+          box-shadow: 0 2px 0 rgba(0, 0, 0, 0.55), 0 0 14px rgba(255, 95, 210, 0.8);
         }
-        .hp-label {
-          position: absolute;
-          left: 0;
-          right: 0;
-          top: -14px;
-          text-align: center;
-          font-size: 7px;
-          color: #fff;
-          text-shadow: 1px 1px 0 #000;
-          pointer-events: none;
-          white-space: nowrap;
-        }
-        .hp-gun {
+        /* the big FIRE (START) button, bottom right */
+        .hp-fire {
           position: absolute;
           right: max(10px, env(safe-area-inset-right));
-          bottom: calc(max(12px, env(safe-area-inset-bottom)) + min(40vh, 150px) + 22px);
-          width: min(18vh, 62px);
+          bottom: max(12px, env(safe-area-inset-bottom));
+          width: min(30vh, 112px); /* SIZE of the fire button (sideways) */
+          aspect-ratio: 1;
+          z-index: 3;
+          padding: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: inherit;
+          font-size: 12px;
+          color: #fff;
+          text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.7);
+          background: radial-gradient(circle at 35% 30%, #ff8a8a 0%, #ff2a2a 40%, #a80000 100%);
+          border: 3px solid #111;
+          border-radius: 50%;
+          box-shadow: 0 5px 0 rgba(0, 0, 0, 0.55), 0 0 0 3px rgba(255, 255, 255, 0.5);
+          touch-action: none;
+          -webkit-user-select: none;
+          user-select: none;
+        }
+        .hp-fire.hp-start {
+          background: radial-gradient(circle at 35% 30%, #fff3a0 0%, #ffd400 40%, #b88a00 100%);
+          color: #111;
+          text-shadow: none;
+          animation: hpPulse 1s ease-in-out infinite;
+        }
+        .hp-fire.hp-on {
+          transform: translateY(3px);
+          box-shadow: 0 2px 0 rgba(0, 0, 0, 0.55), 0 0 0 3px rgba(255, 255, 255, 0.8), 0 0 18px rgba(255, 60, 60, 0.9);
+        }
+        @keyframes hpPulse {
+          50% {
+            scale: 1.06;
+          }
+        }
+        /* the small GUN button: left of the fire button (sideways), above it (upright) */
+        .hp-gun {
+          position: absolute;
+          right: calc(max(10px, env(safe-area-inset-right)) + min(30vh, 112px) + 10px);
+          bottom: max(12px, env(safe-area-inset-bottom));
+          width: min(17vh, 56px);
           aspect-ratio: 1;
           z-index: 3;
           padding: 0;
@@ -139,28 +206,29 @@ export default function HellPad({ onWeapon }: Props) {
           font-size: 8px;
           color: #fff;
           text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.6);
-          background: rgba(138, 31, 134, 0.5);
-          border: 2px solid rgba(255, 255, 255, 0.65);
+          background: rgba(138, 31, 134, 0.75);
+          border: 3px solid #111;
           border-radius: 50%;
+          box-shadow: 0 3px 0 rgba(0, 0, 0, 0.55), 0 0 0 2px rgba(255, 255, 255, 0.5);
           touch-action: none;
         }
         .hp-gun:active {
-          background: rgba(255, 143, 240, 0.9);
+          background: #ff5fd2;
         }
         @media (orientation: portrait) {
-          .hp-stick {
+          .hp-joy {
+            left: 18px;
             bottom: max(30px, env(safe-area-inset-bottom));
-            width: min(40vw, 170px); /* SIZE of the sticks (upright) */
+            width: min(42vw, 170px); /* SIZE of the joystick (upright) */
           }
-          .hp-move {
-            left: 14px;
-          }
-          .hp-aim {
-            right: 14px;
+          .hp-fire {
+            right: 18px;
+            bottom: max(36px, env(safe-area-inset-bottom));
+            width: min(32vw, 130px); /* SIZE of the fire button (upright) */
           }
           .hp-gun {
-            right: 14px;
-            bottom: calc(max(30px, env(safe-area-inset-bottom)) + min(40vw, 170px) + 24px);
+            right: calc(18px + min(32vw, 130px) - min(8vw, 32px));
+            bottom: calc(max(36px, env(safe-area-inset-bottom)) + min(32vw, 130px) + 6px);
             width: min(16vw, 64px);
           }
         }
