@@ -32,6 +32,9 @@ export const GAMES: Record<string, GameCfg> = {
   hell: { key: "pinkhell:scores", rate: 800, base: 5000, max: 3000000 },
   // PINK JUNGLE: meters run + 5 per gem. Top speed with BOOST is ~29 m/s, plus gems (2X GEMS doubles them).
   jungle: { key: "pinkjungle:scores", rate: 200, base: 1000, max: 2000000 },
+  // PINK JETPACK: meters flown + 5 per gem (a piglet hit with a leaf = 3 gems). Top speed is 23.5 m/s,
+  // and the thickest gem rows can add ~150 a second for a moment, so 250 a second leaves plenty of room.
+  jet: { key: "pinkjet:scores", rate: 250, base: 1000, max: 2000000 },
 };
 
 for (let n = 1; n <= LEVEL_COUNT; n++) {

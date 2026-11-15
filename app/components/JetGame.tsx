@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { ScorePanel, type ScoreApi } from "./Scoreboard";
 
 // PINK JETPACK (DEMO): an endless side-scrolling jetpack game.
 // Pinkmane flies through the night city. His jetpack shoots WEED LEAVES downwards, that's what pushes him up.
@@ -9,8 +10,11 @@ import { useEffect, useRef } from "react";
 //   ESC / P (or the PAUSE button on phones)                     = pause
 // Dodge the ZAPPERS (electric bars) and the ROCKETS (a red ! shows where one is coming from).
 // Collect the green gems. The little PIGLETS on the ground don't hurt you: hit one with your weed leaves for bonus gems.
-// One hit and the run is over. Score = meters + 5 for every gem. Your best score is saved in the browser.
-// This is a first demo: no shop, no skins, no online Top 10 yet.
+// One hit and the run is over. Score = meters + 5 for every gem. Your best score is saved in the browser,
+// and a good score goes on the online Top 10 (the same box as PINK JUNGLE, board id "jet").
+// SOUND EFFECTS: the speaker icon top left turns them on / off (or press M), the little slider under it sets how loud
+// (drag it, or press - and +). Your choice is saved in the browser.
+// This is a first demo: no shop and no skins yet.
 
 type Props = {
   // Goes up by 1 every time the player presses OK / A on the handheld (= start, or a short puff of the jetpack)
@@ -29,6 +33,9 @@ type Props = {
 const GAME_TITLE = "PINK JETPACK";
 // Where the best score is saved in the browser
 const BEST_KEY = "pinkmane-jet-best";
+// Where the sound effects settings are saved in the browser
+const FX_KEY = "pinkmane-jet-fx"; // "on" / "off"
+const FX_VOL_KEY = "pinkmane-jet-fx-volume"; // 0 to 1
 // Your pixel dude, the same picture PINKMANE VOID uses (walking frames side by side, each 24 x 35, he looks to the right).
 // If the picture can't be loaded, a simple drawn Pinkmane is used instead.
 const DUDE_IMAGE = "/game/pinkdude.png";
@@ -64,6 +71,9 @@ const SW = 24; // his picture: 24 x 35 pixels
 const SH = 35;
 // the part of him that can be hit (hair, arms and the jetpack don't count, so close calls feel fair)
 const HB = { x: 8, y: 6, w: 9, h: 27 };
+// the speaker icon (top left, on the ceiling) and the sound effects slider under it
+const FX_ICON = { x: 4, y: 2, w: 16, h: 12 }; // the area you can click / tap
+const FX_SLIDER = { x: 7, top: 22, bottom: 58 }; // top = loud, bottom = quiet
 
 // ---------- Colours ----------
 const PINK = "#ff5fd2";
@@ -165,6 +175,11 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
   // a short puff of the jetpack (for the OK / A button, which can only be tapped)
   const puffRef = useRef<(() => void) | null>(null);
   const lastSignal = useRef(actionSignal);
+  const boardRef = useRef<ScoreApi | null>(null); // the online Top 10 box (Scoreboard.tsx), board id "jet"
+  // a click / tap on the game picture, in game pixels. Returns true if it hit the speaker icon or the slider.
+  const fxTapRef = useRef<((x: number, y: number) => boolean) | null>(null);
+  const fxDragRef = useRef<((y: number) => void) | null>(null);
+  const fxDragging = useRef(false);
 
   // OK / A from the page = start, or a short puff while flying.
   // (SPACE also arrives here, but the game already handles the keyboard itself, so that one is skipped.)
@@ -203,8 +218,33 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
 
     // ---------- sound ----------
     let ac: AudioContext | null = null;
+    // sound effects on / off + how loud (saved in the browser)
+    const fx = { on: true, vol: 1, drag: false };
+    try {
+      fx.on = localStorage.getItem(FX_KEY) !== "off";
+      const v = localStorage.getItem(FX_VOL_KEY);
+      if (v !== null && !Number.isNaN(Number(v))) fx.vol = Math.max(0, Math.min(1, Number(v)));
+    } catch {}
+    const saveFx = () => {
+      try {
+        localStorage.setItem(FX_KEY, fx.on ? "on" : "off");
+        localStorage.setItem(FX_VOL_KEY, String(fx.vol));
+      } catch {}
+    };
+    // moving the slider up from 0 also turns the sounds back on
+    const setFxVolume = (v: number) => {
+      fx.vol = Math.round(Math.max(0, Math.min(1, v)) * 20) / 20;
+      if (fx.vol > 0) fx.on = true;
+      saveFx();
+    };
+    const toggleFx = () => {
+      fx.on = !fx.on;
+      if (fx.on && fx.vol <= 0) fx.vol = 0.5;
+      saveFx();
+    };
     const tone = (f1: number, f2: number, dur: number, type: OscillatorType, vol = 0.08, delay = 0) => {
-      if (mutedRef.current) return;
+      if (mutedRef.current || !fx.on || fx.vol <= 0) return;
+      vol *= fx.vol;
       try {
         if (!ac) ac = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
         if (ac.state === "suspended") ac.resume();
@@ -259,6 +299,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
     const s = {
       mode: "ready" as Mode,
       t: 0, // seconds in this mode
+      runT: 0, // seconds this run has lasted (the scoreboard checks the score is possible for that time)
       scroll: 0, // how far the world has moved (pixels)
       speed: START_SPEED,
       y: FLOOR - SH, // top of Pinkmane's picture
@@ -285,9 +326,13 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
     const meters = () => Math.floor(s.scroll / 10);
     const flying = () => s.mode === "running" && (hold.key || hold.mouse || hold.touch || s.puff > 0);
 
+    let runId = 0; // goes up every run, so a late Top 10 box never opens in the middle of a new run
     const reset = () => {
+      boardRef.current?.hide();
+      runId++;
       s.mode = "running";
       s.t = 0;
+      s.runT = 0;
       s.scroll = 0;
       s.speed = START_SPEED;
       s.y = FLOOR - SH;
@@ -320,6 +365,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
         sfx.click();
         return;
       }
+      if (boardRef.current?.busy()) return; // the Top 10 / name box is open: close it first (OK)
       if (s.mode === "ready") reset();
       else if (s.mode === "dead" && s.t > 0.8) reset(); // (wait a moment so you don't skip the game over screen by accident)
     };
@@ -426,6 +472,13 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
           localStorage.setItem(BEST_KEY, String(best));
         } catch {}
       }
+      // ONLINE TOP 10: after the crash, the name box (good score) or the Top 10 pops up
+      const myRun = runId;
+      const score = s.score;
+      const runT = s.runT;
+      setTimeout(() => {
+        if (runId === myRun && s.mode === "dead") boardRef.current?.gameOver(score, runT);
+      }, 900);
     };
 
     // ---------- input: keyboard ----------
@@ -441,6 +494,19 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
           pause.on = !pause.on;
           sfx.click();
         }
+        return;
+      }
+      // M = sound effects on / off, - and + = quieter / louder
+      if (k === "m" || k === "M") {
+        toggleFx();
+        return;
+      }
+      if (k === "-" || k === "_") {
+        setFxVolume((fx.on ? fx.vol : 0) - 0.1);
+        return;
+      }
+      if (k === "=" || k === "+") {
+        setFxVolume((fx.on ? fx.vol : 0) + 0.1);
         return;
       }
       if (FLY_KEYS.includes(k)) {
@@ -462,6 +528,25 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       if (!document.hidden) return;
       letGo();
       if (s.mode === "running") pause.on = true;
+    };
+    // the speaker icon + slider (clicks / taps come from the canvas and touch code below)
+    const onSlider = (x: number, y: number) => x < 18 && y >= FX_SLIDER.top - 5 && y <= FX_SLIDER.bottom + 5;
+    const fxFromY = (y: number) => setFxVolume((FX_SLIDER.bottom - y) / (FX_SLIDER.bottom - FX_SLIDER.top));
+    fxTapRef.current = (x, y) => {
+      if (x >= FX_ICON.x && x < FX_ICON.x + FX_ICON.w && y >= FX_ICON.y && y < FX_ICON.y + FX_ICON.h) {
+        toggleFx();
+        return true;
+      }
+      if (onSlider(x, y)) {
+        fx.drag = true;
+        fxFromY(y);
+        return true;
+      }
+      return false;
+    };
+    fxDragRef.current = (y) => {
+      if (y < 0) fx.drag = false;
+      else fxFromY(y);
     };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
@@ -692,8 +777,47 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       ctx.restore();
     };
 
+    // the speaker icon (on the ceiling, top left) with a pink X when the sounds are off
+    const drawFxIcon = () => {
+      const x = FX_ICON.x + 3;
+      const y = FX_ICON.y + 1;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x, y + 2, 2, 3);
+      ctx.fillRect(x + 2, y + 1, 1, 5);
+      ctx.fillRect(x + 3, y, 1, 7);
+      if (fx.on && fx.vol > 0) {
+        ctx.fillRect(x + 5, y + 2, 1, 3);
+        if (fx.vol > 0.5) ctx.fillRect(x + 7, y + 1, 1, 5);
+      } else {
+        ctx.fillStyle = PINK;
+        for (let i = 0; i < 5; i++) {
+          ctx.fillRect(x + 5 + i, y + 1 + i, 1, 1);
+          ctx.fillRect(x + 9 - i, y + 1 + i, 1, 1);
+        }
+      }
+    };
+    // the sound effects slider: a thin bar under the speaker (top = loud, bottom = quiet)
+    const drawFxSlider = () => {
+      const { x, top, bottom } = FX_SLIDER;
+      const vol = fx.on ? fx.vol : 0;
+      const knobY = Math.round(bottom - vol * (bottom - top));
+      ctx.globalAlpha = fx.drag ? 1 : 0.7;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(x - 1, top - 1, 5, bottom - top + 2);
+      ctx.fillStyle = "#6e5a8a";
+      ctx.fillRect(x, top, 3, bottom - top);
+      ctx.fillStyle = PINK;
+      ctx.fillRect(x, knobY, 3, bottom - knobY);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(x - 3, knobY - 2, 9, 5);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x - 2, knobY - 1, 7, 3);
+      ctx.globalAlpha = 1;
+      text("FX", x + 2, top - 9, "#ffffff", 8);
+    };
+
     const drawHud = () => {
-      text(`${meters()}M`, 4, 15, GREEN, 8, "left");
+      text(`${meters()}M`, 20, 15, GREEN, 8, "left");
       const gx = W - 12;
       ctx.fillStyle = "#3ee05a";
       ctx.fillRect(gx + 2, 15, 3, 1);
@@ -725,6 +849,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       const floorY = FLOOR - SH;
 
       if (s.mode === "running") {
+        s.runT += dt;
         s.speed = Math.min(MAX_SPEED, START_SPEED + (s.scroll / 10) * SPEED_GAIN);
         s.scroll += s.speed * dt;
 
@@ -928,6 +1053,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
         text("DODGE ZAPPERS + ROCKETS", W / 2, 88, "#d8a8ff");
         if (Math.floor(clock * 2) % 2 === 0) text(touchRef.current ? "TAP TO START" : "SPACE = START", W / 2, 106, GREEN);
         if (best > 0) text(`BEST ${best}`, W / 2, 122, "#b48ad0");
+        text(touchRef.current ? "TAP THE SPEAKER = SOUNDS" : "M = SOUNDS   - / + = FX VOLUME", W / 2, 136, "#9a7ab8");
       }
 
       if (s.mode === "dead") {
@@ -942,12 +1068,17 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
         }
       }
 
+      drawFxIcon();
+      if (s.mode !== "running" || pause.on || fx.drag) drawFxSlider(); // (hidden while you fly, so it never covers the game)
+
       if (pause.on) {
         ctx.fillStyle = "rgba(14,4,24,0.75)";
         ctx.fillRect(0, 0, W, H);
         text("PAUSED", W / 2, 40, PINK, 16);
         text(`${meters()}M  ${s.gems} GEMS`, W / 2, 70, "#d8a8ff");
         if (Math.floor(pauseClock * 2) % 2 === 0) text(touchRef.current ? "TAP = RESUME" : "SPACE / ESC = RESUME", W / 2, 92, GREEN);
+        drawFxIcon();
+        drawFxSlider();
       }
     };
 
@@ -970,6 +1101,8 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       document.removeEventListener("visibilitychange", onHidden);
       pressRef.current = null;
       puffRef.current = null;
+      fxTapRef.current = null;
+      fxDragRef.current = null;
       letGo();
       try {
         ac?.close();
@@ -980,15 +1113,34 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
   // ---------- touch: hold a finger down to fly ----------
   // PHONES (touch = true): hold ANYWHERE on the screen (the page's small EXIT / PAUSE / music buttons still work).
   //   Other touch screens: the finger has to start on the game picture (or just next to it).
+  // a screen point -> game pixels (the picture is fitted inside the canvas box, "contain"). null = outside the picture.
+  const toGame = (cx: number, cy: number) => {
+    const c = canvasRef.current;
+    if (!c) return null;
+    const r = c.getBoundingClientRect();
+    const sc = Math.min(r.width / W, r.height / H);
+    const x = (cx - r.left - (r.width - W * sc) / 2) / sc;
+    const y = (cy - r.top - (r.height - H * sc) / 2) / sc;
+    return x >= 0 && x < W && y >= 0 && y < H ? { x, y } : null;
+  };
+
   useEffect(() => {
     // touches on buttons, sliders and links are left alone
     const onUi = (t: EventTarget | null) =>
       t instanceof Element && !!t.closest("button, a, input, select, textarea, [role='button'], [role='slider']");
     const fingers = new Set<number>();
+    let fxFinger = -1; // the finger that's dragging the sound slider
 
     const start = (e: TouchEvent) => {
       if (onUi(e.target)) return;
       const t = e.changedTouches[0];
+      // the speaker icon / sound slider: no flying
+      const g = toGame(t.clientX, t.clientY);
+      if (g && fxTapRef.current?.(g.x, g.y)) {
+        fxFinger = t.identifier;
+        if (e.cancelable) e.preventDefault();
+        return;
+      }
       if (!touchRef.current) {
         const r = canvasRef.current?.getBoundingClientRect();
         const M = 40;
@@ -1000,9 +1152,23 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       if (e.cancelable) e.preventDefault(); // no double-tap zoom / long-press menu
     };
     const move = (e: TouchEvent) => {
-      if (fingers.size && e.cancelable) e.preventDefault(); // don't scroll the page while flying
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        if (t.identifier !== fxFinger) continue;
+        const c = canvasRef.current?.getBoundingClientRect();
+        if (c) {
+          const sc = Math.min(c.width / W, c.height / H);
+          fxDragRef.current?.((t.clientY - c.top - (c.height - H * sc) / 2) / sc);
+        }
+      }
+      if ((fingers.size || fxFinger >= 0) && e.cancelable) e.preventDefault(); // don't scroll the page while flying
     };
     const end = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++)
+        if (e.changedTouches[i].identifier === fxFinger) {
+          fxFinger = -1;
+          fxDragRef.current?.(-1);
+        }
       for (let i = 0; i < e.changedTouches.length; i++) fingers.delete(e.changedTouches[i].identifier);
       if (e.touches.length === 0) fingers.clear();
       holdRef.current.touch = fingers.size > 0;
@@ -1018,19 +1184,39 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       window.removeEventListener("touchend", end);
       window.removeEventListener("touchcancel", end);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
+    <>
     <canvas
       ref={canvasRef}
       width={W}
       height={H}
-      // COMPUTER mouse: hold the button down on the game picture = fly (touch is handled above)
+      // COMPUTER mouse: hold the button down on the game picture = fly (touch is handled above).
+      // The speaker icon + the sound slider (top left) don't make you fly.
       onPointerDown={(e) => {
         if (e.pointerType !== "mouse") return;
         e.stopPropagation();
+        const g = toGame(e.clientX, e.clientY);
+        if (g && fxTapRef.current?.(g.x, g.y)) {
+          fxDragging.current = true;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          return;
+        }
         holdRef.current.mouse = true;
         pressRef.current?.();
+      }}
+      onPointerMove={(e) => {
+        if (e.pointerType !== "mouse" || !fxDragging.current) return;
+        const c = e.currentTarget.getBoundingClientRect();
+        const sc = Math.min(c.width / W, c.height / H);
+        fxDragRef.current?.((e.clientY - c.top - (c.height - H * sc) / 2) / sc);
+      }}
+      onPointerUp={(e) => {
+        if (e.pointerType !== "mouse" || !fxDragging.current) return;
+        fxDragging.current = false;
+        fxDragRef.current?.(-1);
       }}
       onContextMenu={(e) => e.preventDefault()}
       style={{
@@ -1045,5 +1231,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
         cursor: "pointer",
       }}
     />
+    <ScorePanel game="jet" title="PINK JETPACK" apiRef={boardRef} fontFamily={fontFamily} accent={PINK} />
+    </>
   );
 }
