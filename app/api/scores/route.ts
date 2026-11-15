@@ -27,6 +27,7 @@ export async function GET(req: Request) {
   const redis = getRedis();
   if (!redis) return fail("offline", 503);
   const game = gameConfig(new URL(req.url).searchParams.get("game"));
+  if (!game) return fail("unknown game");
   try {
     return NextResponse.json({ scores: await topTen(redis, game.key) });
   } catch {
@@ -54,6 +55,7 @@ export async function POST(req: Request) {
 
   const { name, score, runTime, device, ownerCode } = body;
   const game = gameConfig(body.game);
+  if (!game) return fail("unknown game");
   if (
     typeof name !== "string" ||
     typeof score !== "number" ||

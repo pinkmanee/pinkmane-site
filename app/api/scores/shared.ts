@@ -35,6 +35,9 @@ export const GAMES: Record<string, GameCfg> = {
   // PINK JETPACK: meters flown + 5 per gem (a piglet hit with a leaf = 3 gems). Top speed is 23.5 m/s,
   // and the thickest gem rows can add ~150 a second for a moment, so 250 a second leaves plenty of room.
   jet: { key: "pinkjet:scores", rate: 250, base: 1000, max: 2000000 },
+  // PINK NINJA: 1 point per nug (a golden nug = 5), a combo adds 1 per nug in it. The fastest throws are 6 nugs every
+  // 1.2 seconds, all in one swipe = about 10 a second, so 25 a second leaves plenty of room.
+  ninja: { key: "pinkninja:scores", rate: 25, base: 100, max: 200000 },
 };
 
 for (let n = 1; n <= LEVEL_COUNT; n++) {
@@ -47,8 +50,12 @@ for (let n = 1; n <= LEVEL_COUNT; n++) {
   };
 }
 
-export function gameConfig(game: unknown) {
-  return typeof game === "string" && GAMES[game] ? GAMES[game] : GAMES.pinkrun;
+// Which board a request is for. No game given at all = Pink Run (the oldest game asks without one).
+// A game name that isn't in GAMES above = null, so a new game can never land on Pink Run's board by mistake:
+// add every new game to GAMES first.
+export function gameConfig(game: unknown): GameCfg | null {
+  if (game === undefined || game === null || game === "") return GAMES.pinkrun;
+  return typeof game === "string" && GAMES[game] ? GAMES[game] : null;
 }
 export const BANNED_KEY = "pinkrun:banned";
 export const OWNER_PREFIX = "pinkrun:owner:";

@@ -14,7 +14,6 @@ import { ScorePanel, type ScoreApi } from "./Scoreboard";
 // The background is your trippy picture from PINKMANE VOID (public/backgrounds/field-trippy.png), wobbling like the covers there.
 // When the site's music is playing, things are thrown up on the beat and the background pulses with it.
 // After the game: the online Top 10 (Scoreboard.tsx, board "ninja"), where a good score can be saved with your name.
-//   It's switched OFF for now (SHOW_TOP10 below) until the scores server has its own "ninja" board.
 
 type Props = {
   // Goes up by 1 every time the player presses OK / A / Space (= start / play again)
@@ -35,9 +34,8 @@ const GAME_TITLE = "PINK NINJA";
 const BEST_KEY = "pinkmane-ninja-best";
 const FX_KEY = "pinkmane-ninja-fx"; // "on" / "off": the game sounds
 const FX_VOL_KEY = "pinkmane-ninja-fx-volume"; // 0..1
-// The online Top 10 after each game. false = off (the scores server doesn't have a "ninja" board yet, so it would show
-// another game's scores). Switch to true once app/api/scores knows "ninja".
-const SHOW_TOP10 = false;
+// The online Top 10 after each game (true = on, false = off). Its board is "ninja" in app/api/scores/shared.ts.
+const SHOW_TOP10 = true;
 // The background picture (if it can't be loaded, a dark dojo is drawn instead)
 const BG_IMAGE = "/backgrounds/field-trippy.png";
 const BG_DARKEN = 0.35; // how much darker the picture is made, so the nugs stand out (0 = not at all, 1 = black)
