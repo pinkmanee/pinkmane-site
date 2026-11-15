@@ -2,15 +2,44 @@
 
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
-import { PAUSE_ROWS_SIMPLE, drawPauseMenu, leaveToGameMenu, pauseKey, pauseTapRow } from "./PinkShop";
+import {
+  KIT,
+  PAUSE_ROWS,
+  SKIN_COLORS,
+  drawFxIcon,
+  drawFxSlider,
+  drawOverScreen,
+  drawPauseMenu,
+  drawPinkShop,
+  drawSidePanels,
+  drawStartScreen,
+  fxDrag,
+  fxGain,
+  fxKey,
+  fxTap,
+  leaveToGameMenu,
+  loadFx,
+  makeShop,
+  newShopUi,
+  panelShopHit,
+  pauseKey,
+  pauseTapRow,
+  shopKey,
+  shopTap,
+  type ShopHooks,
+  type ShopRow,
+} from "./PinkShop";
 
 // PINK HELL: a top-down 2D shooter, a bit like the old 90s demon shooters.
 // Pinkmane is stuck in a hell dungeon and the demons come out of the glowing portals in waves.
 //   W A S D / arrows   = move
 //   MOUSE              = aim (the red crosshair), Pinkmane always looks where you aim
 //   CLICK (hold)       = shoot
-//   1 / 2, Q, wheel    = switch weapon (PISTOL never runs out, SHOTGUN needs shells)
-//   ESC / P            = pause menu: RESUME / RESTART / GAME MENU (it also pauses by itself if you switch to another tab or window)
+//   1 / 2 / 3, Q, wheel = switch weapon (PISTOL never runs out, SHOTGUN needs shells, the SMG from the shop never runs out)
+//   ESC / P            = pause menu: RESUME / RESTART / SHOP / GAME MENU (it also pauses by itself if you switch to another tab or window)
+//   ← → on the start screen = pick the map: THE DUNGEON or THE LAVA PIT
+//   S / DOWN on the start + game over screen = PINK SHOP (skins, the SMG, upgrades). M = sounds, - / + = FX volume
+// MONEY: SOULS. 1 for every demon you kill, 25 for BEARMANPIG.
 // On phones + tablets (see HellPad.tsx): pink joystick = walk (Pinkmane looks the way he walks),
 // FIRE button = shoot (hold it, it aims at the nearest demon by itself), GUN = switch weapon, PAUSE button at the top.
 // You can also touch the game screen where you want to shoot.
@@ -34,6 +63,10 @@ type Props = {
 
 const GAME_TITLE = "PINK HELL";
 const BEST_KEY = "pinkmane-hell-best";
+const MAP_KEY = "pinkmane-hell-map"; // which map you picked last
+const FX_KEY = "pinkmane-hell-fx";
+const SHOP_KEY = "pinkmane-hell-shop";
+const SMG_COOLDOWN = 0.09; // the SMG from the shop: fast, a bit wild, never runs out
 
 // ---------- EASY TUNING (change these to make it easier / harder) ----------
 const PLAYER_SPEED = 70; // pixels per second
@@ -90,6 +123,39 @@ const MAP = [
   "#S..........#..............#..........S#",
   "########################################",
 ];
+// THE LAVA PIT: the second map (pick it on the start screen). The same size as the first one.
+const MAP2 = [
+"########################################",
+"#S.......~~~~..........~~~~..........S.#",
+"#........~~~~..........~~~~............#",
+"#...##...~~~~...####...~~~~...##.......#",
+"#...##..........####..........##.......#",
+"#......................................#",
+"#..~~~~~~~...............~~~~~~~~......#",
+"#..~~~~~~~...####...##...~~~~~~~~......#",
+"#............####...##.................#",
+"#.....##...............##....###.......#",
+"#.....##.....~~~~~~....##....###.......#",
+"#............~~~~~~....................#",
+"#S......#....~~~~~~.....P......#......S#",
+"#.......#....~~~~~~............#.......#",
+"#............~~~~~~....................#",
+"#....###...............###.....~~~~....#",
+"#....###.......##......###.....~~~~....#",
+"#..............##..............~~~~....#",
+"#..~~~~...................~~~~.........#",
+"#..~~~~.....###.....###...~~~~...##....#",
+"#...........###.....###..........##....#",
+"#......................................#",
+"#...##.....~~~~~~.......~~~~~~...##....#",
+"#...##.....~~~~~~.......~~~~~~...##....#",
+"#S...................................S.#",
+"########################################",
+];
+const MAPS = [
+  { name: "THE DUNGEON", rows: MAP },
+  { name: "THE LAVA PIT", rows: MAP2 },
+];
 const MW = MAP[0].length;
 const MH = MAP.length;
 const WW = MW * T; // world size in pixels
@@ -143,6 +209,43 @@ const FACE_HALF = [
   "..AAAA",
 ];
 const FACE_COLORS: Record<string, string> = { A: "#111111", B: "#d63cc8", D: "#8a1f86", F: "#ffc800" };
+
+// ---------- the PINK SHOP ----------
+type Weapon = 0 | 1 | 2; // 0 = pistol, 1 = shotgun, 2 = SMG (from the shop)
+const HELL_SKINS = [
+  { id: "pink", name: "PINK", price: 0 },
+  { id: "toxic", name: "TOXIC", price: 150 },
+  { id: "ice", name: "ICE", price: 250 },
+  { id: "fire", name: "FIRE", price: 400 },
+  { id: "shadow", name: "SHADOW", price: 600 },
+  { id: "gold", name: "GOLD", price: 800 },
+];
+const HELL_SHOP_ROWS: ShopRow[] = [
+  { kind: "head", label: "SKINS" },
+  ...HELL_SKINS.map((k): ShopRow => ({ kind: "item", id: `skin:${k.id}`, name: `${k.name} PINKMANE`, prices: [k.price], wear: true, info: [`${k.name} HAIR`, ""] })),
+  { kind: "head", label: "GUNS" },
+  { kind: "item", id: "gun:smg", name: "SMG", prices: [500], info: ["A MACHINE GUN: KEY 3 / Q / GUN", "SUPER FAST, NEVER RUNS OUT"] },
+  { kind: "head", label: "UPGRADES" },
+  { kind: "item", id: "up:hp", name: "MORE HEALTH", prices: [100, 250, 500], info: ["+25 HEALTH EVERY LEVEL", ""] },
+  { kind: "item", id: "up:shells", name: "MORE SHELLS", prices: [80, 200], info: ["START WITH MORE SHELLS", "AND SHELL BOXES GIVE MORE"] },
+  { kind: "item", id: "up:fast", name: "FAST PISTOL", prices: [120, 300], info: ["THE PISTOL SHOOTS FASTER", "A BIT MORE EVERY LEVEL"] },
+  { kind: "item", id: "up:med", name: "BIG MEDKITS", prices: [100, 250], info: ["MEDKITS HEAL MORE", "+10 HEALTH EVERY LEVEL"] },
+  { kind: "back" },
+];
+// the money icon: a little white soul
+const soulIcon = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+  ctx.fillStyle = "#111111";
+  ctx.fillRect(x + 1, y, 6, 7);
+  ctx.fillRect(x, y + 1, 8, 5);
+  ctx.fillStyle = "#e8f4ff";
+  ctx.fillRect(x + 2, y + 1, 4, 5);
+  ctx.fillRect(x + 1, y + 2, 6, 3);
+  ctx.fillRect(x + 2, y + 6, 1, 1);
+  ctx.fillRect(x + 5, y + 6, 1, 1);
+  ctx.fillStyle = "#111111";
+  ctx.fillRect(x + 3, y + 3, 1, 1);
+  ctx.fillRect(x + 5, y + 3, 1, 1);
+};
 
 // The demons (front view, only the LEFT half, the right half is mirrored)
 const IMP_HALF = [
@@ -371,8 +474,24 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
     ctx.imageSmoothingEnabled = false;
 
     // ---------- sprites ----------
-    const playerFrames = bakeRotations(buildMap(PLAYER_MAP, PLAYER_COLORS), 32, 6.5, 7, 20);
-    const faceImg = buildSprite(FACE_HALF, FACE_COLORS, 99, 0);
+    // Pinkmane in every skin (made the first time a skin is needed)
+    const skinCols = (skin: string) => {
+      const c = SKIN_COLORS[skin] ?? SKIN_COLORS.pink;
+      return { B: c[1], D: c[0] };
+    };
+    const playerFramesBySkin: Record<string, HTMLCanvasElement[]> = {};
+    const faceBySkin: Record<string, HTMLCanvasElement> = {};
+    const playerFramesFor = (skin: string) =>
+      (playerFramesBySkin[skin] ??= bakeRotations(buildMap(PLAYER_MAP, { ...PLAYER_COLORS, ...skinCols(skin) }), 32, 6.5, 7, 20));
+    const faceFor = (skin: string) => (faceBySkin[skin] ??= buildSprite(FACE_HALF, { ...FACE_COLORS, ...skinCols(skin) }, 99, 0));
+
+    // ---------- saved money + the PINK SHOP + FX (the same as every game, see PinkShop.ts) ----------
+    const shop = makeShop(SHOP_KEY, HELL_SHOP_ROWS);
+    const fx = loadFx(FX_KEY);
+    const shopUi = { open: false, fromPause: false, ui: newShopUi(HELL_SHOP_ROWS) };
+    const skin = () => shop.wearingName("skin");
+    const hasSmg = () => shop.level("gun:smg") > 0;
+    const maxHp = () => PLAYER_HP + shop.lvl("hp") * 25;
     const mk = (half: string[], colors: Record<string, string>, legs: number) => {
       const frames = [buildSprite(half, colors, legs, 1), buildSprite(half, colors, legs, 2)];
       return { frames, white: frames.map(whiteCopy) };
@@ -385,7 +504,11 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
     };
 
     // ---------- the map, drawn once onto its own canvas (blood stains get painted onto it too) ----------
-    const grid: string[][] = MAP.map((r) => r.split(""));
+    let mapIdx = 0;
+    try {
+      mapIdx = Math.max(0, Math.min(MAPS.length - 1, Number(localStorage.getItem(MAP_KEY)) || 0));
+    } catch {}
+    const grid: string[][] = MAPS[mapIdx].rows.map((r) => r.split(""));
     const tileAt = (tx: number, ty: number) => (tx < 0 || ty < 0 || tx >= MW || ty >= MH ? "#" : grid[ty][tx]);
     const wallAt = (tx: number, ty: number) => tileAt(tx, ty) === "#";
     const solid = (x: number, y: number) => wallAt(Math.floor(x / T), Math.floor(y / T));
@@ -394,16 +517,22 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
     const lava: { tx: number; ty: number }[] = [];
     let startX = WW / 2;
     let startY = WH / 2;
-    grid.forEach((row, ty) =>
-      row.forEach((c, tx) => {
-        if (c === "S") portals.push({ x: tx * T + T / 2, y: ty * T + T / 2 });
-        if (c === "~") lava.push({ tx, ty });
-        if (c === "P") {
-          startX = tx * T + T / 2;
-          startY = ty * T + T / 2;
-        }
-      })
-    );
+    // find the portals, the lava and the start on the map
+    const scanMap = () => {
+      portals.length = 0;
+      lava.length = 0;
+      grid.forEach((row, ty) =>
+        row.forEach((c, tx) => {
+          if (c === "S") portals.push({ x: tx * T + T / 2, y: ty * T + T / 2 });
+          if (c === "~") lava.push({ tx, ty });
+          if (c === "P") {
+            startX = tx * T + T / 2;
+            startY = ty * T + T / 2;
+          }
+        })
+      );
+    };
+    scanMap();
 
     const mapCv = document.createElement("canvas");
     mapCv.width = WW;
@@ -480,6 +609,22 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       }
     };
     bakeMap();
+    // the other map (on the start screen)
+    const switchMap = (dir: 1 | -1) => {
+      mapIdx = (mapIdx + dir + MAPS.length) % MAPS.length;
+      grid.length = 0;
+      grid.push(...MAPS[mapIdx].rows.map((r) => r.split("")));
+      scanMap();
+      bakeMap();
+      s.px = startX;
+      s.py = startY;
+      s.camX = startX - VW / 2;
+      s.camY = startY - VH / 2;
+      tone(500, 750, 0.06, "square", 0.05);
+      try {
+        localStorage.setItem(MAP_KEY, String(mapIdx));
+      } catch {}
+    };
     // paints a blood drop onto the floor for good
     const stain = (x: number, y: number, color: string, size: number) => {
       if (solid(x, y)) return;
@@ -497,7 +642,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
     let ac: AudioContext | null = null;
     let noiseBuf: AudioBuffer | null = null;
     const audio = () => {
-      if (mutedRef.current) return null;
+      if (fxGain(fx, mutedRef.current) <= 0) return null;
       try {
         if (!ac) ac = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
         if (ac.state === "suspended") ac.resume();
@@ -515,7 +660,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       o.type = type;
       o.frequency.setValueAtTime(f1, t0);
       o.frequency.exponentialRampToValueAtTime(Math.max(20, f2), t0 + dur);
-      g.gain.setValueAtTime(vol, t0);
+      g.gain.setValueAtTime(vol * fx.vol, t0);
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
       o.connect(g).connect(a.destination);
       o.start(t0);
@@ -538,7 +683,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       f.frequency.setValueAtTime(f1, t0);
       f.frequency.exponentialRampToValueAtTime(Math.max(40, f2), t0 + dur);
       const g = a.createGain();
-      g.gain.setValueAtTime(vol, t0);
+      g.gain.setValueAtTime(vol * fx.vol, t0);
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
       src.connect(f).connect(g).connect(a.destination);
       src.start(t0, Math.random() * 0.5);
@@ -613,9 +758,10 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       px: startX,
       py: startY,
       angle: -Math.PI / 2,
-      hp: PLAYER_HP,
-      weapon: 1 as 0 | 1, // 0 = pistol, 1 = shotgun
-      shells: START_SHELLS,
+      hp: maxHp(),
+      weapon: 1 as Weapon, // 0 = pistol, 1 = shotgun, 2 = SMG
+      shells: START_SHELLS + shop.lvl("shells") * 12,
+      souls: 0, // money from this run
       cd: 0,
       recoil: 0,
       muzzle: 0,
@@ -667,8 +813,40 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
     };
     // the pause menu (the same one in every game, see PinkShop.ts)
     let pauseRow = 0;
+    // the shop (from the start / game over screen, or from the pause menu)
+    const openShop = (fromPause: boolean) => {
+      shopUi.open = true;
+      shopUi.fromPause = fromPause;
+      shopUi.ui.msg = "";
+      keys.clear();
+      mouse.down = false;
+      tone(700, 700, 0.03, "square", 0.03);
+    };
+    const closeShop = () => {
+      shopUi.open = false;
+      mouse.down = false;
+      s.needRelease = true;
+      tone(700, 700, 0.03, "square", 0.03);
+    };
+    const shopHooks: ShopHooks = {
+      money: shop.money,
+      moneyName: "SOULS",
+      icon: soulIcon,
+      level: shop.level,
+      worn: shop.worn,
+      buy: shop.buy,
+      wear: shop.wear,
+      preview: (c, id, box, t) => drawShopPreview(c, id, box.x + box.w / 2, box.y + box.h / 2, t),
+      sound: (w) => (w === "buy" ? sfx.pickup() : w === "no" ? sfx.empty() : w === "wear" ? sfx.switch() : tone(700, 700, 0.03, "square", 0.03)),
+    };
+    const canShop = () => !boardRef.current?.busy() && (s.mode === "ready" || (s.mode === "dead" && s.t > 1.3));
     const pauseChoose = () => {
-      const pick = PAUSE_ROWS_SIMPLE[pauseRow];
+      const pick = PAUSE_ROWS[pauseRow];
+      if (pick === "SHOP") {
+        openShop(true);
+        return;
+      }
+      if (pick !== "RESUME" && s.mode === "play") shop.add(s.souls); // leaving the run: keep its souls
       if (pick === "RESUME") setPause(false);
       else if (pick === "RESTART") {
         // a brand new run, blood washed away
@@ -695,22 +873,26 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       const p = toCanvas(e.clientX, e.clientY);
       mouse.x = Math.max(0, Math.min(W - 1, p.x));
       mouse.y = Math.max(0, Math.min(H - 1, p.y));
+      if (fx.drag) fxDrag(fx, p.y);
     };
     const onUp = (e: PointerEvent) => {
       if (e.pointerType !== "mouse" && e.pointerId !== canvasTouch) return;
       canvasTouch = -1;
       mouse.down = false;
       s.needRelease = false;
+      fxDrag(fx, -1);
     };
-    const switchWeapon = (w?: 0 | 1) => {
-      const next = w ?? (s.weapon === 0 ? 1 : 0);
-      if (next === s.weapon) return;
+    const switchWeapon = (w?: Weapon) => {
+      const guns: Weapon[] = hasSmg() ? [0, 1, 2] : [0, 1];
+      const next = w ?? guns[(guns.indexOf(s.weapon) + 1) % guns.length];
+      if (next === s.weapon || !guns.includes(next)) return;
       s.weapon = next;
       s.cd = Math.max(s.cd, 0.15);
       sfx.switch();
     };
     const go = () => {
       if (boardRef.current?.busy()) return; // the Top 10 / name box is still open
+      if (shopUi.open || s.paused) return;
       if (s.mode === "ready" || (s.mode === "dead" && s.t > 1.3)) {
         boardRef.current?.hide();
         const wasDead = s.mode === "dead";
@@ -731,9 +913,24 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         stick.pad = false; // aim at the finger
       }
       onMove(e);
+      // the FX speaker + slider (top left)
+      if (fxTap(fx, mouse.x, mouse.y, s.mode !== "play" || s.paused)) return;
+      if (shopUi.open) {
+        if (shopTap(HELL_SHOP_ROWS, shopUi.ui, shopHooks, mouse.x, mouse.y) === "close") closeShop();
+        return;
+      }
+      if (canShop() && panelShopHit(mouse.x, mouse.y, W)) {
+        openShop(false);
+        return;
+      }
+      // the map's name on the start screen = the other map
+      if (s.mode === "ready" && mouse.y >= 32 && mouse.y < 48 && Math.abs(mouse.x - W / 2) < 80) {
+        switchMap(1);
+        return;
+      }
       if (s.paused) {
         // a click / tap on a pause menu row picks it
-        const r = pauseTapRow(mouse.x, mouse.y, W, PAUSE_ROWS_SIMPLE.length);
+        const r = pauseTapRow(mouse.x, mouse.y, W, PAUSE_ROWS.length);
         if (r >= 0) {
           pauseRow = r;
           pauseChoose();
@@ -748,10 +945,19 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       if (tag === "INPUT" || tag === "TEXTAREA") return; // typing your name for the Top 10
       const k = e.key.toLowerCase();
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)) e.preventDefault();
+      // the shop: up / down / OK / ESC
+      if (shopUi.open) {
+        if (fxKey(fx, e.key)) return;
+        if (e.repeat && (e.key === "Enter" || e.key === " ")) return;
+        if (shopKey(HELL_SHOP_ROWS, shopUi.ui, shopHooks, e.key) === "close") closeShop();
+        return;
+      }
+      // M = sounds on / off, - and + = FX volume
+      if (fxKey(fx, e.key)) return;
       if (s.paused) {
         // UP / DOWN / OK / SPACE move and pick on the pause menu, ESC / P = back to the game
         const pm = { row: pauseRow };
-        const did = pauseKey(pm, PAUSE_ROWS_SIMPLE.length, e.key);
+        const did = pauseKey(pm, PAUSE_ROWS.length, e.key);
         pauseRow = pm.row;
         if (did === "move") sfx.switch();
         else if (!e.repeat && did === "choose") pauseChoose();
@@ -763,9 +969,19 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         setPause(true);
         return;
       }
+      // the start / game over screen: S / DOWN = the shop, ← → = the other map
+      if (canShop() && (k === "s" || k === "arrowdown")) {
+        openShop(false);
+        return;
+      }
+      if (s.mode === "ready" && (k === "arrowleft" || k === "a" || k === "arrowright" || k === "d")) {
+        switchMap(k === "arrowleft" || k === "a" ? -1 : 1);
+        return;
+      }
       keys.add(k);
       if (k === "1") switchWeapon(0);
       if (k === "2") switchWeapon(1);
+      if (k === "3") switchWeapon(2);
       if (k === "q" && s.mode === "play") switchWeapon();
     };
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.key.toLowerCase());
@@ -786,6 +1002,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         stick.my = d.on ? d.y : 0;
         return;
       }
+      if (shopUi.open) return;
       const wasOn = stick.fire;
       stick.fire = d.on;
       if (!d.on) s.needRelease = false;
@@ -1005,10 +1222,18 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         s.cd = 0.3;
         return;
       }
-      if (s.weapon === 0) {
+      if (s.weapon === 2) {
+        // the SMG: fast and a bit wild
+        const a = s.angle + (Math.random() - 0.5) * 0.18;
+        s.bullets.push({ x: ox, y: oy, vx: Math.cos(a) * BULLET_SPEED, vy: Math.sin(a) * BULLET_SPEED, life: 0.6, dmg: 1, push: 12 });
+        s.cd = SMG_COOLDOWN;
+        s.recoil = 0.04;
+        s.muzzle = 0.04;
+        sfx.pistol();
+      } else if (s.weapon === 0) {
         const a = s.angle + (Math.random() - 0.5) * 0.06;
         s.bullets.push({ x: ox, y: oy, vx: Math.cos(a) * BULLET_SPEED, vy: Math.sin(a) * BULLET_SPEED, life: 0.8, dmg: 1, push: 25 });
-        s.cd = PISTOL_COOLDOWN;
+        s.cd = PISTOL_COOLDOWN * (1 - shop.lvl("fast") * 0.18);
         s.recoil = 0.06;
         s.muzzle = 0.05;
         sfx.pistol();
@@ -1043,6 +1268,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         s.hp = 0;
         s.mode = "dead";
         s.t = 0;
+        shop.add(s.souls); // the souls from this run are saved
         burst(s.px, s.py, 40, ["#c00000", "#ff2a2a", "#7a0000", "#d63cc8"], 70, 0.6, 2);
         sfx.dead();
         const score = s.score;
@@ -1064,6 +1290,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
 
     const killEnemy = (e: Enemy) => {
       s.kills++;
+      s.souls += e.kind === "boss" ? 25 : 1;
       const def = DEMONS[e.kind];
       s.score += def.score;
       pop(e.x, e.y - e.r - 6, `+${def.score}`, YELLOW);
@@ -1354,12 +1581,14 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         p.t += dt;
         if (Math.hypot(p.x - s.px, p.y - s.py) < 9) {
           if (p.kind === "shells") {
-            s.shells += SHELLS_PICKUP;
-            pop(p.x, p.y - 8, `+${SHELLS_PICKUP} SHELLS`, YELLOW);
+            const got = SHELLS_PICKUP + shop.lvl("shells") * 4;
+            s.shells += got;
+            pop(p.x, p.y - 8, `+${got} SHELLS`, YELLOW);
           } else {
-            if (s.hp >= PLAYER_HP) continue; // leave it for later
-            s.hp = Math.min(PLAYER_HP, s.hp + MEDKIT_HP);
-            pop(p.x, p.y - 8, `+${MEDKIT_HP} HP`, "#7dff6a");
+            if (s.hp >= maxHp()) continue; // leave it for later
+            const got = MEDKIT_HP + shop.lvl("med") * 10;
+            s.hp = Math.min(maxHp(), s.hp + got);
+            pop(p.x, p.y - 8, `+${got} HP`, "#7dff6a");
           }
           p.t = -1;
           sfx.pickup();
@@ -1550,6 +1779,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         ctx.fillRect(x + 2, y + 1, 4, 2);
         return;
       }
+      const playerFrames = playerFramesFor(skin());
       const n = playerFrames.length;
       let idx = Math.round((s.angle / (Math.PI * 2)) * n) % n;
       if (idx < 0) idx += n;
@@ -1617,7 +1847,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
     const drawCrosshair = () => {
       const x = Math.round(mouse.x);
       const y = Math.round(mouse.y);
-      const gap = 2 + (s.recoil > 0 ? (s.weapon === 1 ? 3 : 1) : 0);
+      const gap = 2 + (s.recoil > 0 ? (s.weapon === 1 ? 3 : 1) : 0); // (the SMG: like the pistol)
       const len = 3;
       const segs: [number, number, number, number][] = [
         [x - gap - len, y, len, 1],
@@ -1633,7 +1863,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
     };
 
     const drawFace = (x: number, y: number) => {
-      ctx.drawImage(faceImg, x, y);
+      ctx.drawImage(faceFor(skin()), x, y);
       // eyes look towards the crosshair
       const look = mouse.x < W / 2 - 40 ? -1 : mouse.x > W / 2 + 40 ? 1 : 0;
       ctx.fillStyle = "#111";
@@ -1645,7 +1875,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         ctx.fillRect(x + 8 + look, y + 5, 1, 2);
       }
       // the more hurt, the more blood
-      const blood = s.mode === "dead" ? 6 : Math.floor((1 - s.hp / PLAYER_HP) * 6);
+      const blood = s.mode === "dead" ? 6 : Math.floor((1 - s.hp / maxHp()) * 6);
       ctx.fillStyle = "#c00000";
       const spots = [
         [2, 8],
@@ -1671,8 +1901,8 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       ctx.fillStyle = "#0a0808";
       ctx.fillRect(0, y + 1, W, 1);
       // weapon + ammo
-      ctx.fillStyle = s.weapon === 1 ? "#c2241a" : "#a0a0a0";
-      ctx.fillRect(6, y + 5, s.weapon === 1 ? 12 : 7, 3);
+      ctx.fillStyle = s.weapon === 1 ? "#c2241a" : s.weapon === 2 ? "#6e6e6e" : "#a0a0a0";
+      ctx.fillRect(6, y + 5, s.weapon === 1 ? 12 : s.weapon === 2 ? 10 : 7, 3);
       ctx.fillRect(6, y + 8, 3, 3);
       text(s.weapon === 1 ? `${s.shells}` : "--", 22, y + 4, s.weapon === 1 && s.shells < 4 ? RED : YELLOW, 8, "left");
       // health
@@ -1758,7 +1988,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       }
       ctx.restore();
 
-      drawHud();
+      if (s.mode !== "ready") drawHud(); // (the start screen has its own text down there)
 
       if (s.bannerT > 0 && s.mode === "play") {
         const a = Math.min(1, s.bannerT * 2);
@@ -1767,40 +1997,119 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         ctx.globalAlpha = 1;
       }
 
+      // the side panels on the start + game over screens: your souls, and the SHOP
+      const drawPanels = () =>
+        drawSidePanels(ctx, fontFamily, {
+          W,
+          money: shop.money(),
+          moneyName: "SOULS",
+          icon: soulIcon,
+          touch: touchy,
+          t: clock,
+          preview: (c, cx, cy) => drawShopPreview(c, shop.wearing("skin"), cx, cy, clock),
+        });
       if (s.mode === "ready") {
-        ctx.fillStyle = "rgba(20,0,0,0.6)";
-        ctx.fillRect(0, 0, W, H);
-        text(GAME_TITLE, W / 2, 14, RED, 24);
-        text("KILL THE DEMONS", W / 2, 46, "#ffffff");
-        if (touchy) {
-          text("JOYSTICK = MOVE", W / 2, 66, "#ff9a9a");
-          text("HOLD FIRE = SHOOT (AUTO AIM)", W / 2, 78, "#ff9a9a");
-          text("GUN = SWITCH WEAPON", W / 2, 90, "#ff9a9a");
-        } else {
-          text("WSAD / ARROWS = MOVE", W / 2, 66, "#ff9a9a");
-          text("MOUSE = AIM  CLICK = SHOOT", W / 2, 78, "#ff9a9a");
-          text("1 / 2 / Q = WEAPON  ESC = PAUSE", W / 2, 90, "#ff9a9a");
-        }
-        if (Math.floor(clock * 2) % 2 === 0) text(touchy ? "PRESS START" : "CLICK TO START", W / 2, 110, YELLOW);
-        if (best > 0) text(`BEST ${best}`, W / 2, 126, "#c08080");
+        // the start screen every game shares
+        const top = boardRef.current?.top();
+        drawStartScreen(ctx, fontFamily, {
+          W,
+          H,
+          t: clock,
+          title: GAME_TITLE,
+          sub: `< ${MAPS[mapIdx].name} >`,
+          lines: touchy
+            ? [
+                ["JOYSTICK = MOVE", "#ffffff"],
+                ["HOLD FIRE = SHOOT", KIT.lilac],
+                ["GUN = SWITCH WEAPON", KIT.lilac],
+              ]
+            : [
+                ["WSAD = MOVE  MOUSE = AIM", "#ffffff"],
+                ["CLICK = SHOOT", KIT.lilac],
+                ["1 2 3 / Q = WEAPON", KIT.lilac],
+              ],
+          start: touchy ? "PRESS START" : "CLICK TO START",
+          best: top ? `#1 ${top.name} ${top.score}` : best > 0 ? `BEST ${best}` : undefined,
+          hint: touchy ? "TAP THE MAP NAME = OTHER MAP" : "\u2190 \u2192 = MAP   M = SOUNDS   - / + = FX",
+          dim: 0.62,
+        });
+        drawPanels();
       }
       if (s.mode === "dead") {
-        const a = Math.min(0.7, s.t * 1.2);
-        ctx.fillStyle = `rgba(60,0,0,${a})`;
-        ctx.fillRect(0, 0, W, H);
-        if (s.t > 0.4) {
-          text("YOU DIED", W / 2, 16, RED, 24);
-          text(`SCORE ${s.score}`, W / 2, 54, YELLOW);
-          text(s.newBest ? "NEW BEST!" : `BEST ${best}`, W / 2, 68, s.newBest ? PINK : "#c08080");
-          text(`WAVE ${s.wave}   ${s.kills} KILLS`, W / 2, 82, "#ffffff");
-          if (s.t > 1 && Math.floor(clock * 2) % 2 === 0) text(touchy ? "PRESS AGAIN" : "CLICK = AGAIN", W / 2, 106, YELLOW);
+        // the game over screen every game shares
+        drawOverScreen(ctx, fontFamily, {
+          W,
+          H,
+          t: clock,
+          age: s.t,
+          title: "YOU DIED",
+          score: `SCORE ${s.score}`,
+          best: `BEST ${best}`,
+          newBest: s.newBest,
+          stats: `WAVE ${s.wave}   ${s.kills} KILLS`,
+          again: touchy ? "PRESS AGAIN" : "CLICK = AGAIN",
+          saved: `+${s.souls} SOULS SAVED`,
+        });
+        if (s.t > 0.4) drawPanels();
+      }
+      if (s.paused && !shopUi.open) {
+        drawPauseMenu(ctx, fontFamily, { W, H, row: pauseRow, t: clock, touch: touchy, stats: `WAVE ${s.wave}  SCORE ${s.score}  +${s.souls}` });
+      }
+      if (shopUi.open) {
+        shopUi.ui.t = clock;
+        drawPinkShop(ctx, fontFamily, HELL_SHOP_ROWS, shopUi.ui, shopHooks, {
+          W,
+          H,
+          touch: touchy,
+          backLine: shopUi.fromPause ? "BACK TO YOUR GAME" : "BACK TO THE START SCREEN",
+        });
+      } else {
+        // the FX speaker (+ the slider when you're not playing)
+        drawFxIcon(ctx, fx, "#ffffff");
+        if (s.mode !== "play" || s.paused || fx.drag) drawFxSlider(ctx, fontFamily, fx);
+      }
+      // (the crosshair stays on the menus too: it's your mouse pointer)
+      if (!touchy || (s.mode === "play" && !s.paused && !shopUi.open)) drawCrosshair();
+    };
+
+    // the shop's preview box + the SHOP panel: Pinkmane in a skin (turning round), the SMG, or an upgrade's picture
+    const drawShopPreview = (c: CanvasRenderingContext2D, id: string | null, cx: number, cy: number, t: number) => {
+      c.fillStyle = "#1a0e0e";
+      c.fillRect(cx - 50, cy - 50, 100, 100);
+      const sk = id && id.startsWith("skin:") ? id.split(":")[1] : skin();
+      const frames = playerFramesFor(sk);
+      const spin = frames[Math.floor(Math.max(0, t) * 6) % frames.length];
+      if (id === "gun:smg") {
+        c.fillStyle = "#6e6e6e";
+        c.fillRect(cx - 14, cy - 3, 26, 5);
+        c.fillRect(cx - 14, cy + 2, 6, 8);
+        c.fillRect(cx - 2, cy + 2, 4, 9);
+        c.fillStyle = "#3a3a3a";
+        c.fillRect(cx + 12, cy - 2, 6, 3);
+        if (Math.floor(t * 12) % 2 === 0) {
+          c.fillStyle = YELLOW;
+          c.fillRect(cx + 19, cy - 3, 3, 5);
         }
+        return;
       }
-      if (s.paused) {
-        drawPauseMenu(ctx, fontFamily, { W, H, row: pauseRow, t: clock, touch: touchy, rows: PAUSE_ROWS_SIMPLE, stats: `WAVE ${s.wave}  SCORE ${s.score}` });
+      if (id === "up:hp" || id === "up:med") {
+        c.fillStyle = id === "up:med" ? "#ffffff" : "#e01010";
+        c.fillRect(cx - 9, cy - 9, 18, 18);
+        c.fillStyle = id === "up:med" ? "#e01010" : "#ffffff";
+        c.fillRect(cx - 2, cy - 7, 4, 14);
+        c.fillRect(cx - 7, cy - 2, 14, 4);
+        return;
       }
-      // (the crosshair stays while paused too: it's your mouse pointer for clicking the menu)
-      if (!s.paused || !touchy) drawCrosshair();
+      if (id === "up:shells") {
+        for (let i = 0; i < 4; i++) {
+          c.fillStyle = "#c2241a";
+          c.fillRect(cx - 12 + i * 7, cy - 6, 5, 10);
+          c.fillStyle = YELLOW;
+          c.fillRect(cx - 12 + i * 7, cy + 4, 5, 3);
+        }
+        return;
+      }
+      c.drawImage(spin, Math.round(cx - spin.width), Math.round(cy - spin.height), spin.width * 2, spin.height * 2);
     };
 
     let raf = 0;
@@ -1813,10 +2122,11 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       step(dt);
       render(clockNow);
       // tell the phone buttons (HellPad) when the game starts / ends / pauses, so START turns into FIRE
-      const st = `${s.mode}|${s.paused}|${s.mode === "dead" && s.t > 1}`;
+      const held = s.paused || shopUi.open; // (the shop counts as paused for the phone buttons)
+      const st = `${s.mode}|${held}|${s.mode === "dead" && s.t > 1}`;
       if (st !== lastState) {
         lastState = st;
-        window.dispatchEvent(new CustomEvent("pinkmane-hell-state", { detail: { mode: s.mode === "dead" && s.t <= 1 ? "play" : s.mode, paused: s.paused } }));
+        window.dispatchEvent(new CustomEvent("pinkmane-hell-state", { detail: { mode: s.mode === "dead" && s.t <= 1 ? "play" : s.mode, paused: held } }));
       }
       raf = requestAnimationFrame(loop);
     };
@@ -1824,6 +2134,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
 
     return () => {
       cancelAnimationFrame(raf);
+      if (s.mode === "play") shop.add(s.souls); // leaving with EXIT / BACKSPACE: keep the souls from this run
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("keydown", onKey);

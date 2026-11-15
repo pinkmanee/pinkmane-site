@@ -1,8 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { PAUSE_ROWS_SIMPLE, drawPauseButton, drawPauseMenu, leaveToGameMenu, pauseBtnHit, pauseKey, pauseTapRow } from "./PinkShop";
+import { useEffect, useRef } from "react";
+import { ScorePanel, type ScoreApi } from "./Scoreboard";
+import { KIT, SKIN_COLORS, drawOverScreen, drawStartScreen, makeArcade, rainbow, type Arcade, type ShopRow } from "./PinkShop";
 
+// PINK HEXAGON: walls close in on the middle, slip through the gaps with your little triangle. Survive as long as you can.
+//   hold ← → (or A D) / click wheel / hold the left or right half of the screen = go round
+//   SPACE / OK / tap = start      ESC / P / the II button = pause menu      S / DOWN on the start + game over screen = PINK SHOP
+//   M = sounds on / off, - and + = FX volume (or the speaker + slider top left)
+// The middle hexagon and the walls pulse to the song that's playing. Every stage has its own colours.
+// MONEY: VIBES. 1 for every 2 seconds you survive.
+// This one stays on the iPod screen (256 x 160) on purpose: the old-school look.
+// ONLINE TOP 10: board id "hex" (scores are times in hundredths of a second, see Scoreboard.tsx).
+
+type BeatState = { kick: number; sway: number; bass: number; quake: number; live: boolean };
 type Props = {
   // Goes up by 1 every time the player presses OK / Enter / Space
   actionSignal: number;
@@ -12,16 +23,19 @@ type Props = {
   fontFamily: string;
   // Follows the iPod mute button
   muted: boolean;
+  touch?: boolean;
+  // the music's beat from the page (kick = 1 on a kick drum, then fades). Without it, a steady 140 BPM.
+  beatRef?: React.MutableRefObject<BeatState>;
 };
 
-type Mode = "ready" | "running" | "dying" | "entry" | "board";
+type Mode = "ready" | "running" | "dying" | "over";
 // One ring of walls coming in: which of the 6 sides have a wall, and how far away it is
 type Wave = { d: number; sides: boolean[] };
 type Particle = { x: number; y: number; vx: number; vy: number; color: string; life: number };
-type Entry = { name: string; score: number };
-type BoardStatus = "loading" | "ok" | "offline";
 
-// Game size in pixels. It gets scaled up to fill the iPod screen.
+const GAME_TITLE = "PINK HEXAGON";
+
+// Game size in pixels (the iPod screen)
 const W = 256;
 const H = 160;
 const CX = 128;
@@ -29,78 +43,72 @@ const CY = 84;
 
 const SIDE = Math.PI / 3; // 60 degrees
 const COS30 = Math.cos(Math.PI / 6);
-const PLAYER_R = 20; // how far the triangle circles from the center
-const CORE = 11; // size of the center hexagon
+const PLAYER_R = 20; // how far the triangle circles from the middle
+const CORE = 11; // size of the middle hexagon
 const WALL_TH = 8; // wall thickness
 const SPAWN_D = 175; // walls start this far out
 const TURN_SPEED = 5.2; // keyboard / touch turning speed (radians per second)
 
-// Beat pulse, same tempo as the site
+// Without the page's beat: a steady pulse at this tempo
 const BPM = 140;
 const BEAT = 60 / BPM;
 
-// Saved in the visitor's browser (name, device and owner code are shared with the other games)
+// Saved in the visitor's browser
 const BEST_KEY = "pinkhex-best";
-const SFX_KEY = "pinkhex-sfx";
-const NAME_KEY = "pinkrun-name";
-const DEVICE_KEY = "pinkrun-device";
-const OWNER_KEY = "pinkrun-owner";
+const FX_KEY = "pinkhex-sfx";
+const SHOP_KEY = "pinkhex-shop";
 
 // Plays on Game Over: public/sounds/killed.mp3
 const DEATH_SOUND = "/sounds/killed.mp3";
 
 // Stage changes at these many seconds
 const STAGES = [10, 20, 30, 45, 60, 90];
+// Every stage's colours: two background shades, the walls, the walls' edge, and the text colour
+const PALETTES: { a: string; b: string; wall: string; edge: string; ink: string }[] = [
+  { a: "#d7efbc", b: "#c3e2a3", wall: "#111111", edge: "#d63cc8", ink: "#111111" }, // pale green (the classic)
+  { a: "#ffd6f2", b: "#f5b8e4", wall: "#5a0f4f", edge: "#ff2fb4", ink: "#5a0f4f" }, // pink
+  { a: "#cfe8ff", b: "#a9d2f7", wall: "#0d2a5a", edge: "#ff5fd2", ink: "#0d2a5a" }, // ice blue
+  { a: "#ffe1bf", b: "#ffc890", wall: "#5a1e00", edge: "#ff3b1a", ink: "#5a1e00" }, // orange
+  { a: "#2a1040", b: "#3a1858", wall: "#ff5fd2", edge: "#ffffff", ink: "#ffffff" }, // dark purple
+  { a: "#1a0a0a", b: "#2e0f0f", wall: "#ff2a2a", edge: "#ffd400", ink: "#ffd400" }, // black + red
+  { a: "#111111", b: "#1c1c1c", wall: "#ffffff", edge: "#ff5fd2", ink: "#ffffff" }, // black (and the walls turn rainbow)
+];
 
-const SCREEN = "#d7efbc";
-const SCREEN_DARK = "#c3e2a3";
 const INK = "#111111";
 const PINK = "#d63cc8";
-const DARK_PINK = "#8a1f86";
-const BOOM = [PINK, DARK_PINK, "#ffffff", INK, "#ffc800"];
+const BOOM = [PINK, "#8a1f86", "#ffffff", INK, "#ffc800"];
+
+// ---------- the PINK SHOP ----------
+const SKINS: { id: string; name: string; price: number }[] = [
+  { id: "pink", name: "PINK", price: 0 },
+  { id: "toxic", name: "TOXIC", price: 40 },
+  { id: "ice", name: "ICE", price: 80 },
+  { id: "fire", name: "FIRE", price: 120 },
+  { id: "rainbow", name: "RAINBOW", price: 200 },
+  { id: "gold", name: "GOLD", price: 320 },
+];
+const TRAILS: { id: string; name: string; price: number; info: string }[] = [
+  { id: "none", name: "NO TRAIL", price: 0, info: "JUST THE TRIANGLE" },
+  { id: "pink", name: "PINK TRAIL", price: 60, info: "A PINK TAIL BEHIND YOU" },
+  { id: "fire", name: "FIRE TRAIL", price: 140, info: "SPARKS FLY OFF YOU" },
+  { id: "rainbow", name: "RAINBOW TRAIL", price: 220, info: "EVERY COLOUR BEHIND YOU" },
+];
+const SHOP_ROWS: ShopRow[] = [
+  { kind: "head", label: "TRIANGLES" },
+  ...SKINS.map((k): ShopRow => ({ kind: "item", id: `skin:${k.id}`, name: `${k.name} TRIANGLE`, prices: [k.price], wear: true, info: [`A ${k.name} TRIANGLE`, ""] })),
+  { kind: "head", label: "TRAILS" },
+  ...TRAILS.map((k): ShopRow => ({ kind: "item", id: `trail:${k.id}`, name: k.name, prices: [k.price], wear: true, info: [k.info, ""] })),
+  { kind: "back" },
+];
 
 function rand(min: number, max: number) {
   return min + Math.random() * (max - min);
 }
-
-function randInt(n: number) {
-  return Math.floor(Math.random() * n);
-}
-
+const randInt = (n: number) => Math.floor(Math.random() * n);
 // Angle between -PI and PI
-function wrap(a: number) {
-  return Math.atan2(Math.sin(a), Math.cos(a));
-}
-
+const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 // Scores are saved in hundredths of a second: 1234 = 12.34 seconds
-function fmtTime(cs: number) {
-  return (Math.floor(cs) / 100).toFixed(2);
-}
-
-// A random ID for this browser, so names stay locked to the device that claimed them
-function getDeviceId() {
-  try {
-    let id = localStorage.getItem(DEVICE_KEY);
-    if (!id) {
-      id =
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : Math.random().toString(36).slice(2) + Date.now().toString(36);
-      localStorage.setItem(DEVICE_KEY, id);
-    }
-    return id;
-  } catch {
-    return "no-storage-device";
-  }
-}
-
-function getOwnerCode() {
-  try {
-    return localStorage.getItem(OWNER_KEY) || "";
-  } catch {
-    return "";
-  }
-}
+const fmtTime = (cs: number) => (Math.floor(cs) / 100).toFixed(2);
 
 // Wall patterns. Each returns waves (sides with walls) and the gap after each wave.
 function makePattern(time: number): { sides: boolean[]; gap: number }[] {
@@ -114,7 +122,6 @@ function makePattern(time: number): { sides: boolean[]; gap: number }[] {
   const choices = easy ? [0, 1, 2] : [0, 1, 2, 3, 4, 5];
   const pick = choices[randInt(choices.length)];
   const space = easy ? 70 : 55;
-
   switch (pick) {
     case 0: // one gap
       return [{ sides: on([1, 2, 3, 4, 5]), gap: space }];
@@ -135,751 +142,598 @@ function makePattern(time: number): { sides: boolean[]; gap: number }[] {
       // the gap walks around: follow it
       const dir = Math.random() < 0.5 ? 1 : -1;
       const out = [];
-      for (let k = 0; k < 5; k++) {
-        const gapSide = k * dir;
-        out.push({
-          sides: on([1, 2, 3, 4, 5].map((i) => i + gapSide)),
-          gap: k === 4 ? space : 24,
-        });
-      }
+      for (let k = 0; k < 5; k++) out.push({ sides: on([1, 2, 3, 4, 5].map((i) => i + k * dir)), gap: k === 4 ? space : 24 });
       return out;
     }
-    default: // two walls, then three, zig-zag
+    default: // two walls, then four
       return [
         { sides: on([0, 3]), gap: 30 },
         { sides: on([1, 2, 4, 5]), gap: space },
       ];
   }
 }
+// A point on a hexagon with this apothem (distance from the middle to the middle of an edge)
+const hexPoint = (apothem: number, corner: number) => {
+  const r = apothem / COS30;
+  const a = corner * SIDE;
+  return [Math.cos(a) * r, Math.sin(a) * r];
+};
+const triColor = (skin: string, t: number) => (skin === "rainbow" ? rainbow(t) : (SKIN_COLORS[skin] ?? SKIN_COLORS.pink)[1]);
+// the money icon: a little pulsing hexagon
+const vibeIcon = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+  ctx.fillStyle = INK;
+  ctx.fillRect(x + 2, y, 4, 8);
+  ctx.fillRect(x, y + 2, 8, 4);
+  ctx.fillRect(x + 1, y + 1, 6, 6);
+  ctx.fillStyle = PINK;
+  ctx.fillRect(x + 2, y + 2, 4, 4);
+};
 
-export default function HexGame({ actionSignal, spinRef, fontFamily, muted }: Props) {
+export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touch = false, beatRef }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // the pause menu (the same one in every game, see PinkShop.ts)
-  const pauseRef = useRef({ on: false, row: 0, t: 0 });
+  const boardRef = useRef<ScoreApi | null>(null);
   const firstSignal = useRef(actionSignal);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const deathSoundRef = useRef<HTMLAudioElement | null>(null);
-  // Game sounds on/off (separate from the music): speaker icon top-left or the M key
-  const sfxOnRef = useRef(true);
-  const heldRef = useRef({ ccw: false, cw: false });
-  const touchRef = useRef<number>(0); // -1 = holding left side, 1 = right side
+  const touchRef = useRef(touch);
+  touchRef.current = touch;
+  const beat = useRef(beatRef);
+  beat.current = beatRef;
+  const pressRef = useRef<(() => void) | null>(null);
+  const arcRef = useRef<Arcade | null>(null);
 
-  // Scoreboard (shared online) and name entry
-  const [showEntry, setShowEntry] = useState(false);
-  const [name, setName] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
-  const boardRef = useRef<Entry[]>([]);
-  const boardStatusRef = useRef<BoardStatus>("loading");
-  const myNameRef = useRef("");
-  const nameRef = useRef("");
-  const savingRef = useRef(false);
-
-  const state = useRef({
-    mode: "ready" as Mode,
-    angle: -Math.PI / 2, // where the triangle is (in the spinning world)
-    waves: [] as Wave[],
-    queue: [] as { sides: boolean[]; gap: number }[],
-    nextIn: 0, // distance until the next wave comes in
-    rot: 0, // how much the whole world is turned
-    rotSpeed: 0.7,
-    flipIn: 6,
-    time: 0, // survival time in seconds
-    best: 0, // in hundredths of a second
-    stage: 0,
-    flash: 0,
-    flashText: "",
-    textTimer: 0,
-    particles: [] as Particle[],
-    t: 0,
-    deadAt: 0,
-    shake: 0,
-    whiteout: 0,
-  });
-
-  // ---------- Sounds (made in code) ----------
-
-  const getAudio = () => {
-    if (typeof window === "undefined") return null;
-    if (!audioCtxRef.current) {
-      const AC =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AC) return null;
-      audioCtxRef.current = new AC();
-    }
-    if (audioCtxRef.current.state === "suspended") audioCtxRef.current.resume();
-    return audioCtxRef.current;
-  };
-
-  const beep = (from: number, to: number, time: number, volume: number, type: OscillatorType = "square", delay = 0) => {
-    if (mutedRef.current || !sfxOnRef.current) return;
-    const ac = getAudio();
-    if (!ac) return;
-    const now = ac.currentTime + delay;
-    const osc = ac.createOscillator();
-    osc.type = type;
-    osc.frequency.setValueAtTime(from, now);
-    osc.frequency.exponentialRampToValueAtTime(to, now + time);
-    const g = ac.createGain();
-    g.gain.setValueAtTime(0.0001, ac.currentTime);
-    g.gain.setValueAtTime(volume, now);
-    g.gain.exponentialRampToValueAtTime(0.001, now + time + 0.02);
-    osc.connect(g).connect(ac.destination);
-    osc.start(now);
-    osc.stop(now + time + 0.04);
-  };
-
-  const playStart = () => beep(220, 880, 0.25, 0.05, "sawtooth");
-  const playStage = () => [523, 784, 1047].forEach((f, i) => beep(f, f, 0.09, 0.05, "square", i * 0.08));
-  const playHit = () => beep(300, 50, 0.3, 0.14, "sawtooth");
-  const playDeath = () => {
-    const sound = deathSoundRef.current;
-    if (sound && !mutedRef.current && sfxOnRef.current) {
-      sound.currentTime = 0;
-      sound.play().catch(() => {});
-    }
-  };
-
-  const toggleSfx = () => {
-    sfxOnRef.current = !sfxOnRef.current;
-    try {
-      localStorage.setItem(SFX_KEY, sfxOnRef.current ? "on" : "off");
-    } catch {}
-  };
-
-  // ---------- Scoreboard ----------
-
-  const loadBoard = async () => {
-    try {
-      const res = await fetch("/api/scores?game=hex", { cache: "no-store" });
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      boardRef.current = Array.isArray(data.scores) ? data.scores : [];
-      boardStatusRef.current = "ok";
-    } catch {
-      boardStatusRef.current = "offline";
-    }
-  };
-
-  const qualifies = (score: number) => {
-    if (boardStatusRef.current !== "ok" || score < 100) return false;
-    const b = boardRef.current;
-    return b.length < 10 || score > b[b.length - 1].score;
-  };
-
-  const scoreNow = () => Math.floor(state.current.time * 100);
-
-  const submitName = async () => {
-    const s = state.current;
-    const clean = nameRef.current.trim();
-    if (clean.length < 2) {
-      setMessage("NAME TOO SHORT");
-      return;
-    }
-    if (savingRef.current) return;
-    savingRef.current = true;
-    setSaving(true);
-    setMessage("");
-    try {
-      const res = await fetch("/api/scores", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          game: "hex",
-          name: clean,
-          score: scoreNow(),
-          runTime: s.time,
-          device: getDeviceId(),
-          ownerCode: getOwnerCode(),
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setMessage(String(data.error || "COULD NOT SAVE").toUpperCase());
-        return;
-      }
-      boardRef.current = Array.isArray(data.scores) ? data.scores : boardRef.current;
-      myNameRef.current = data.name || clean;
-      try {
-        localStorage.setItem(NAME_KEY, clean);
-      } catch {}
-      setShowEntry(false);
-      s.mode = "board";
-      s.deadAt = s.t;
-    } catch {
-      setMessage("COULD NOT SAVE");
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
-  };
-
-  const skipEntry = () => {
-    const s = state.current;
-    setShowEntry(false);
-    setMessage("");
-    s.mode = "board";
-    s.deadAt = s.t;
-  };
-
-  // ---------- Game ----------
-
-  const wallSpeed = () => Math.min(120, 48 + state.current.time * 1.1);
-
-  // Is there a wall touching the triangle if it stood at this angle?
-  const blockedAt = (angle: number) => {
-    const s = state.current;
-    const a = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-    const side = Math.floor(a / SIDE) % 6;
-    const center = side * SIDE + SIDE / 2;
-    // Distance of the triangle toward that side's wall (walls are straight hexagon edges)
-    const pd = PLAYER_R * Math.cos(a - center);
-    for (const w of s.waves) {
-      if (!w.sides[side]) continue;
-      if (pd + 2 >= w.d && pd - 2 <= w.d + WALL_TH) return true;
-    }
-    return false;
-  };
-
-  // Turn the triangle, but walls block it from the side
-  const moveBy = (delta: number) => {
-    const s = state.current;
-    const steps = Math.max(1, Math.ceil(Math.abs(delta) / 0.05));
-    const step = delta / steps;
-    for (let i = 0; i < steps; i++) {
-      const next = s.angle + step;
-      if (blockedAt(next)) break;
-      s.angle = wrap(next);
-    }
-  };
-
-  const newGame = () => {
-    const s = state.current;
-    s.waves = [];
-    s.queue = [];
-    s.nextIn = 40;
-    s.rot = 0;
-    s.rotSpeed = 0.7;
-    s.flipIn = rand(5, 8);
-    s.time = 0;
-    s.stage = 0;
-    s.particles = [];
-    s.whiteout = 0;
-    s.angle = -Math.PI / 2;
-  };
-
-  // Called on OK / Enter / Space / tapping the screen
-  const press = () => {
-    const s = state.current;
-    getAudio(); // browsers only allow sound after a click, so wake it up here
-    if (s.mode === "ready") {
-      s.mode = "running";
-      playStart();
-    } else if (s.mode === "entry") {
-      submitName();
-    } else if (s.mode === "board" && s.t - s.deadAt > 0.6) {
-      newGame();
-      s.mode = "running";
-      playStart();
-    }
-  };
-
-  const die = () => {
-    const s = state.current;
-    s.mode = "dying";
-    s.deadAt = s.t;
-    s.shake = 0.4;
-    s.whiteout = 0.35;
-    const px = Math.cos(s.angle + s.rot) * PLAYER_R;
-    const py = Math.sin(s.angle + s.rot) * PLAYER_R;
-    for (let i = 0; i < 40; i++) {
-      s.particles.push({
-        x: CX + px,
-        y: CY + py,
-        vx: rand(-110, 110),
-        vy: rand(-110, 110),
-        color: BOOM[randInt(BOOM.length)],
-        life: rand(0.5, 1.2),
-      });
-    }
-    const score = scoreNow();
-    if (score > s.best) {
-      s.best = score;
-      try {
-        localStorage.setItem(BEST_KEY, String(score));
-      } catch {}
-    }
-    playHit();
-    playDeath();
-  };
-
-  const finishDeath = () => {
-    const s = state.current;
-    if (qualifies(scoreNow())) {
-      s.mode = "entry";
-      setMessage("");
-      setShowEntry(true);
-    } else {
-      s.mode = "board";
-      s.deadAt = s.t;
-    }
-  };
-
-  const update = (dt: number) => {
-    const s = state.current;
-    s.t += dt;
-    if (s.shake > 0) s.shake -= dt;
-    if (s.whiteout > 0) s.whiteout -= dt;
-    if (s.textTimer > 0) s.textTimer -= dt;
-
-    for (const p of s.particles) {
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.vx *= 1 - 2 * dt;
-      p.vy *= 1 - 2 * dt;
-      p.life -= dt;
-    }
-    s.particles = s.particles.filter((p) => p.life > 0);
-
-    // The world keeps spinning slowly even on the start screen
-    if (s.mode === "ready") {
-      s.rot += 0.5 * dt;
-      spinRef.current = 0;
-      return;
-    }
-    if (s.mode === "dying") {
-      s.rot += s.rotSpeed * 0.3 * dt;
-      if (s.t - s.deadAt > 1.5) finishDeath();
-      return;
-    }
-    if (s.mode !== "running") {
-      spinRef.current = 0;
-      return;
-    }
-
-    s.time += dt;
-
-    // Your turning: click wheel, keyboard, touch
-    const wheel = (spinRef.current * Math.PI) / 180;
-    spinRef.current = 0;
-    let turn = wheel;
-    if (heldRef.current.ccw || touchRef.current < 0) turn -= TURN_SPEED * dt;
-    if (heldRef.current.cw || touchRef.current > 0) turn += TURN_SPEED * dt;
-    if (turn !== 0) moveBy(turn);
-
-    // The world spins, faster over time, and sometimes flips direction
-    const spin = Math.min(2.4, 0.7 + s.time * 0.025);
-    s.rotSpeed = Math.sign(s.rotSpeed || 1) * spin;
-    s.flipIn -= dt;
-    if (s.flipIn <= 0) {
-      s.rotSpeed = -s.rotSpeed;
-      s.flipIn = rand(4, 8);
-    }
-    s.rot += s.rotSpeed * dt;
-
-    // Stages
-    if (s.stage < STAGES.length && s.time >= STAGES[s.stage]) {
-      s.stage += 1;
-      s.flashText = `STAGE ${s.stage + 1}`;
-      s.textTimer = 1.4;
-      playStage();
-    }
-
-    // Walls come in
-    const move = wallSpeed() * dt;
-    for (const w of s.waves) w.d -= move;
-    s.waves = s.waves.filter((w) => w.d + WALL_TH > CORE - 2);
-
-    s.nextIn -= move;
-    if (s.nextIn <= 0) {
-      if (s.queue.length === 0) s.queue = makePattern(s.time);
-      const next = s.queue.shift();
-      if (next) {
-        s.waves.push({ d: SPAWN_D, sides: next.sides });
-        s.nextIn = next.gap;
-      }
-    }
-
-    // Crushed by a wall
-    if (blockedAt(s.angle)) die();
-  };
-
-  // A point on a hexagon with this apothem (distance from center to the middle of an edge)
-  const hexPoint = (apothem: number, corner: number) => {
-    const r = apothem / COS30;
-    const a = corner * SIDE;
-    return [Math.cos(a) * r, Math.sin(a) * r];
-  };
-
-  const drawBoard = (ctx: CanvasRenderingContext2D) => {
-    const s = state.current;
-    const status = boardStatusRef.current;
-    ctx.fillStyle = SCREEN;
-    ctx.fillRect(0, 0, W, H);
-    ctx.font = `8px ${fontFamily}`;
-    ctx.textBaseline = "top";
-    ctx.fillStyle = INK;
-    ctx.textAlign = "center";
-
-    if (status !== "ok") {
-      ctx.fillText("GAME OVER", W / 2, 40);
-      ctx.fillText(`TIME ${fmtTime(scoreNow())}`, W / 2, 58);
-      ctx.fillText(status === "loading" ? "LOADING SCORES..." : "SCOREBOARD OFFLINE", W / 2, 80);
-    } else {
-      ctx.fillText("TOP 10", W / 2, 8);
-      const b = boardRef.current;
-      if (b.length === 0) ctx.fillText("NO SCORES YET", W / 2, 60);
-      b.slice(0, 10).forEach((e, i) => {
-        const y = 22 + i * 11;
-        if (e.name === myNameRef.current) {
-          ctx.fillStyle = PINK;
-          ctx.fillRect(24, y - 2, W - 48, 11);
-        }
-        ctx.fillStyle = INK;
-        ctx.textAlign = "left";
-        ctx.fillText(`${String(i + 1).padStart(2, " ")} ${e.name}`, 28, y);
-        ctx.textAlign = "right";
-        ctx.fillText(fmtTime(e.score), W - 28, y);
-      });
-      ctx.textAlign = "center";
-      ctx.fillText(`YOU ${fmtTime(scoreNow())}`, W / 2, 134);
-    }
-
-    if (Math.floor(s.t * 2) % 2 === 0) ctx.fillText("OK TO PLAY AGAIN", W / 2, 148);
-  };
-
-  const drawSfxIcon = (ctx: CanvasRenderingContext2D) => {
-    const x = 6;
-    const y = 5;
-    ctx.fillStyle = INK;
-    ctx.fillRect(x, y + 2, 2, 3);
-    ctx.fillRect(x + 2, y + 1, 1, 5);
-    ctx.fillRect(x + 3, y, 1, 7);
-    if (sfxOnRef.current) {
-      ctx.fillRect(x + 5, y + 2, 1, 3);
-      ctx.fillRect(x + 7, y + 1, 1, 5);
-    } else {
-      ctx.fillStyle = PINK;
-      for (let i = 0; i < 5; i++) {
-        ctx.fillRect(x + 5 + i, y + 1 + i, 1, 1);
-        ctx.fillRect(x + 9 - i, y + 1 + i, 1, 1);
-      }
-    }
-  };
-
-  const textBox = (ctx: CanvasRenderingContext2D, text: string, y: number) => {
-    const w = ctx.measureText(text).width + 8;
-    ctx.fillStyle = SCREEN;
-    ctx.fillRect(Math.round(W / 2 - w / 2), y - 2, Math.round(w), 12);
-    ctx.fillStyle = INK;
-    ctx.fillText(text, W / 2, y);
-  };
-
-  const draw = (ctx: CanvasRenderingContext2D) => {
-    const s = state.current;
-
-    if (s.mode === "board") {
-      drawBoard(ctx);
-      return;
-    }
-
-    // Beat pulse: jumps on each beat, then settles
-    const beatPhase = (s.t % BEAT) / BEAT;
-    const pulse = Math.max(0, 1 - beatPhase * 4);
-
-    ctx.save();
-    if (s.shake > 0) ctx.translate(Math.round(rand(-3, 3)), Math.round(rand(-3, 3)));
-    ctx.translate(CX, CY);
-    ctx.rotate(s.rot);
-
-    // Background: 6 slices in two shades
-    for (let i = 0; i < 6; i++) {
-      ctx.fillStyle = i % 2 === 0 ? SCREEN : SCREEN_DARK;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(Math.cos(i * SIDE) * 260, Math.sin(i * SIDE) * 260);
-      ctx.lineTo(Math.cos((i + 1) * SIDE) * 260, Math.sin((i + 1) * SIDE) * 260);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    // Walls
-    for (const w of s.waves) {
-      for (let i = 0; i < 6; i++) {
-        if (!w.sides[i]) continue;
-        const inner = Math.max(CORE, w.d);
-        const outer = w.d + WALL_TH;
-        if (outer <= CORE) continue;
-        const [x1, y1] = hexPoint(inner, i);
-        const [x2, y2] = hexPoint(inner, i + 1);
-        const [x3, y3] = hexPoint(outer, i + 1);
-        const [x4, y4] = hexPoint(outer, i);
-        ctx.fillStyle = INK;
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.lineTo(x3, y3);
-        ctx.lineTo(x4, y4);
-        ctx.closePath();
-        ctx.fill();
-        // Pink inner edge
-        ctx.strokeStyle = PINK;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-      }
-    }
-
-    // Center hexagon, pulsing to the beat
-    const core = CORE + pulse * 2.5;
-    ctx.fillStyle = INK;
-    ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const [x, y] = hexPoint(core, i);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = PINK;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // You: the pink triangle
-    if (s.mode === "ready" || s.mode === "running") {
-      const a = s.angle;
-      const tip = PLAYER_R + 4;
-      const base = PLAYER_R - 1;
-      ctx.fillStyle = PINK;
-      ctx.strokeStyle = INK;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * tip, Math.sin(a) * tip);
-      ctx.lineTo(Math.cos(a - 0.2) * base, Math.sin(a - 0.2) * base);
-      ctx.lineTo(Math.cos(a + 0.2) * base, Math.sin(a + 0.2) * base);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    }
-
-    ctx.restore();
-
-    // Explosion
-    for (const p of s.particles) {
-      ctx.fillStyle = p.color;
-      ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
-    }
-
-    if (s.whiteout > 0) {
-      ctx.fillStyle = `rgba(255,255,255,${Math.min(0.8, s.whiteout * 2.5)})`;
-      ctx.fillRect(0, 0, W, H);
-    }
-
-    // HUD
-    ctx.font = `8px ${fontFamily}`;
-    ctx.textBaseline = "top";
-    drawSfxIcon(ctx);
-    ctx.textAlign = "right";
-    const boxText = (text: string, x: number, y: number) => {
-      const w = ctx.measureText(text).width + 6;
-      ctx.fillStyle = INK;
-      ctx.fillRect(Math.round(x - w + 3), y - 2, Math.round(w), 12);
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(text, x, y);
-    };
-    boxText(`TIME ${fmtTime(scoreNow())}`, W - 5, 5);
-    boxText(`BEST ${fmtTime(s.best)}`, W - 5, H - 13);
-
-    // Messages
-    ctx.textAlign = "center";
-    const blink = Math.floor(s.t * 2) % 2 === 0;
-    if (s.mode === "ready") {
-      textBox(ctx, "PINK HEXAGON", 30);
-      if (blink) textBox(ctx, "PRESS OK TO START", 124);
-      const top = boardRef.current[0];
-      if (boardStatusRef.current === "ok" && top) textBox(ctx, `#1 ${top.name} ${fmtTime(top.score)}`, 140);
-    } else if (s.mode === "running" && s.textTimer > 0) {
-      textBox(ctx, s.flashText, 30);
-    } else if (s.mode === "entry") {
-      textBox(ctx, "NEW TOP 10 TIME!", 30);
-      textBox(ctx, fmtTime(scoreNow()), 44);
-    }
-  };
-
-  // ---------- PAUSE: the same menu in every game (see PinkShop.ts) ----------
-  // ESC / P, or the little II button at the top = RESUME / RESTART / GAME MENU (GAME MENU = back to the PSP game list)
-  const PAUSE_BTN = { x: 26, y: 4 };
-  const pauseActive = () => state.current.mode === "running"; // the II button only shows while you play
-  const setPause = (on: boolean) => {
-    const p = pauseRef.current;
-    if (on && state.current.mode === "entry") return; // (typing your name for the Top 10)
-    p.on = on;
-    p.row = 0;
-    heldRef.current.ccw = false;
-    heldRef.current.cw = false;
-    touchRef.current = 0;
-  };
-  const pauseChoose = () => {
-    const p = pauseRef.current;
-    const pick = PAUSE_ROWS_SIMPLE[p.row];
-    p.on = false;
-    if (pick === "RESTART") {
-      newGame();
-      state.current.mode = "running";
-      playStart();
-    } else if (pick === "GAME MENU") leaveToGameMenu();
-  };
-  const pauseStats = () => {
-    const s = state.current;
-    return `TIME ${fmtTime(scoreNow())}`;
-  };
-  // a click / tap on the screen, in game pixels
-  const toGamePt = (el: HTMLCanvasElement, cx: number, cy: number) => {
-    const rect = el.getBoundingClientRect();
-    const scale = Math.min(rect.width / W, rect.height / H);
-    return { x: (cx - rect.left - (rect.width - W * scale) / 2) / scale, y: (cy - rect.top - (rect.height - H * scale) / 2) / scale };
-  };
-  // a tap while paused picks a row; a tap on the II button pauses. true = the tap was used up here
-  const pauseTap = (x: number, y: number) => {
-    if (pauseRef.current.on) {
-      const r = pauseTapRow(x, y, W, PAUSE_ROWS_SIMPLE.length);
-      if (r >= 0) {
-        pauseRef.current.row = r;
-        pauseChoose();
-      }
-      return true;
-    }
-    if (pauseActive() && pauseBtnHit(x, y, PAUSE_BTN.x, PAUSE_BTN.y)) {
-      setPause(true);
-      return true;
-    }
-    return false;
-  };
-
-  // Start the game loop once
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    const isTouch = () => touchRef.current || coarse;
+    const held = { ccw: false, cw: false };
+    let touchSide = 0; // -1 = holding the left half, 1 = the right half
 
-    deathSoundRef.current = new Audio(DEATH_SOUND);
-
-    // Owner code: open the site once with ?owner=YOURCODE on each of your devices
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const ownerParam = params.get("owner");
-      if (ownerParam) {
-        localStorage.setItem(OWNER_KEY, ownerParam);
-        params.delete("owner");
-        const rest = params.toString();
-        window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : ""));
-      }
-    } catch {}
-
-    try {
-      sfxOnRef.current = localStorage.getItem(SFX_KEY) !== "off";
-      const saved = Number(localStorage.getItem(BEST_KEY));
-      if (saved > 0) state.current.best = saved;
-      const savedName = localStorage.getItem(NAME_KEY);
-      if (savedName) {
-        nameRef.current = savedName;
-        setName(savedName);
-      }
-    } catch {}
-
-    loadBoard();
-    newGame();
-
-    // Keyboard: hold ← / A to go left, → / D to go right, M = game sounds on/off
-    const down = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") heldRef.current.ccw = true;
-      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") heldRef.current.cw = true;
-      if (e.key === "m" || e.key === "M") toggleSfx();
+    const s = {
+      mode: "ready" as Mode,
+      angle: -Math.PI / 2, // where the triangle is (in the spinning world)
+      waves: [] as Wave[],
+      queue: [] as { sides: boolean[]; gap: number }[],
+      nextIn: 0, // distance until the next wave comes in
+      rot: 0, // how much the whole world is turned
+      rotSpeed: 0.7,
+      flipIn: 6,
+      time: 0, // survival time in seconds
+      best: 0, // in hundredths of a second
+      stage: 0,
+      flashText: "",
+      textTimer: 0,
+      particles: [] as Particle[],
+      trail: [] as { a: number; life: number }[],
+      t: 0,
+      clock: 0,
+      shake: 0,
+      whiteout: 0,
+      run: 0, // vibes this game
+      newBest: false,
     };
-    const up = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") heldRef.current.ccw = false;
-      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") heldRef.current.cw = false;
-    };
-    window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
+    try {
+      s.best = Number(localStorage.getItem(BEST_KEY)) || 0;
+    } catch {}
+    const scoreNow = () => Math.floor(s.time * 100);
+    const palette = () => PALETTES[Math.min(s.stage, PALETTES.length - 1)];
 
-    // PAUSE keys. This listens BEFORE the page does, so while paused UP / DOWN / OK / SPACE only move the pause menu
-    // (they don't steer, jump or skip songs). BACKSPACE still goes back to the game list.
-    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false; // phone / tablet: the menu says TAP
-    const onPauseKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-      const p = pauseRef.current;
-      if (!p.on) {
-        if ((e.key === "Escape" || e.key === "p" || e.key === "P") && state.current.mode !== "entry") {
-          setPause(true);
-          e.preventDefault();
-          e.stopImmediatePropagation();
-        }
+    // ---------- pause, shop, FX (the same in every game, see PinkShop.ts) ----------
+    const bankRun = () => {
+      s.run = Math.floor(s.time / 2);
+      if (s.run > 0) arc.shop.add(s.run);
+    };
+    const arc = makeArcade({
+      W,
+      H,
+      font: fontFamily,
+      fxKey: FX_KEY,
+      shopKey: SHOP_KEY,
+      rows: SHOP_ROWS,
+      moneyName: "VIBES",
+      icon: vibeIcon,
+      preview: (c, id, box, t) => drawPreview(c, id, box.x + box.w / 2, box.y + box.h / 2, t),
+      panelPreview: (c, cx, cy, t) => drawPreview(c, null, cx, cy, t),
+      ink: INK,
+      muted: () => mutedRef.current,
+      touch: isTouch,
+      playing: () => s.mode === "running",
+      menuScreen: () => s.mode === "ready" || (s.mode === "over" && s.t > 0.6),
+      busy: () => boardRef.current?.busy() ?? false,
+      restart: () => {
+        newGame();
+        s.mode = "running";
+        playStart();
+      },
+      leaving: () => {
+        if (s.mode === "running") bankRun();
+      },
+      stats: () => `TIME ${fmtTime(scoreNow())}  +${Math.floor(s.time / 2)} VIBES`,
+      pauseBtn: { x: 24, y: 3 },
+    });
+    arcRef.current = arc;
+    const beep = arc.beep;
+    const deathSound = new Audio(DEATH_SOUND);
+
+    const playStart = () => beep(220, 880, 0.25, 0.05, "sawtooth");
+    const playStage = () => [523, 784, 1047].forEach((f, i) => beep(f, f, 0.09, 0.05, "square", i * 0.08));
+    const playHit = () => beep(300, 50, 0.3, 0.14, "sawtooth");
+    const playDeath = () => {
+      const g = arc.fx.on && !mutedRef.current ? arc.fx.vol : 0;
+      if (g <= 0) return;
+      deathSound.volume = g;
+      deathSound.currentTime = 0;
+      deathSound.play().catch(() => {});
+    };
+
+    // ---------- the game ----------
+    const wallSpeed = () => Math.min(120, 48 + s.time * 1.1);
+    // Is there a wall touching the triangle if it stood at this angle?
+    const blockedAt = (angle: number) => {
+      const a = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      const side = Math.floor(a / SIDE) % 6;
+      const center = side * SIDE + SIDE / 2;
+      // Distance of the triangle toward that side's wall (walls are straight hexagon edges)
+      const pd = PLAYER_R * Math.cos(a - center);
+      for (const w of s.waves) {
+        if (!w.sides[side]) continue;
+        if (pd + 2 >= w.d && pd - 2 <= w.d + WALL_TH) return true;
+      }
+      return false;
+    };
+    // Turn the triangle, but walls block it from the side
+    const moveBy = (delta: number) => {
+      const steps = Math.max(1, Math.ceil(Math.abs(delta) / 0.05));
+      const step = delta / steps;
+      for (let i = 0; i < steps; i++) {
+        const next = s.angle + step;
+        if (blockedAt(next)) break;
+        s.angle = wrap(next);
+      }
+    };
+    const newGame = () => {
+      boardRef.current?.hide();
+      s.waves = [];
+      s.queue = [];
+      s.nextIn = 40;
+      s.rot = 0;
+      s.rotSpeed = 0.7;
+      s.flipIn = rand(5, 8);
+      s.time = 0;
+      s.stage = 0;
+      s.particles = [];
+      s.trail = [];
+      s.whiteout = 0;
+      s.angle = -Math.PI / 2;
+      s.run = 0;
+      s.newBest = false;
+      s.t = 0;
+    };
+
+    // OK / Enter / Space / tapping the screen
+    const press = () => {
+      arc.wakeSound(); // browsers only allow sound after a click, so wake it up here
+      if (s.mode === "ready") {
+        newGame();
+        s.mode = "running";
+        playStart();
+      } else if (s.mode === "over" && s.t > 0.6) {
+        if (boardRef.current?.busy()) return;
+        newGame();
+        s.mode = "running";
+        playStart();
+      }
+    };
+    pressRef.current = press;
+
+    const die = () => {
+      s.mode = "dying";
+      s.t = 0;
+      s.shake = 0.4;
+      s.whiteout = 0.35;
+      const px = Math.cos(s.angle + s.rot) * PLAYER_R;
+      const py = Math.sin(s.angle + s.rot) * PLAYER_R;
+      for (let i = 0; i < 40; i++) s.particles.push({ x: CX + px, y: CY + py, vx: rand(-110, 110), vy: rand(-110, 110), color: BOOM[randInt(BOOM.length)], life: rand(0.5, 1.2) });
+      const score = scoreNow();
+      if (score > s.best) {
+        s.best = score;
+        s.newBest = true;
+        try {
+          localStorage.setItem(BEST_KEY, String(score));
+        } catch {}
+      }
+      bankRun();
+      playHit();
+      playDeath();
+    };
+    const gameOver = () => {
+      s.mode = "over";
+      s.t = 0;
+      boardRef.current?.gameOver(scoreNow(), s.time);
+    };
+
+    // how hard the music is hitting right now (0..1)
+    const pulseNow = () => {
+      const b = beat.current?.current;
+      if (b && b.live) return Math.max(0, Math.min(1, b.kick));
+      const phase = (s.clock % BEAT) / BEAT;
+      return Math.max(0, 1 - phase * 4);
+    };
+
+    const update = (dt: number) => {
+      s.t += dt;
+      if (s.shake > 0) s.shake -= dt;
+      if (s.whiteout > 0) s.whiteout -= dt;
+      if (s.textTimer > 0) s.textTimer -= dt;
+      for (const p of s.particles) {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vx *= 1 - 2 * dt;
+        p.vy *= 1 - 2 * dt;
+        p.life -= dt;
+      }
+      s.particles = s.particles.filter((p) => p.life > 0);
+      for (const tr of s.trail) tr.life -= dt;
+      s.trail = s.trail.filter((tr) => tr.life > 0);
+
+      // The world keeps spinning slowly even on the start screen
+      if (s.mode === "ready" || s.mode === "over") {
+        s.rot += 0.5 * dt;
+        spinRef.current = 0;
         return;
       }
-      if (e.key === "Backspace") return;
-      const did = pauseKey(p, PAUSE_ROWS_SIMPLE.length, e.key);
-      if (!did) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      if (e.repeat && did !== "move") return;
-      if (did === "choose") pauseChoose();
-      else if (did === "resume") setPause(false);
+      if (s.mode === "dying") {
+        s.rot += s.rotSpeed * 0.3 * dt;
+        if (s.t > 1.5) gameOver();
+        return;
+      }
+
+      s.time += dt;
+      // Your turning: click wheel, keyboard, touch
+      const wheel = (spinRef.current * Math.PI) / 180;
+      spinRef.current = 0;
+      let turn = wheel;
+      if (held.ccw || touchSide < 0) turn -= TURN_SPEED * dt;
+      if (held.cw || touchSide > 0) turn += TURN_SPEED * dt;
+      if (turn !== 0) moveBy(turn);
+      // the trail
+      if (arc.shop.wearingName("trail") !== "none") s.trail.push({ a: s.angle, life: 0.35 });
+
+      // The world spins, faster over time, and sometimes flips direction
+      const spin = Math.min(2.4, 0.7 + s.time * 0.025);
+      s.rotSpeed = Math.sign(s.rotSpeed || 1) * spin;
+      s.flipIn -= dt;
+      if (s.flipIn <= 0) {
+        s.rotSpeed = -s.rotSpeed;
+        s.flipIn = rand(4, 8);
+      }
+      s.rot += s.rotSpeed * dt;
+
+      // Stages (new colours every time)
+      if (s.stage < STAGES.length && s.time >= STAGES[s.stage]) {
+        s.stage += 1;
+        s.flashText = `STAGE ${s.stage + 1}`;
+        s.textTimer = 1.4;
+        s.whiteout = 0.2;
+        playStage();
+      }
+
+      // Walls come in
+      const move = wallSpeed() * dt;
+      for (const w of s.waves) w.d -= move;
+      s.waves = s.waves.filter((w) => w.d + WALL_TH > CORE - 2);
+      s.nextIn -= move;
+      if (s.nextIn <= 0) {
+        if (s.queue.length === 0) s.queue = makePattern(s.time);
+        const next = s.queue.shift();
+        if (next) {
+          s.waves.push({ d: SPAWN_D, sides: next.sides });
+          s.nextIn = next.gap;
+        }
+      }
+      // Crushed by a wall
+      if (blockedAt(s.angle)) die();
     };
-    window.addEventListener("keydown", onPauseKey, true);
+
+    // ---------- drawing ----------
+    const drawTriangle = (c: CanvasRenderingContext2D, a: number, color: string, scale = 1) => {
+      const tip = (PLAYER_R + 4) * scale;
+      const base = (PLAYER_R - 1) * scale;
+      c.fillStyle = color;
+      c.strokeStyle = INK;
+      c.lineWidth = 1;
+      c.beginPath();
+      c.moveTo(Math.cos(a) * tip, Math.sin(a) * tip);
+      c.lineTo(Math.cos(a - 0.2) * base, Math.sin(a - 0.2) * base);
+      c.lineTo(Math.cos(a + 0.2) * base, Math.sin(a + 0.2) * base);
+      c.closePath();
+      c.fill();
+      c.stroke();
+    };
+    const trailColor = (trail: string, i: number, t: number) =>
+      trail === "rainbow" ? rainbow(t, i) : trail === "fire" ? ["#ffd84a", "#ff7a00", "#ff3b1a"][i % 3] : PINK;
+    // the shop's preview + the SHOP panel: the triangle going round a little hexagon
+    const drawPreview = (c: CanvasRenderingContext2D, id: string | null, cx: number, cy: number, t: number) => {
+      c.fillStyle = PALETTES[0].a;
+      c.fillRect(cx - 50, cy - 50, 100, 100);
+      const skin = id && id.startsWith("skin:") ? id.split(":")[1] : arc.shop.wearingName("skin");
+      const trail = id && id.startsWith("trail:") ? id.split(":")[1] : arc.shop.wearingName("trail");
+      c.save();
+      c.translate(cx, cy);
+      const core = 7 + pulseNow() * 2;
+      c.fillStyle = INK;
+      c.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const [x, y] = hexPoint(core, i);
+        if (i === 0) c.moveTo(x, y);
+        else c.lineTo(x, y);
+      }
+      c.closePath();
+      c.fill();
+      const a = t * 2.5;
+      if (trail !== "none") {
+        for (let i = 1; i < 10; i++) {
+          c.globalAlpha = 1 - i / 10;
+          c.fillStyle = trailColor(trail, i, t);
+          const ta = a - i * 0.12;
+          c.fillRect(Math.round(Math.cos(ta) * 15) - 1, Math.round(Math.sin(ta) * 15) - 1, 2, 2);
+        }
+        c.globalAlpha = 1;
+      }
+      drawTriangle(c, a, triColor(skin, t), 0.8);
+      c.restore();
+    };
+
+    const draw = () => {
+      const pal = palette();
+      const pulse = pulseNow();
+      ctx.save();
+      if (s.shake > 0) ctx.translate(Math.round(rand(-3, 3)), Math.round(rand(-3, 3)));
+      ctx.translate(CX, CY);
+      ctx.rotate(s.rot);
+      // the whole world jumps a little on the beat
+      const zoom = 1 + pulse * 0.035;
+      ctx.scale(zoom, zoom);
+      // Background: 6 slices in two shades
+      for (let i = 0; i < 6; i++) {
+        ctx.fillStyle = i % 2 === 0 ? pal.a : pal.b;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(i * SIDE) * 260, Math.sin(i * SIDE) * 260);
+        ctx.lineTo(Math.cos((i + 1) * SIDE) * 260, Math.sin((i + 1) * SIDE) * 260);
+        ctx.closePath();
+        ctx.fill();
+      }
+      // Walls
+      const rainbowWalls = s.stage >= PALETTES.length - 1;
+      for (const w of s.waves) {
+        for (let i = 0; i < 6; i++) {
+          if (!w.sides[i]) continue;
+          const inner = Math.max(CORE, w.d);
+          const outer = w.d + WALL_TH;
+          if (outer <= CORE) continue;
+          const [x1, y1] = hexPoint(inner, i);
+          const [x2, y2] = hexPoint(inner, i + 1);
+          const [x3, y3] = hexPoint(outer, i + 1);
+          const [x4, y4] = hexPoint(outer, i);
+          ctx.fillStyle = rainbowWalls ? rainbow(s.clock, i) : pal.wall;
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.lineTo(x3, y3);
+          ctx.lineTo(x4, y4);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = pal.edge;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+        }
+      }
+      // Middle hexagon, pulsing to the beat
+      const core = CORE + pulse * 3;
+      ctx.fillStyle = pal.wall;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const [x, y] = hexPoint(core, i);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = pal.edge;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // the trail, then you: the triangle
+      const trail = arc.shop.wearingName("trail");
+      if (trail !== "none" && s.mode === "running") {
+        s.trail.forEach((tr, i) => {
+          ctx.globalAlpha = Math.max(0, tr.life / 0.35);
+          ctx.fillStyle = trailColor(trail, i, s.clock);
+          ctx.fillRect(Math.round(Math.cos(tr.a) * PLAYER_R) - 1, Math.round(Math.sin(tr.a) * PLAYER_R) - 1, 2, 2);
+        });
+        ctx.globalAlpha = 1;
+      }
+      if (s.mode === "ready" || s.mode === "running") drawTriangle(ctx, s.angle, triColor(arc.shop.wearingName("skin"), s.clock));
+      ctx.restore();
+
+      for (const p of s.particles) {
+        ctx.fillStyle = p.color;
+        ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
+      }
+      if (s.whiteout > 0) {
+        ctx.fillStyle = `rgba(255,255,255,${Math.min(0.8, s.whiteout * 2.5)})`;
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      // HUD
+      ctx.font = `8px ${fontFamily}`;
+      ctx.textBaseline = "top";
+      ctx.textAlign = "right";
+      const boxText = (text: string, x: number, y: number) => {
+        const w = ctx.measureText(text).width + 6;
+        ctx.fillStyle = INK;
+        ctx.fillRect(Math.round(x - w + 3), y - 2, Math.round(w), 12);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(text, x, y);
+      };
+      if (s.mode === "running" || s.mode === "dying") {
+        boxText(`TIME ${fmtTime(scoreNow())}`, W - 5, 5);
+        boxText(`BEST ${fmtTime(s.best)}`, W - 5, H - 13);
+      }
+      ctx.textAlign = "center";
+      if (s.mode === "running" && s.textTimer > 0) {
+        const w = ctx.measureText(s.flashText).width + 8;
+        ctx.fillStyle = INK;
+        ctx.fillRect(Math.round(W / 2 - w / 2), 28, Math.round(w), 12);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(s.flashText, W / 2, 30);
+      }
+
+      if (s.mode === "ready") {
+        const top = boardRef.current?.top();
+        drawStartScreen(ctx, fontFamily, {
+          W,
+          H,
+          t: s.clock,
+          title: GAME_TITLE,
+          sub: "SURVIVE THE WALLS",
+          lines: [
+            [isTouch() ? "HOLD LEFT/RIGHT" : "← → = GO ROUND", "#ffffff"],
+            ["IT PULSES TO", KIT.lilac],
+            ["THE MUSIC", KIT.lilac],
+          ],
+          start: isTouch() ? "TAP TO START" : "SPACE = START",
+          best: top ? `#1 ${top.name} ${fmtTime(top.score)}` : s.best > 0 ? `BEST ${fmtTime(s.best)}` : undefined,
+          hint: isTouch() ? "TAP THE SPEAKER = SOUNDS" : "M = SOUNDS  -/+ = FX VOLUME",
+          kick: pulse,
+        });
+        arc.drawPanels(ctx, s.clock);
+      }
+      if (s.mode === "over") {
+        drawOverScreen(ctx, fontFamily, {
+          W,
+          H,
+          t: s.clock,
+          age: s.t,
+          title: "GAME OVER",
+          score: `TIME ${fmtTime(scoreNow())}`,
+          best: `BEST ${fmtTime(s.best)}`,
+          newBest: s.newBest,
+          stats: `STAGE ${s.stage + 1}`,
+          again: isTouch() ? "TAP = AGAIN" : "SPACE = AGAIN",
+          saved: `+${s.run} VIBES SAVED`,
+        });
+        if (s.t > 0.4) arc.drawPanels(ctx, s.clock);
+      }
+      // (the speaker is white on the dark stages)
+      arc.drawOverlays(ctx, s.clock);
+    };
+
+    // ---------- keys (capture: true = before the page, so the pause menu / shop / FX keys go there first) ----------
+    const onKeyFirst = (e: KeyboardEvent) => {
+      if (arc.key(e)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") held.ccw = true;
+      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") held.cw = true;
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") held.ccw = false;
+      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") held.cw = false;
+    };
+    window.addEventListener("keydown", onKeyFirst, true);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+
+    // ---------- taps: hold the left or right half of the screen to go round ----------
+    const toGame = (cx: number, cy: number) => {
+      const r = canvas.getBoundingClientRect();
+      const sc = Math.min(r.width / W, r.height / H);
+      return { x: (cx - r.left - (r.width - W * sc) / 2) / sc, y: (cy - r.top - (r.height - H * sc) / 2) / sc };
+    };
+    const onDown = (e: PointerEvent) => {
+      const g = toGame(e.clientX, e.clientY);
+      if (arc.tap(g.x, g.y)) {
+        if (arc.dragging()) canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+      if (arc.frozen()) return;
+      if (s.mode !== "running") {
+        press();
+        return;
+      }
+      canvas.setPointerCapture(e.pointerId);
+      touchSide = g.x < W / 2 ? -1 : 1;
+    };
+    const onMove = (e: PointerEvent) => {
+      if (arc.dragging()) arc.drag(toGame(e.clientX, e.clientY).y);
+    };
+    const onUp = () => {
+      if (arc.dragging()) arc.drag(-1);
+      touchSide = 0;
+    };
+    canvas.addEventListener("pointerdown", onDown);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    const onHidden = () => {
+      if (document.hidden && s.mode === "running") arc.setPause(true);
+    };
+    document.addEventListener("visibilitychange", onHidden);
+
+    newGame();
 
     let raf = 0;
     let last = performance.now();
     const loop = (now: number) => {
-      const dt = Math.min(0.033, (now - last) / 1000);
+      const dt = Math.max(0, Math.min(0.033, (now - last) / 1000)); // (never below 0: the first frame can be a hair early)
       last = now;
-      const pz = pauseRef.current;
-      if (pz.on) {
-        pz.t += dt;
-        spinRef.current = 0; // (the click wheel does nothing while paused)
+      s.clock += dt;
+      arc.tick(dt);
+      if (arc.frozen()) {
+        spinRef.current = 0;
+        held.ccw = held.cw = false;
+        touchSide = 0;
       } else update(dt);
-      draw(ctx);
-      if (pz.on) drawPauseMenu(ctx, fontFamily, { W, H, row: pz.row, t: pz.t, touch: coarse, rows: PAUSE_ROWS_SIMPLE, stats: pauseStats() });
-      else if (pauseActive()) drawPauseButton(ctx, PAUSE_BTN.x, PAUSE_BTN.y);
+      draw();
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("keydown", onPauseKey, true);
-      window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
-      audioCtxRef.current?.close().catch(() => {});
+      window.removeEventListener("keydown", onKeyFirst, true);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+      canvas.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      document.removeEventListener("visibilitychange", onHidden);
+      if (s.mode === "running") bankRun();
+      arc.closeSound();
+      pressRef.current = null;
+      arcRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fontFamily]);
 
-  // React to OK / Enter / Space from the iPod controls
+  // OK / Enter / Space from the page (the pause menu or shop gets it first when open)
   useEffect(() => {
-    // (OK while paused = choose the highlighted pause row)
-    if (actionSignal !== firstSignal.current) {
-      if (pauseRef.current.on) pauseChoose();
-      else press();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (actionSignal === firstSignal.current) return;
+    if (arcRef.current?.ok()) return;
+    pressRef.current?.();
   }, [actionSignal]);
-
-  const buttonStyle: React.CSSProperties = {
-    fontFamily,
-    fontSize: "clamp(8px, 2.4vw, 11px)",
-    border: "none",
-    padding: "6px 10px",
-    cursor: "pointer",
-  };
 
   return (
     <>
@@ -887,36 +741,6 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted }: Pr
         ref={canvasRef}
         width={W}
         height={H}
-        // Phones: hold the left or right half of the screen to move, tap to start.
-        // The speaker icon (top-left) turns game sounds on/off.
-        onPointerDown={(e) => {
-          {
-            const pt = toGamePt(e.currentTarget, e.clientX, e.clientY);
-            if (pauseTap(pt.x, pt.y)) return;
-          }
-          const rect = e.currentTarget.getBoundingClientRect();
-          const scale = Math.min(rect.width / W, rect.height / H);
-          const cx = (e.clientX - rect.left - (rect.width - W * scale) / 2) / scale;
-          const cy = (e.clientY - rect.top - (rect.height - H * scale) / 2) / scale;
-          if (cx < 24 && cy < 20) {
-            toggleSfx();
-            return;
-          }
-          const mode = state.current.mode;
-          if (mode === "entry") return;
-          if (mode !== "running") {
-            press();
-            return;
-          }
-          e.currentTarget.setPointerCapture(e.pointerId);
-          touchRef.current = cx < W / 2 ? -1 : 1;
-        }}
-        onPointerUp={() => {
-          touchRef.current = 0;
-        }}
-        onPointerCancel={() => {
-          touchRef.current = 0;
-        }}
         style={{
           position: "absolute",
           inset: 0,
@@ -924,65 +748,12 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted }: Pr
           height: "100%",
           objectFit: "contain",
           imageRendering: "pixelated",
-          background: SCREEN,
+          background: PALETTES[0].a,
           touchAction: "none",
           cursor: "pointer",
         }}
       />
-
-      {showEntry && (
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            bottom: "12%",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "8px",
-            zIndex: 10,
-          }}
-        >
-          <input
-            autoFocus
-            value={name}
-            maxLength={12}
-            placeholder="YOUR NAME"
-            onChange={(e) => {
-              const v = e.target.value.toUpperCase().replace(/[^A-Z0-9 _.\-]/g, "");
-              nameRef.current = v;
-              setName(v);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submitName();
-              if (e.key === "Escape") skipEntry();
-            }}
-            style={{
-              fontFamily,
-              fontSize: "clamp(10px, 3vw, 13px)",
-              width: "60%",
-              textAlign: "center",
-              padding: "6px",
-              background: INK,
-              color: "#fff",
-              border: `2px solid ${PINK}`,
-              outline: "none",
-            }}
-          />
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button onClick={submitName} disabled={saving} style={{ ...buttonStyle, background: PINK, color: "#fff" }}>
-              {saving ? "SAVING..." : "SAVE"}
-            </button>
-            <button onClick={skipEntry} style={{ ...buttonStyle, background: "#bbb", color: INK }}>
-              SKIP
-            </button>
-          </div>
-          {message && (
-            <div style={{ fontFamily, fontSize: "clamp(7px, 2vw, 9px)", color: "#b00020" }}>{message}</div>
-          )}
-        </div>
-      )}
+      <ScorePanel game="hex" title={GAME_TITLE} apiRef={boardRef} fontFamily={fontFamily} width={W} height={H} format={fmtTime} minScore={100} />
     </>
   );
 }

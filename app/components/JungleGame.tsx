@@ -2,7 +2,25 @@
 
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
-import { PAUSE_ROWS_SIMPLE, drawPauseMenu, leaveToGameMenu, pauseTapRow } from "./PinkShop";
+import {
+  KIT,
+  PAUSE_ROWS,
+  drawOverScreen,
+  drawPauseMenu,
+  drawPinkShop,
+  drawSidePanels,
+  drawStartScreen,
+  drawText,
+  leaveToGameMenu,
+  newShopUi,
+  panelShopHit,
+  pauseTapRow,
+  shopAct,
+  shopMove,
+  shopTap,
+  type ShopHooks,
+  type ShopRow,
+} from "./PinkShop";
 
 // PINK JUNGLE: an endless 3-lane jungle runner. Pinkmane runs down an old mossy temple path
 // and BEARMANPIG (half bear, half pig, half man) chases him.
@@ -733,6 +751,43 @@ const SPELL_ROWS: { kind: SpellKind; name: string }[] = [
   { kind: "boost", name: "BOOST" },
   { kind: "double", name: "2X GEM" },
 ];
+// THE PINK SHOP (the same shop screen as every other game, see PinkShop.ts): spells to upgrade, then skins
+const SPELL_SHOP_INFO: Record<SpellKind, [string, string]> = {
+  magnet: ["MAGNET: PULLS IN THE GEMS", "LASTS LONGER EVERY LEVEL"],
+  shield: ["SHIELD: BLOCKS A HIT", "ONE MORE HIT EVERY LEVEL"],
+  boost: ["BOOST: RUN SUPER FAST", "LASTS LONGER EVERY LEVEL"],
+  double: ["2X GEM: EVERY GEM COUNTS TWICE", "LASTS LONGER EVERY LEVEL"],
+};
+const JUNGLE_SHOP_ROWS: ShopRow[] = [
+  { kind: "head", label: "SPELLS" },
+  ...SPELL_ROWS.map((r): ShopRow => ({ kind: "item", id: `spell:${r.kind}`, name: r.name, prices: SPELL_COSTS, info: SPELL_SHOP_INFO[r.kind] })),
+  { kind: "head", label: "SKINS" },
+  ...SKINS.map(
+    (sk): ShopRow => ({
+      kind: "item",
+      id: `skin:${sk.id}`,
+      name: sk.name,
+      prices: [sk.price],
+      wear: true,
+      info: [sk.mission ? `${sk.name}: A MISSIONS-ONLY SKIN` : sk.fire ? `${sk.name}: HIS HAIR IS ON FIRE` : `${sk.name} SKIN`, ""],
+    })
+  ),
+  { kind: "back" },
+];
+// the money icon: a green gem
+const gemIcon = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+  ctx.fillStyle = "#111111";
+  ctx.fillRect(x + 1, y, 5, 1);
+  ctx.fillRect(x, y + 1, 7, 3);
+  ctx.fillRect(x + 1, y + 4, 5, 1);
+  ctx.fillRect(x + 2, y + 5, 3, 1);
+  ctx.fillRect(x + 3, y + 6, 1, 1);
+  ctx.fillStyle = "#3ee05a";
+  ctx.fillRect(x + 1, y + 1, 5, 3);
+  ctx.fillRect(x + 2, y + 4, 3, 1);
+  ctx.fillStyle = "#c8ffd0";
+  ctx.fillRect(x + 2, y + 1, 2, 1);
+};
 
 export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, touch = false, beatRef }: Props) {
   const touchRef = useRef(touch);
@@ -792,7 +847,6 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     for (const k of Object.keys(SPELL_MAPS)) spellImg[k] = buildMap(SPELL_MAPS[k], SPELL_COLORS);
     const tail = { px: BMP_TAIL, color: "#ff8fb8" };
     const bmp = [buildSprite(BMP_HALF, BMP_COLORS, BMP_LEGS, 1, tail), buildSprite(BMP_HALF, BMP_COLORS, BMP_LEGS, 2, tail)];
-    const face = buildSprite(FACE_HALF, FACE_COLORS, 99, 0);
     // one set of trees (or tall grass) and pillars for each world
     const trees = THEMES.map((th) =>
       [7, 21, 99].map((seed) =>
@@ -1003,10 +1057,63 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     const doubleSecs = () => DOUBLE_SECONDS + lv.double * DOUBLE_UP;
     const boostSecs = () => BOOST_SECONDS + lv.boost * BOOST_UP;
     const shieldHits = () => 1 + lv.shield;
-    // where the cursor is in the shop: col 0 = spells, col 1 = skins, row 4 = BACK
-    const SHOP_BACK = SKINS.length; // the BACK row comes after the longest list (the skins)
-    const shopLastRow = () => (shop.col === 0 ? SPELL_ROWS.length : SKINS.length) - 1;
-    const shop = { col: 0, row: 0, from: "ready" as "ready" | "caught" };
+    // THE PINK SHOP: where it was opened from (the start / game over screen, or the pause menu), and its cursor
+    const shop = { from: "ready" as "ready" | "caught" };
+    const shopUi = newShopUi(JUNGLE_SHOP_ROWS);
+    let pauseShop = false; // the shop opened from the pause menu (the run waits behind it)
+    const skinOf = (id: string) => SKINS.findIndex((sk) => `skin:${sk.id}` === id);
+    const shopHooks: ShopHooks = {
+      money: () => bank,
+      moneyName: "GEMS",
+      icon: gemIcon,
+      level: (id) => {
+        const [g, k] = id.split(":");
+        if (g === "spell") return lv[k as SpellKind] ?? 0;
+        return owned.includes(k) ? 1 : 0;
+      },
+      worn: (id) => id === `skin:${SKINS[skinIdx].id}`,
+      buy: (id, price) => {
+        const [g, k] = id.split(":");
+        bank -= price;
+        if (g === "spell") lv[k as SpellKind] = (lv[k as SpellKind] ?? 0) + 1;
+        else {
+          if (!owned.includes(k)) owned.push(k);
+          const i = skinOf(id);
+          if (i >= 0) skinIdx = i;
+        }
+        saveShop();
+      },
+      wear: (id) => {
+        const i = skinOf(id);
+        if (i >= 0) skinIdx = i;
+        saveShop();
+      },
+      // the mission skin can't be bought, you earn it
+      locked: (id) => {
+        const sk = SKINS[skinOf(id)];
+        return sk && sk.mission && !owned.includes(sk.id) ? `FINISH ${sk.mission} MISSIONS (${mDone} DONE)` : null;
+      },
+      preview: (c, id, box) => {
+        const cx = box.x + box.w / 2;
+        const cy = box.y + box.h / 2;
+        if (id && id.startsWith("spell:")) {
+          const img = spellImg[id.split(":")[1]];
+          if (img) c.drawImage(img, Math.round(cx - 18), Math.round(cy - 18), 36, 36);
+          return;
+        }
+        drawSkinBig(c, id ? Math.max(0, skinOf(id)) : skinIdx, cx, cy);
+      },
+      sound: (w) => (w === "buy" ? sfx.buy() : w === "no" ? sfx.no() : sfx.lane()),
+    };
+    // a skin, 2x big, standing in the middle of (cx, cy)
+    const drawSkinBig = (c: CanvasRenderingContext2D, i: number, cx: number, cy: number) => {
+      c.save();
+      c.translate(Math.round(cx - 24), Math.round(cy - 36));
+      c.scale(2, 2);
+      c.drawImage(fitNow(i).stand, 0, 0, 24, 36);
+      if (SKINS[i].fire) fireHair(0, 0, clock);
+      c.restore();
+    };
 
     // ---------- missions ----------
     let mDone = 0; // how many missions you've finished
@@ -1323,59 +1430,35 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     };
 
     // ---------- input ----------
-    // The shop: up / down move, left / right switch between SPELLS and SKINS, go (SPACE / OK / tap) buys or picks
+    // The shop: up / down move, go (SPACE / OK / tap) buys or puts on. BACK (or ESC / the X) closes it.
+    const closeShop = () => {
+      if (pauseShop) pauseShop = false; // back to the pause menu
+      else s.mode = shop.from;
+      sfx.lane();
+    };
     const shopInput = (a: "left" | "right" | "jump" | "slide" | "go") => {
-      if (a === "jump" && shop.row > 0) {
-        shop.row = shop.row === SHOP_BACK ? shopLastRow() : shop.row - 1;
-        sfx.lane();
-      } else if (a === "slide" && shop.row < SHOP_BACK) {
-        shop.row = shop.row >= shopLastRow() ? SHOP_BACK : shop.row + 1;
-        sfx.lane();
-      } else if ((a === "left" && shop.col !== 0) || (a === "right" && shop.col !== 1)) {
-        shop.col = a === "left" ? 0 : 1;
-        if (shop.row !== SHOP_BACK) shop.row = Math.min(shop.row, shopLastRow());
-        sfx.lane();
-      } else if (a === "go") {
-        if (shop.row === SHOP_BACK) {
-          // BACK: close the shop
-          s.mode = shop.from;
-          sfx.lane();
-        } else if (shop.col === 0) {
-          // upgrade a spell
-          const kind = SPELL_ROWS[shop.row].kind;
-          const cost = SPELL_COSTS[lv[kind]];
-          if (cost === undefined || bank < cost) {
-            sfx.no();
-            return;
-          }
-          bank -= cost;
-          lv[kind]++;
-          sfx.buy();
-          saveShop();
-        } else {
-          // buy a skin, or put on one you already have
-          const sk = SKINS[shop.row];
-          if (!sk) return;
-          if (!owned.includes(sk.id)) {
-            if (sk.mission || bank < sk.price) {
-              // (a mission skin can't be bought, you earn it)
-              sfx.no();
-              return;
-            }
-            bank -= sk.price;
-            owned.push(sk.id);
-            sfx.buy();
-          } else sfx.lane();
-          skinIdx = shop.row;
-          saveShop();
-        }
+      if (a === "jump") shopMove(JUNGLE_SHOP_ROWS, shopUi, -1, shopHooks);
+      else if (a === "slide") shopMove(JUNGLE_SHOP_ROWS, shopUi, 1, shopHooks);
+      else if (a === "go" && shopAct(JUNGLE_SHOP_ROWS, shopUi, shopHooks) === "close") closeShop();
+    };
+    const openShop = (fromPause: boolean) => {
+      pauseShop = fromPause;
+      if (!fromPause) {
+        shop.from = s.mode === "caught" ? "caught" : "ready";
+        s.mode = "shop";
       }
+      shopUi.msg = "";
+      sfx.lane();
     };
 
     inputRef.current = (a) => {
-      // PAUSED: up / down picks a row, OK / SPACE / A / tap picks it
+      // PAUSED: up / down picks a row, OK / SPACE / A / tap picks it (the shop from the pause menu goes first)
+      if (pause.on && pauseShop) {
+        shopInput(a);
+        return;
+      }
       if (pause.on) {
-        const n = PAUSE_ROWS_SIMPLE.length;
+        const n = PAUSE_ROWS.length;
         if (a === "jump" || a === "left") {
           pause.row = (pause.row + n - 1) % n;
           sfx.lane();
@@ -1385,7 +1468,11 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           sfx.lane();
         }
         if (a === "go") {
-          const pick = PAUSE_ROWS_SIMPLE[pause.row];
+          const pick = PAUSE_ROWS[pause.row];
+          if (pick === "SHOP") {
+            openShop(true);
+            return;
+          }
           pause.on = false;
           if (pick === "RESUME") {
             sfx.lane();
@@ -1422,13 +1509,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           reset();
         }
         // DOWN = open the shop
-        if (a === "slide" && !(s.mode === "caught" && s.t < 0.9)) {
-          shop.from = s.mode === "caught" ? "caught" : "ready";
-          shop.col = 0;
-          shop.row = 0;
-          s.mode = "shop";
-          sfx.lane();
-        }
+        if (a === "slide" && !(s.mode === "caught" && s.t < 0.9)) openShop(false);
         // LEFT = show the missions
         if (a === "left" && !(s.mode === "caught" && s.t < 0.9)) {
           missionsFrom = s.mode === "caught" ? "caught" : "ready";
@@ -1574,13 +1655,14 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     };
 
     // TAPS / CLICKS on the game picture (x, y in game pixels)
-    const SHOP_Y0 = 30; // where the first shop row is
-    const SHOP_DY = 12; // how far apart the shop rows are
-    const SHOP_ROW_Y = (r: number) => SHOP_Y0 + r * SHOP_DY; // the same rows drawShopScreen uses
     tapRef.current = (x, y) => {
+      if (pause.on && pauseShop) {
+        if (shopTap(JUNGLE_SHOP_ROWS, shopUi, shopHooks, x, y) === "close") closeShop();
+        return;
+      }
       if (pause.on) {
         // tap a row
-        const row = pauseTapRow(x, y, W, PAUSE_ROWS_SIMPLE.length);
+        const row = pauseTapRow(x, y, W, PAUSE_ROWS.length);
         if (row >= 0) {
           pause.row = row;
           inputRef.current?.("go");
@@ -1588,30 +1670,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
         return;
       }
       if (s.mode === "shop") {
-        // close (X, top left)
-        if (x < 30 && y < 16) {
-          s.mode = shop.from;
-          sfx.lane();
-          return;
-        }
-        // BACK
-        const by = SHOP_ROW_Y(SHOP_BACK);
-        if (y >= by && y < by + 16 && Math.abs(x - W / 2) < 50) {
-          shop.row = SHOP_BACK;
-          shopInput("go");
-          return;
-        }
-        // a spell (left) or skin (right) row: first tap picks it, tapping it again buys / puts it on
-        const r = Math.floor((y - SHOP_ROW_Y(0) + 3) / SHOP_DY);
-        const col = x < 171 ? 0 : 1;
-        const last = (col === 0 ? SPELL_ROWS.length : SKINS.length) - 1;
-        if (r < 0 || r > last || r >= SHOP_BACK) return;
-        if (shop.col === col && shop.row === r) shopInput("go");
-        else {
-          shop.col = col;
-          shop.row = r;
-          sfx.lane();
-        }
+        if (shopTap(JUNGLE_SHOP_ROWS, shopUi, shopHooks, x, y) === "close") closeShop();
         return;
       }
       if (s.mode === "missions") {
@@ -1619,9 +1678,9 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
         return;
       }
       if (s.mode === "ready" || (s.mode === "caught" && s.t > 0.9)) {
-        // the skin picture on the right = open the shop, your gems on the left = the missions, anywhere else = run
-        if (x > W - 92 && y > 24 && y < 96) inputRef.current?.("slide");
-        else if (x < 116 && y > 24 && y < 96) inputRef.current?.("left");
+        // the SHOP box on the right = open the shop, your gems on the left = the missions, anywhere else = run
+        if (panelShopHit(x, y, W)) inputRef.current?.("slide");
+        else if (x < 72 && y > 30 && y < 108) inputRef.current?.("left");
         else inputRef.current?.("go");
         return;
       }
@@ -1633,6 +1692,11 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return; // typing your name for the Top 10
       const k = e.key;
+      // ESC in the shop = close it
+      if ((s.mode === "shop" || (pause.on && pauseShop)) && k === "Escape") {
+        closeShop();
+        return;
+      }
       // ESC (or the PAUSE button on phones) = pause / resume, only while running
       if (k === "Escape" || k === "p" || k === "P") {
         if (s.mode === "running") {
@@ -2447,105 +2511,33 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       if (s.boost > 0) row("BOOST", s.boost / boostSecs(), SPELL_INFO.boost.color);
     };
 
-    // on the start + game over screens: your gems on the left, your skin + how to open the shop on the right
+    // on the start + game over screens: the same side panels as every game (your gems + MISSIONS left, the SHOP right)
     const drawShop = () => {
-      const lx = 48;
-      text("YOUR GEMS", lx, 44, "#b6ffb0");
-      text(String(bank), lx, 56, GREEN, 16);
-      const rx = W - 48;
-      text(touchRef.current ? "TAP: MISSIONS" : "LEFT: MISSIONS", 60, 84, "#ffffff");
-      ctx.drawImage(fitNow(skinIdx).stand, rx - 12, 30, 24, 36);
-      if (SKINS[skinIdx].fire) fireHair(rx - 12, 30, clock);
-      text(SKINS[skinIdx].name, rx, 72, "#ffd24a");
-      text(touchRef.current ? "TAP: SHOP" : "DOWN: SHOP", rx, 84, "#ffffff");
+      drawSidePanels(ctx, fontFamily, {
+        W,
+        money: bank,
+        moneyName: "GEMS",
+        icon: gemIcon,
+        touch: touchRef.current,
+        t: clock,
+        preview: (c, cx, cy) => {
+          c.drawImage(fitNow(skinIdx).stand, cx - 12, cy - 18, 24, 36);
+          if (SKINS[skinIdx].fire) fireHair(cx - 12, cy - 18, clock);
+        },
+      });
+      drawText(ctx, fontFamily, "MISSIONS", 38, 90, Math.floor(clock * 2) % 2 === 0 ? "#ffd24a" : "#ffffff");
+      drawText(ctx, fontFamily, touchRef.current ? "TAP HERE" : "← LEFT", 38, 100, "#d8b8e8");
     };
 
-    // THE SHOP: spells to upgrade on the left, skins on the right, BACK at the bottom
+    // THE SHOP: the PINK SHOP every game shares
     const drawShopScreen = () => {
-      ctx.fillStyle = "rgba(0,12,6,0.9)";
-      ctx.fillRect(0, 0, W, H);
-      text("SHOP", W / 2, 4, PINK);
-      text(`GEMS ${bank}`, W - 6, 4, GREEN, 8, "right");
-      text("SPELLS", 10, 18, "#9ad19a", 8, "left");
-      text("SKINS", 178, 18, "#9ad19a", 8, "left");
-      const rowY = SHOP_ROW_Y;
-      const RED = "#ff7a7a";
-      let info = "BACK TO THE GAME";
-
-      SPELL_ROWS.forEach((r, i) => {
-        const y = rowY(i);
-        const on = shop.col === 0 && shop.row === i;
-        if (on) {
-          ctx.fillStyle = "#4a1447";
-          ctx.fillRect(6, y - 2, 162, SHOP_DY);
-        }
-        const level = lv[r.kind];
-        const cost = SPELL_COSTS[level];
-        const color = SPELL_INFO[r.kind].color;
-        text(r.name, 10, y, on ? "#ffffff" : color, 8, "left");
-        // the little squares = the upgrade level
-        for (let p = 0; p < SPELL_COSTS.length; p++) {
-          ctx.fillStyle = "#000";
-          ctx.fillRect(66 + p * 9, y, 8, 8);
-          ctx.fillStyle = p < level ? color : "#3a3a3a";
-          ctx.fillRect(67 + p * 9, y + 1, 6, 6);
-        }
-        if (cost === undefined) text("MAX", 164, y, "#9ad19a", 8, "right");
-        else text(String(cost), 164, y, bank >= cost ? GREEN : RED, 8, "right");
-        if (on) {
-          const max = cost === undefined;
-          if (r.kind === "magnet") info = max ? `LASTS ${magnetSecs()} SEC (MAX)` : `LASTS ${magnetSecs()} SEC, NEXT ${magnetSecs() + MAGNET_UP}`;
-          else if (r.kind === "double") info = max ? `LASTS ${doubleSecs()} SEC (MAX)` : `LASTS ${doubleSecs()} SEC, NEXT ${doubleSecs() + DOUBLE_UP}`;
-          else if (r.kind === "boost") info = max ? `LASTS ${boostSecs()} SEC (MAX)` : `LASTS ${boostSecs()} SEC, NEXT ${boostSecs() + BOOST_UP}`;
-          else info = max ? `BLOCKS ${shieldHits()} HITS (MAX)` : `BLOCKS ${shieldHits()} HIT${shieldHits() > 1 ? "S" : ""}, NEXT ${shieldHits() + 1}`;
-        }
+      shopUi.t = clock;
+      drawPinkShop(ctx, fontFamily, JUNGLE_SHOP_ROWS, shopUi, shopHooks, {
+        W,
+        H,
+        touch: touchRef.current,
+        backLine: pauseShop ? "BACK TO YOUR RUN" : "BACK TO THE START SCREEN",
       });
-
-      SKINS.slice(0, SHOP_BACK).forEach((sk, i) => {
-        const y = rowY(i);
-        const on = shop.col === 1 && shop.row === i;
-        if (on) {
-          ctx.fillStyle = "#4a1447";
-          ctx.fillRect(174, y - 2, 140, SHOP_DY);
-        }
-        const have = owned.includes(sk.id);
-        text(sk.name, 178, y, on ? "#ffffff" : "#ffd24a", 8, "left");
-        if (i === skinIdx) text("ON", 310, y, GREEN, 8, "right");
-        else if (have) text("OWNED", 310, y, "#9ad19a", 8, "right");
-        else if (sk.mission) text(`${Math.min(mDone, sk.mission)}/${sk.mission}`, 310, y, "#ffd24a", 8, "right"); // missions done / needed
-        else text(String(sk.price), 310, y, bank >= sk.price ? GREEN : RED, 8, "right");
-        if (on) {
-          const k = touchRef.current ? "TAP AGAIN" : "SPACE";
-          info =
-            i === skinIdx
-              ? "YOU'RE WEARING IT"
-              : have
-              ? `${k} = PUT IT ON`
-              : sk.mission
-              ? `FINISH ${sk.mission - mDone} MORE MISSIONS`
-              : bank >= sk.price
-              ? `${k} = BUY IT`
-              : `YOU NEED ${sk.price - bank} MORE GEMS`;
-        }
-      });
-
-      const backOn = shop.row === SHOP_BACK;
-      if (backOn) {
-        ctx.fillStyle = "#4a1447";
-        ctx.fillRect(W / 2 - 40, rowY(SHOP_BACK) + 1, 80, 13);
-      }
-      text("BACK", W / 2, rowY(SHOP_BACK) + 4, backOn ? "#ffffff" : "#9ad19a");
-
-      // what the picked row does, and the skin it would give you
-      text(info, 10, 124, "#b6ffb0", 8, "left");
-      const show = shop.col === 1 && shop.row < SHOP_BACK && SKINS[shop.row] ? shop.row : skinIdx;
-      ctx.drawImage(fitNow(show).stand, W - 38, 110, 24, 36);
-      if (SKINS[show].fire) fireHair(W - 38, 110, clock);
-      text(touchRef.current ? "TAP = PICK   TAP AGAIN = BUY" : "ARROWS / CLICK = PICK   SPACE = BUY", W / 2 - 14, 140, "#6f9a6f");
-      // close button (top left)
-      ctx.fillStyle = "#4a1447";
-      ctx.fillRect(4, 2, 22, 12);
-      text("X", 15, 4, "#ffffff");
     };
 
     // THE MISSIONS: your 3 missions with a bar each, and how close the mission skin is
@@ -2584,9 +2576,6 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       text("X", 15, 4, "#ffffff");
     };
 
-    const drawFace = (cx: number, y: number, scale: number) => {
-      ctx.drawImage(face, Math.round(cx - 8 * scale), Math.round(y), 16 * scale, 16 * scale);
-    };
 
     const pixelate = (f: number) => {
       if (f <= 1) return;
@@ -2814,13 +2803,17 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     };
 
     const drawPause = () => {
+      if (pauseShop) {
+        drawShopScreen();
+        return;
+      }
       drawPauseMenu(ctx, fontFamily, {
         W,
         H,
         row: pause.row,
         t: pauseClock,
         touch: touchRef.current,
-        rows: PAUSE_ROWS_SIMPLE,
+        rows: PAUSE_ROWS,
         stats: `${Math.floor(s.dist)}M  ${s.gems} GEMS`,
       });
     };
@@ -2862,15 +2855,31 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       }
 
       if (s.mode === "ready") {
-        ctx.fillStyle = "rgba(0,20,8,0.55)";
-        ctx.fillRect(0, 0, W, H);
-        text(GAME_TITLE, W / 2, 12 - Math.round(Math.max(0, beatKick()) * 2), GREEN, 16); // (bounces to the music)
-        drawFace(W / 2, 36, 2);
-        text("RUN FROM", W / 2, 72, "#ffffff");
-        text("BEARMANPIG!", W / 2, 83, PINK);
-        text(touchRef.current ? "SWIPE TO PLAY" : "SWIPE / ARROWS", W / 2, 100, "#b6ffb0");
-        if (Math.floor(clock * 2) % 2 === 0) text(touchRef.current ? "TAP TO RUN" : "SPACE = RUN", W / 2, 114, GREEN);
-        if (best > 0) text(`BEST ${best}`, W / 2, 130, "#9ad19a");
+        // the start screen every game shares
+        const top = boardRef.current?.top();
+        drawStartScreen(ctx, fontFamily, {
+          W,
+          H,
+          t: clock,
+          title: GAME_TITLE,
+          sub: "RUN FROM BEARMANPIG!",
+          lines: touchRef.current
+            ? [
+                ["SWIPE \u2190 \u2192 = CHANGE LANE", "#ffffff"],
+                ["SWIPE UP = JUMP", KIT.lilac],
+                ["SWIPE DOWN = SLIDE", KIT.lilac],
+              ]
+            : [
+                ["\u2190 \u2192 = CHANGE LANE", "#ffffff"],
+                ["\u2191 = JUMP   \u2193 = SLIDE", KIT.lilac],
+                ["NEW WORLD EVERY 1000", KIT.lilac],
+              ],
+          start: touchRef.current ? "TAP TO RUN" : "SPACE = RUN",
+          best: top ? `#1 ${top.name} ${top.score}` : best > 0 ? `BEST ${best}` : undefined,
+          hint: touchRef.current ? "TAP THE SPEAKER = SOUNDS" : "M = SOUNDS   - / + = FX VOLUME",
+          kick: Math.max(0, beatKick()),
+          dim: 0.55,
+        });
         drawShop();
       }
 
@@ -2878,19 +2887,21 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       if (s.mode === "missions") drawMissionsScreen();
 
       if (s.mode === "caught") {
-        const a = Math.min(0.7, s.t * 1.2);
-        ctx.fillStyle = `rgba(0,15,5,${a})`;
-        ctx.fillRect(0, 0, W, H);
-        if (s.t > 0.4) {
-          drawFace(W / 2, 8, 3);
-          text("BEARMANPIG", W / 2, 60, PINK);
-          text("GOT YOU!", W / 2, 71, "#ffffff");
-          text(`SCORE ${s.score}`, W / 2, 88, GREEN);
-          text(s.newBest ? "NEW BEST!" : `BEST ${best}`, W / 2, 100, s.newBest ? PINK : "#9ad19a");
-          text(`${Math.floor(s.dist)}M  ${s.gems}${s.bonus ? `+${s.bonus}` : ""} GEMS`, W / 2, 112, "#b6ffb0");
-          if (s.t > 0.9 && Math.floor(clock * 2) % 2 === 0) text(touchRef.current ? "TAP = AGAIN" : "SPACE = AGAIN", W / 2, 128, GREEN);
-          drawShop();
-        }
+        // the game over screen every game shares
+        drawOverScreen(ctx, fontFamily, {
+          W,
+          H,
+          t: clock,
+          age: s.t,
+          title: "BEARMANPIG GOT YOU!",
+          score: `SCORE ${s.score}`,
+          best: `BEST ${best}`,
+          newBest: s.newBest,
+          stats: `${Math.floor(s.dist)}M  ${s.gems}${s.bonus ? `+${s.bonus}` : ""} GEMS`,
+          again: touchRef.current ? "TAP = AGAIN" : "SPACE = AGAIN",
+          saved: `+${s.gems + s.bonus} GEMS SAVED`,
+        });
+        if (s.t > 0.4) drawShop();
       }
       if (fxShown()) drawFx();
     };
