@@ -11,6 +11,8 @@ type Props = {
   fontFamily: string;
   // Follows the iPod mute button
   muted: boolean;
+  // true on phones / tablets: swipe ANYWHERE on the screen to steer (no need to lift your finger), and the game is a bit kinder
+  touch?: boolean;
 };
 
 type Mode = "ready" | "running" | "caught" | "dying" | "entry" | "board";
@@ -63,6 +65,12 @@ const HOME = [
 
 const START_LIVES = 3;
 const WHEEL_TURN = 40; // degrees of click wheel = one turn
+
+// ---------- PHONES (easy tuning) ----------
+const SWIPE_PX = 14; // how far a finger slides for one turn (in screen pixels, smaller = more sensitive)
+const TURN_GRACE = 0.35; // a turn pressed a moment too late (up to this much of a tile past a corner) still takes the corner
+const TOUCH_HATER_SPEED = 0.88; // on phones the haters are this much slower (1 = the same as on a computer)
+const TOUCH_SCARED_BONUS = 1.5; // ...and they stay scared this many seconds longer
 
 // Saved in the visitor's browser (name, device and owner code are shared with the other games)
 const BEST_KEY = "pinkmaze-best";
@@ -215,8 +223,10 @@ function getOwnerCode() {
   }
 }
 
-export default function MazeGame({ actionSignal, spinRef, fontFamily, muted }: Props) {
+export default function MazeGame({ actionSignal, spinRef, fontFamily, muted, touch = false }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const touchRef = useRef(touch);
+  touchRef.current = touch;
   const firstSignal = useRef(actionSignal);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
@@ -443,17 +453,25 @@ export default function MazeGame({ actionSignal, spinRef, fontFamily, muted }: P
     placeEveryone();
   };
 
-  // Steer to an exact direction (arrows, swipes)
+  // Steer to an exact direction (arrows, swipes). The turn is remembered until it's possible,
+  // so you can swipe a little BEFORE a corner and you'll take it when you get there.
   const steer = (x: number, y: number) => {
     const s = state.current;
     if (s.mode !== "running") return;
-    s.player.next = { x, y };
+    const p = s.player;
+    p.next = { x, y };
     // Turning around is allowed any time
-    if (s.player.dir.x === -x && s.player.dir.y === -y && s.player.prog > 0) {
-      const p = s.player;
+    if (p.dir.x === -x && p.dir.y === -y && p.prog > 0) {
       p.cx += p.dir.x;
       p.cy += p.dir.y;
       p.prog = 1 - p.prog;
+      p.dir = { x, y };
+      return;
+    }
+    // A turn pressed a moment too LATE: you've only just passed a corner where that way is open, so go back and take it
+    const sideways = (x !== 0) !== (p.dir.x !== 0);
+    if (sideways && p.prog > 0 && p.prog < TURN_GRACE && !isWall(p.cx + x, p.cy + y)) {
+      p.prog = 0;
       p.dir = { x, y };
     }
   };
@@ -479,9 +497,9 @@ export default function MazeGame({ actionSignal, spinRef, fontFamily, muted }: P
     }
   };
 
-  const hatersSpeed = () => Math.min(6.0, 3.8 + (state.current.level - 1) * 0.35);
+  const hatersSpeed = () => Math.min(6.0, 3.8 + (state.current.level - 1) * 0.35) * (touchRef.current ? TOUCH_HATER_SPEED : 1);
   const playerSpeed = () => Math.min(6.4, 5.4 + (state.current.level - 1) * 0.2);
-  const scaredTime = () => Math.max(3, 7 - (state.current.level - 1) * 0.8);
+  const scaredTime = () => Math.max(3, 7 - (state.current.level - 1) * 0.8) + (touchRef.current ? TOUCH_SCARED_BONUS : 0);
 
   const burst = (x: number, y: number, count: number, colors: string[], power: number) => {
     const s = state.current;
@@ -882,6 +900,17 @@ export default function MazeGame({ actionSignal, spinRef, fontFamily, muted }: P
       }
     }
 
+    // The turn you asked for that hasn't happened yet: a little blinking pink arrow on that side of you
+    // (so on a phone you can see your swipe was caught, and you'll turn at the next corner)
+    const pl = s.player;
+    if (s.mode === "running" && !same(pl.next, pl.dir) && Math.floor(s.t * 8) % 2 === 0) {
+      const ax = Math.round(px(pl) + 3.5 + pl.next.x * 7);
+      const ay = Math.round(py(pl) + 3.5 + pl.next.y * 7);
+      ctx.fillStyle = PINK;
+      ctx.fillRect(ax - 1, ay - 1, 3, 3);
+      ctx.fillRect(ax + pl.next.x * 2 - (pl.next.y ? 2 : 0), ay + pl.next.y * 2 - (pl.next.x ? 2 : 0), pl.next.y ? 5 : 1, pl.next.x ? 5 : 1);
+    }
+
     // You (hidden while exploding)
     if (s.mode === "ready" || s.mode === "running") {
       const moving = s.player.prog > 0;
@@ -928,7 +957,8 @@ export default function MazeGame({ actionSignal, spinRef, fontFamily, muted }: P
     const blink = Math.floor(s.t * 2) % 2 === 0;
     if (s.mode === "ready") {
       textBox(ctx, "PINK MAZE", 62);
-      if (blink) textBox(ctx, "PRESS OK TO START", 90);
+      if (touchRef.current) textBox(ctx, "SWIPE ANYWHERE TO STEER", 76);
+      if (blink) textBox(ctx, touchRef.current ? "TAP TO START" : "PRESS OK TO START", 90);
       const top = boardRef.current[0];
       if (boardStatusRef.current === "ok" && top) textBox(ctx, `#1 ${top.name} ${pad(top.score)}`, 106);
     } else if (s.mode === "running" && s.flash > 0) {
@@ -1005,6 +1035,91 @@ export default function MazeGame({ actionSignal, spinRef, fontFamily, muted }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // PHONES: swipe ANYWHERE on the screen to steer (the small EXIT / PAUSE / music buttons and the round pad still work).
+  // The turn happens the moment your finger has slid SWIPE_PX, you don't have to lift it. Keep the finger down and
+  // swipe another way for the next turn. A tap = start / play again. Speaker icon (top left of the game) = sounds on / off.
+  // (Other touch screens: the swipe has to start on the game, or just next to it.)
+  useEffect(() => {
+    const onUi = (t: EventTarget | null) =>
+      t instanceof Element &&
+      !!t.closest("button, a, input, select, textarea, [role='button'], [role='slider'], [role='group']");
+    const sw = { x: 0, y: 0, on: false, fired: false, id: -1, last: "" };
+    const toGame = (cx: number, cy: number) => {
+      const c = canvasRef.current;
+      if (!c) return null;
+      const r = c.getBoundingClientRect();
+      const sc = Math.min(r.width / W, r.height / H);
+      return { x: (cx - r.left - (r.width - W * sc) / 2) / sc, y: (cy - r.top - (r.height - H * sc) / 2) / sc };
+    };
+    const start = (e: TouchEvent) => {
+      if (sw.on || onUi(e.target)) return;
+      if (state.current.mode === "entry") return; // typing your name: leave the touch alone
+      const t = e.changedTouches[0];
+      const c = canvasRef.current;
+      if (!c) return;
+      if (!touchRef.current) {
+        const r = c.getBoundingClientRect();
+        const M = 40;
+        if (t.clientX < r.left - M || t.clientX > r.right + M || t.clientY < r.top - M || t.clientY > r.bottom + M) return;
+      }
+      const g = toGame(t.clientX, t.clientY);
+      if (g && g.x >= 0 && g.y >= 0 && g.x < 20 && g.y < 18) {
+        toggleSfx();
+        if (e.cancelable) e.preventDefault();
+        return;
+      }
+      sw.x = t.clientX;
+      sw.y = t.clientY;
+      sw.on = true;
+      sw.fired = false;
+      sw.id = t.identifier;
+      sw.last = "";
+      if (e.cancelable) e.preventDefault(); // no double-tap zoom / page scrolling
+    };
+    const find = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++) if (e.changedTouches[i].identifier === sw.id) return e.changedTouches[i];
+      return null;
+    };
+    const move = (e: TouchEvent) => {
+      if (!sw.on) return;
+      const t = find(e);
+      if (!t) return;
+      if (e.cancelable) e.preventDefault();
+      const dx = t.clientX - sw.x;
+      const dy = t.clientY - sw.y;
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_PX) return;
+      sw.x = t.clientX;
+      sw.y = t.clientY;
+      const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
+      if (dir === sw.last) return; // one long swipe = one turn
+      sw.last = dir;
+      sw.fired = true;
+      if (dir === "right") steer(1, 0);
+      else if (dir === "left") steer(-1, 0);
+      else if (dir === "down") steer(0, 1);
+      else steer(0, -1);
+    };
+    const end = (e: TouchEvent) => {
+      if (!sw.on) return;
+      const t = find(e);
+      if (!t) return;
+      sw.on = false;
+      // a tap (no swipe) on the start / Top 10 screen = play
+      if (e.type === "touchend" && !sw.fired && state.current.mode !== "running") press();
+    };
+    window.addEventListener("touchstart", start, { passive: false });
+    window.addEventListener("touchmove", move, { passive: false });
+    window.addEventListener("touchend", end);
+    window.addEventListener("touchcancel", end);
+    return () => {
+      window.removeEventListener("touchstart", start);
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("touchend", end);
+      window.removeEventListener("touchcancel", end);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // React to OK / Enter / Space from the iPod controls
   useEffect(() => {
     if (actionSignal !== firstSignal.current) press();
@@ -1025,8 +1140,10 @@ export default function MazeGame({ actionSignal, spinRef, fontFamily, muted }: P
         ref={canvasRef}
         width={W}
         height={H}
-        // Phones: swipe to steer, tap to start. Speaker icon (top-left) = game sounds on/off.
+        // COMPUTER mouse: drag to steer, click to start. Speaker icon (top-left) = game sounds on/off.
+        // (fingers are handled by the swipe code above, so they're skipped here)
         onPointerDown={(e) => {
+          if (e.pointerType !== "mouse") return;
           const rect = e.currentTarget.getBoundingClientRect();
           const scale = Math.min(rect.width / W, rect.height / H);
           const cx = (e.clientX - rect.left - (rect.width - W * scale) / 2) / scale;
@@ -1041,6 +1158,7 @@ export default function MazeGame({ actionSignal, spinRef, fontFamily, muted }: P
           if (mode !== "running") press();
         }}
         onPointerUp={(e) => {
+          if (e.pointerType !== "mouse") return;
           const start = swipeRef.current;
           swipeRef.current = null;
           if (!start) return;
