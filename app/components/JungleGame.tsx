@@ -9,7 +9,7 @@ import { ScorePanel, type ScoreApi } from "./Scoreboard";
 //   ↑ / W / SPACE / OK (or swipe up)     = jump
 //   ↓ / S (or swipe down)                = slide
 // Hit something once = you stumble and BEARMANPIG catches up. Stumble again while he's close = he gets you.
-// Every 1000 score the world changes: GREEN JUNGLE -> ORANGE JUNGLE -> BLUE GRASS (no trees, tall grass) -> RED VOLCANO -> BLACK CRYSTALS -> green again...
+// Every 1000 score the world changes: GREEN JUNGLE -> ORANGE JUNGLE -> BLUE GRASS (no trees, tall grass) -> RED VOLCANO -> BLACK CRYSTALS -> FROZEN LAND -> green again...
 // The game is drawn wide (like PINKMANE VOID), so it fills the PINKMANE handheld screen.
 // SPELLS lie on the path, run into one to pick it up:
 //   MAGNET  = pulls in the gems from all 3 lanes        SHIELD = saves you from one hit
@@ -17,6 +17,15 @@ import { ScorePanel, type ScoreApi } from "./Scoreboard";
 // The gems you collect are saved. On the start / game over screen, DOWN (S, swipe down) opens the SHOP:
 //   upgrade the 4 spells (6 levels each) and buy / choose skins, all paid with gems.
 //   In the shop: arrows (or swipes) move, SPACE / OK / tap buys or picks, the BACK row closes it.
+// BOSS: at the start of every new world BEARMANPIG attacks. A lane blinks red, then he charges down it, 3 times
+//   (the last time 2 lanes). Get out of the red lane! Beating him pushes him far back and gives bonus gems.
+// MUSIC: when the site's music is playing, the gems pulse to it. Moves made right on the beat fill the GROOVE meter,
+//   a full meter = a few seconds where every gem gives a bonus gem too.
+// MISSIONS: 3 small goals at a time (LEFT on the start / game over screen shows them). Each one pays gems,
+//   and finishing enough of them gives the RAINBOW skin, which can't be bought.
+// FX VOLUME: the speaker in the top left corner turns the game sounds on / off (also M), the little slider under it
+//   sets how loud they are (drag it, or press - and =). It's saved, like in PINKMANE VOID.
+// Bonus gems (boss, groove, missions) go to your saved gems only, never into the score, so the Top 10 stays fair.
 
 type Props = {
   // Goes up by 1 every time the player presses OK / Enter / Space (= start / jump)
@@ -29,6 +38,9 @@ type Props = {
   muted: boolean;
   // true on phones / tablets: no thumb buttons, you swipe anywhere on the screen, and swipe hints show at the start
   touch?: boolean;
+  // The page's beat clock (the same one PINKMANE VOID gets): kick jumps to 1 on every beat of the song and falls back to 0,
+  // live = the music is really playing right now. Leave it out and the game simply doesn't react to the music.
+  beatRef?: { current: { kick: number; live: boolean } };
 };
 
 // The name of the game on its start screen (the menu on the iPod has its own copy in page.tsx)
@@ -57,9 +69,48 @@ const MAGNET_UP = 3; // seconds the magnet gains per level
 const DOUBLE_UP = 4; // seconds 2X gains per level
 const BOOST_UP = 1.5; // seconds the boost gains per level
 // (the shield blocks 1 hit, and 1 more per level)
+// ---------- BOSS: BEARMANPIG attacks at the start of every new world ----------
+const BOSS_CHARGES = 3; // how many times he charges
+const BOSS_WARN = 1.0; // seconds the lane blinks red before he comes (a little shorter in every later world, never under 0.6)
+const BOSS_GEMS = 30; // bonus gems for beating him (+10 for every world you've passed). Only half if he hit you.
+// ---------- MUSIC ----------
+const BEAT_WINDOW = 0.38; // a move counts as "on the beat" while the beat flash is stronger than this (smaller = easier, 0-1)
+const GROOVE_MAX = 8; // on-beat moves needed to fill the GROOVE meter
+const GROOVE_SECONDS = 8; // how long the bonus lasts once it's full
+// ---------- MISSIONS ----------
+const MISSION_KEY = "pinkmane-jungle-missions"; // where your missions are saved in the browser
+const MISSION_SKIN_AT = 10; // how many missions you must finish to get the RAINBOW skin
+// The missions, handed out in this order, 3 at a time (after the last one they start again from the top).
+//   type: gemsRun = gems in ONE run, distRun = meters in ONE run, world = get to that world in ONE run (1 = orange, 2 = blue, 3 = red, 4 = black),
+//         spells / jumps / slides / boss / beats = counted over all your runs.   n = how many.   reward = gems you get.
+type MissionType = "gemsRun" | "distRun" | "world" | "spells" | "jumps" | "slides" | "boss" | "beats";
+const MISSIONS: { type: MissionType; n: number; reward: number }[] = [
+  { type: "gemsRun", n: 40, reward: 40 },
+  { type: "distRun", n: 400, reward: 40 },
+  { type: "spells", n: 3, reward: 50 },
+  { type: "jumps", n: 10, reward: 50 },
+  { type: "world", n: 1, reward: 60 },
+  { type: "boss", n: 1, reward: 80 },
+  { type: "slides", n: 8, reward: 60 },
+  { type: "gemsRun", n: 100, reward: 80 },
+  { type: "beats", n: 25, reward: 70 },
+  { type: "distRun", n: 900, reward: 90 },
+  { type: "world", n: 2, reward: 100 },
+  { type: "spells", n: 10, reward: 90 },
+  { type: "boss", n: 3, reward: 150 },
+  { type: "jumps", n: 30, reward: 100 },
+  { type: "slides", n: 25, reward: 100 },
+  { type: "gemsRun", n: 180, reward: 130 },
+  { type: "world", n: 3, reward: 150 },
+  { type: "beats", n: 80, reward: 120 },
+  { type: "distRun", n: 1500, reward: 150 },
+  { type: "world", n: 4, reward: 200 },
+];
 // Where the saved gems and the shop things are kept in the browser
 const BANK_KEY = "pinkmane-jungle-gems";
 const SHOP_KEY = "pinkmane-jungle-shop";
+const FX_KEY = "pinkmane-jungle-fx"; // "on" / "off": the game sounds
+const FX_VOL_KEY = "pinkmane-jungle-fx-volume"; // 0..1, set with the slider under the speaker icon
 const OLD_SKIN_KEY = "pinkmane-jungle-skin"; // from the first version (GOLD MANE only), still read so nobody loses it
 
 // ---------- Screen + camera ----------
@@ -88,7 +139,7 @@ const MORTAR: [number, number, number] = [34, 50, 32];
 const EDGE: [number, number, number] = [52, 70, 48];
 const EDGE_DARK: [number, number, number] = [40, 56, 38];
 
-// ---------- The 5 worlds (the background changes every ZONE_SCORE points) ----------
+// ---------- The 6 worlds (the background changes every ZONE_SCORE points) ----------
 // name      = the text that pops up when you get there
 // fog       = the colour far away
 // ground    = 4 colours for the ground next to the path
@@ -99,6 +150,7 @@ const EDGE_DARK: [number, number, number] = [40, 56, 38];
 // vine      = hanging vines + moss on the pillars (dark, light)
 // side      = "trees", "grass" (tall grass instead of trees) or "crystals" (crystals instead of trees)
 // crystals  = 1 = big glowing crystals at the horizon
+// snow      = 1 = a snow mountain at the horizon, and snow falling
 // stars     = 1 = stars and a moon in the sky
 // volcano   = 1 = a volcano at the horizon, and the rocks on the path are flames instead
 // moss      = the colour of the moss + vines on the obstacles (rocks, logs, branches): [bright, dark].
@@ -123,6 +175,7 @@ type Theme = {
   stars: number;
   volcano: number;
   crystals: number;
+  snow: number;
   moss?: [string, string];
   plants?: boolean;
   lava?: boolean;
@@ -156,6 +209,7 @@ const THEMES: Theme[] = [
     stars: 0,
     volcano: 0,
     crystals: 0,
+    snow: 0,
   },
   {
     name: "ORANGE JUNGLE",
@@ -184,6 +238,7 @@ const THEMES: Theme[] = [
     stars: 0,
     volcano: 0,
     crystals: 0,
+    snow: 0,
     moss: ["#ffa23a", "#e07a1a"],
   },
   {
@@ -213,6 +268,7 @@ const THEMES: Theme[] = [
     stars: 1,
     volcano: 0,
     crystals: 0,
+    snow: 0,
     moss: ["#6ab4ff", "#1f5cc2"],
     plants: true,
   },
@@ -243,6 +299,7 @@ const THEMES: Theme[] = [
     stars: 0,
     volcano: 1,
     crystals: 0,
+    snow: 0,
     moss: ["#ff5a3a", "#c2241a"],
     lava: true,
   },
@@ -273,7 +330,38 @@ const THEMES: Theme[] = [
     stars: 0.6,
     volcano: 0,
     crystals: 1,
+    snow: 0,
     moss: ["#b46aff", "#6a2ac2"],
+  },
+  {
+    name: "FROZEN LAND",
+    title: "#bfe8ff",
+    fog: [150, 182, 206],
+    ground: [
+      [190, 210, 226],
+      [212, 229, 241],
+      [170, 195, 216],
+      [236, 246, 252],
+    ],
+    sky: [
+      [10, 24, 48],
+      [22, 48, 84],
+      [44, 84, 128],
+      [84, 130, 170],
+    ],
+    far: [112, 146, 178],
+    canopy: [10, 24, 48],
+    canopyAmt: 0,
+    leaves: ["#17403e", "#24605a", "#cfe8f2", "#ffffff"],
+    vine: "#9cc4e0",
+    vineLight: "#e8f6ff",
+    firefly: "#ffffff",
+    side: "trees",
+    stars: 0.4,
+    volcano: 0,
+    crystals: 0,
+    snow: 1,
+    moss: ["#ffffff", "#bfe0f2"],
   },
 ];
 
@@ -312,13 +400,18 @@ const DUDE_LEGS = 13; // row where the legs start (they move when running)
 // To add a skin: copy one block, give it a new id + name + price and change the colours.
 //   B = hair, D = the dark bit on the tee, F = skin, K = pants (A is the black outline + tee, keep it)
 //   fire: true = the spiky hair is taken off and moving flames are drawn there instead
-const SKINS: { id: string; name: string; price: number; colors: Record<string, string>; fire?: boolean }[] = [
+//   mission: 10 = it can't be bought, you get it after finishing that many missions
+//   rainbow: true = the hair keeps changing colour
+const SKINS: { id: string; name: string; price: number; colors: Record<string, string>; fire?: boolean; mission?: number; rainbow?: boolean }[] = [
   { id: "pink", name: "PINKMANE", price: 0, colors: DUDE_COLORS },
   { id: "gold", name: "GOLD MANE", price: 250, colors: { A: "#111111", B: "#ffd24a", D: "#b8860b", F: "#ffc800", K: "#f2f2f2" } },
   { id: "ice", name: "ICE MANE", price: 400, colors: { A: "#111111", B: "#6ae0ff", D: "#2a9ad0", F: "#ffc800", K: "#e8f2ff" } },
   { id: "toxic", name: "TOXIC", price: 600, colors: { A: "#111111", B: "#7dff3a", D: "#2c8a33", F: "#ffc800", K: "#7a3cc8" } },
   { id: "fire", name: "FIRE MANE", price: 1000, fire: true, colors: { A: "#111111", B: "#ff7a1a", D: "#8a1f86", F: "#ffc800", K: "#787878" } },
+  { id: "rainbow", name: "RAINBOW", price: 0, mission: MISSION_SKIN_AT, rainbow: true, colors: DUDE_COLORS },
 ];
+// the hair colours the RAINBOW skin runs through
+const RAINBOW_HAIR = ["#ff3b3b", "#ffa23a", "#ffd24a", "#3ee05a", "#6ae0ff", "#b46aff"];
 
 // The spell pickups (9 x 9 pixels, drawn whole, not mirrored)
 const SPELL_MAPS: Record<string, string[]> = {
@@ -616,13 +709,23 @@ function buildPillar(seed: number, moss: string, mossDark: string) {
   return cv;
 }
 
-type Obstacle = { at: number; kind: "rock" | "root" | "branch"; lanes: number[]; hit: boolean };
+type Obstacle = { at: number; kind: "rock" | "root" | "branch"; lanes: number[]; hit: boolean; passed?: boolean };
 type Gem = { at: number; lane: number; taken: boolean };
 type SpellKind = "magnet" | "shield" | "boost" | "double";
 type Spell = { at: number; lane: number; kind: SpellKind; taken: boolean };
 type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string };
 type Popup = { x: number; y: number; text: string; life: number; color: string };
-type Mode = "ready" | "running" | "caught" | "shop";
+type Mode = "ready" | "running" | "caught" | "shop" | "missions";
+function missionText(m: { type: MissionType; n: number }) {
+  if (m.type === "gemsRun") return `GET ${m.n} GEMS IN ONE RUN`;
+  if (m.type === "distRun") return `RUN ${m.n}M IN ONE RUN`;
+  if (m.type === "world") return `REACH ${THEMES[m.n % THEMES.length].name}`;
+  if (m.type === "spells") return `PICK UP ${m.n} SPELLS`;
+  if (m.type === "jumps") return `JUMP OVER ${m.n} LOGS`;
+  if (m.type === "slides") return `SLIDE UNDER ${m.n} BRANCHES`;
+  if (m.type === "boss") return `BEAT BEARMANPIG ${m.n}X`;
+  return `MOVE ON THE BEAT ${m.n}X`;
+}
 // the spell rows in the shop, top to bottom
 const SPELL_ROWS: { kind: SpellKind; name: string }[] = [
   { kind: "magnet", name: "MAGNET" },
@@ -631,11 +734,21 @@ const SPELL_ROWS: { kind: SpellKind; name: string }[] = [
   { kind: "double", name: "2X GEM" },
 ];
 
-export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, touch = false }: Props) {
+export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, touch = false, beatRef }: Props) {
   const touchRef = useRef(touch);
   touchRef.current = touch;
+  const beatSrc = useRef(beatRef);
+  beatSrc.current = beatRef;
   // a tap / click on the game picture, in game pixels (shop rows, pause menu, start screen)
   const tapRef = useRef<((x: number, y: number) => void) | null>(null);
+  // the FX volume slider (top left): what the touch / mouse handlers need from the game loop
+  const fxApi = useRef<{
+    hit: (x: number, y: number) => "icon" | "slider" | null;
+    setFromY: (y: number) => void;
+    toggle: () => void;
+    done: () => void;
+  } | null>(null);
+  const fxDrag = useRef(-1); // -1 = not dragging the slider, -2 = dragging with the mouse, otherwise the finger's id
   const boardRef = useRef<ScoreApi | null>(null); // the online Top 10 box (Scoreboard.tsx), board id "jungle"
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mutedRef = useRef(muted);
@@ -667,6 +780,14 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       };
     };
     const fits = SKINS.map((sk) => makeFit(sk.colors, sk.fire));
+    // RAINBOW skin: one set of pictures per hair colour, shown one after the other
+    const rainbowFits = RAINBOW_HAIR.map((c) => makeFit({ ...DUDE_COLORS, B: c }));
+    const fitNow = (i: number) => (SKINS[i].rainbow ? rainbowFits[Math.floor(clock * 6) % rainbowFits.length] : fits[i]);
+    // the beat of the song: 1 right on the beat, falling to 0. -1 = no music playing right now
+    const beatKick = () => {
+      const b = beatSrc.current?.current;
+      return b && b.live ? b.kick : -1;
+    };
     const spellImg: Record<string, HTMLCanvasElement> = {};
     for (const k of Object.keys(SPELL_MAPS)) spellImg[k] = buildMap(SPELL_MAPS[k], SPELL_COLORS);
     const tail = { px: BMP_TAIL, color: "#ff8fb8" };
@@ -688,9 +809,35 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     const floor32 = new Uint32Array(floor.data.buffer);
 
     // ---------- sound ----------
+    // FX volume (the game's own sounds, not your music): on / off and how loud, both saved
+    let fxOn = true;
+    let fxVol = 1;
+    try {
+      fxOn = localStorage.getItem(FX_KEY) !== "off";
+      const v = localStorage.getItem(FX_VOL_KEY);
+      if (v !== null && !Number.isNaN(Number(v))) fxVol = Math.max(0, Math.min(1, Number(v)));
+    } catch {}
+    const saveFx = () => {
+      try {
+        localStorage.setItem(FX_KEY, fxOn ? "on" : "off");
+        localStorage.setItem(FX_VOL_KEY, String(fxVol));
+      } catch {}
+    };
+    // (moving the slider up from 0 also turns the sounds back on)
+    const setFxVolume = (v: number) => {
+      fxVol = Math.max(0, Math.min(1, Math.round(v * 20) / 20));
+      if (fxVol > 0) fxOn = true;
+      saveFx();
+    };
+    const toggleFx = () => {
+      fxOn = !fxOn;
+      if (fxOn && fxVol <= 0) fxVol = 0.5;
+      saveFx();
+    };
+
     let ac: AudioContext | null = null;
     const tone = (f1: number, f2: number, dur: number, type: OscillatorType, vol = 0.08, delay = 0) => {
-      if (mutedRef.current) return;
+      if (mutedRef.current || !fxOn || fxVol <= 0) return;
       try {
         if (!ac) ac = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
         if (ac.state === "suspended") ac.resume();
@@ -700,7 +847,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
         o.type = type;
         o.frequency.setValueAtTime(f1, t0);
         o.frequency.exponentialRampToValueAtTime(Math.max(20, f2), t0 + dur);
-        g.gain.setValueAtTime(vol, t0);
+        g.gain.setValueAtTime(vol * fxVol, t0);
         g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
         o.connect(g).connect(ac.destination);
         o.start(t0);
@@ -740,11 +887,79 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
         tone(1040, 2080, 0.2, "square", 0.06, 0.2);
       },
       no: () => tone(200, 120, 0.18, "square", 0.06),
+      warn: () => {
+        tone(880, 880, 0.07, "square", 0.05);
+        tone(880, 880, 0.07, "square", 0.05, 0.14);
+      },
+      charge: () => {
+        tone(150, 55, 0.5, "sawtooth", 0.11);
+        tone(460, 240, 0.14, "sawtooth", 0.07, 0.05); // OINK
+      },
+      roar: () => {
+        tone(95, 45, 0.8, "sawtooth", 0.12);
+        tone(480, 240, 0.16, "sawtooth", 0.08, 0.15);
+      },
+      beat: () => tone(1250, 1600, 0.05, "square", 0.035),
       zone: () => {
         tone(520, 780, 0.1, "square", 0.05);
         tone(780, 1040, 0.1, "square", 0.05, 0.1);
         tone(1040, 1560, 0.16, "square", 0.05, 0.2);
       },
+    };
+
+    // The FX slider: a speaker icon in the top left corner with a thin bar going down from it (top = loud, bottom = quiet)
+    const FX_SLIDER = { x: 4, top: 18, bottom: 58 };
+    const fxShown = () => !pause.on && (s.mode === "ready" || s.mode === "running" || s.mode === "caught"); // (the shop + missions have their X there)
+    fxApi.current = {
+      hit: (x, y) => {
+        if (!fxShown()) return null;
+        if (x < 16 && y < 14) return "icon";
+        if (x < 16 && y >= FX_SLIDER.top - 5 && y <= FX_SLIDER.bottom + 5) return "slider";
+        return null;
+      },
+      setFromY: (y) => setFxVolume((FX_SLIDER.bottom - y) / (FX_SLIDER.bottom - FX_SLIDER.top)),
+      toggle: () => {
+        toggleFx();
+        tone(520, 780, 0.08, "square", 0.05);
+      },
+      done: () => tone(520, 780, 0.08, "square", 0.05), // a little test sound at the new volume
+    };
+    const drawFx = () => {
+      // the speaker
+      const x = 2;
+      const y = 5;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(x - 1, y - 1, 12, 9);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x, y + 2, 2, 3);
+      ctx.fillRect(x + 2, y + 1, 1, 5);
+      ctx.fillRect(x + 3, y, 1, 7);
+      if (fxOn && fxVol > 0) {
+        ctx.fillRect(x + 5, y + 2, 1, 3);
+        ctx.fillRect(x + 7, y + 1, 1, 5);
+      } else {
+        ctx.fillStyle = PINK;
+        for (let i = 0; i < 5; i++) {
+          ctx.fillRect(x + 5 + i, y + 1 + i, 1, 1);
+          ctx.fillRect(x + 9 - i, y + 1 + i, 1, 1);
+        }
+      }
+      // the slider
+      const { x: sx, top, bottom } = FX_SLIDER;
+      const vol = fxOn ? fxVol : 0;
+      const knobY = Math.round(bottom - vol * (bottom - top));
+      ctx.globalAlpha = fxDrag.current !== -1 ? 1 : 0.75;
+      ctx.fillStyle = "#111";
+      ctx.fillRect(sx - 1, top - 1, 5, bottom - top + 2);
+      ctx.fillStyle = "#6e6478";
+      ctx.fillRect(sx, top, 3, bottom - top);
+      ctx.fillStyle = PINK;
+      ctx.fillRect(sx, knobY, 3, bottom - knobY);
+      ctx.fillStyle = "#111";
+      ctx.fillRect(sx - 3, knobY - 2, 9, 5);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(sx - 2, knobY - 1, 7, 3);
+      ctx.globalAlpha = 1;
     };
 
     // ---------- best score ----------
@@ -772,7 +987,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           const n = Math.floor(Number(d.lv?.[r.kind]) || 0);
           lv[r.kind] = Math.max(0, Math.min(SPELL_COSTS.length, n));
         }
-        if (Array.isArray(d.owned)) owned = SKINS.filter((sk) => sk.price === 0 || d.owned!.includes(sk.id)).map((sk) => sk.id);
+        if (Array.isArray(d.owned)) owned = SKINS.filter((sk) => (sk.price === 0 && !sk.mission) || d.owned!.includes(sk.id)).map((sk) => sk.id);
         const i = SKINS.findIndex((sk) => sk.id === d.on);
         if (i >= 0 && owned.includes(SKINS[i].id)) skinIdx = i;
       }
@@ -792,6 +1007,92 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     const SHOP_BACK = SKINS.length; // the BACK row comes after the longest list (the skins)
     const shopLastRow = () => (shop.col === 0 ? SPELL_ROWS.length : SKINS.length) - 1;
     const shop = { col: 0, row: 0, from: "ready" as "ready" | "caught" };
+
+    // ---------- missions ----------
+    let mDone = 0; // how many missions you've finished
+    let mNext = 3; // the next mission on the list to hand out
+    // the 3 missions you have now: i = its place in MISSIONS, p = progress (for the ones counted over all runs),
+    // wait = you got it in the middle of a run, so a "in one run" mission only starts counting from the next run
+    let mActive: { i: number; p: number; wait?: boolean }[] = [
+      { i: 0, p: 0 },
+      { i: 1, p: 0 },
+      { i: 2, p: 0 },
+    ];
+    let missionsFrom: "ready" | "caught" = "ready";
+    try {
+      const raw = localStorage.getItem(MISSION_KEY);
+      if (raw) {
+        const d = JSON.parse(raw) as { done?: number; next?: number; active?: { i: number; p: number }[] };
+        const ok =
+          Array.isArray(d.active) &&
+          d.active.length === 3 &&
+          d.active.every((a) => Number.isInteger(a.i) && a.i >= 0 && a.i < MISSIONS.length && Number.isFinite(a.p));
+        if (ok) {
+          mActive = d.active!.map((a) => ({ i: a.i, p: Math.max(0, a.p) }));
+          mDone = Math.max(0, Math.floor(Number(d.done) || 0));
+          mNext = Math.max(3, Math.floor(Number(d.next) || 3));
+        }
+      }
+    } catch {}
+    const saveMissions = () => {
+      try {
+        localStorage.setItem(MISSION_KEY, JSON.stringify({ done: mDone, next: mNext, active: mActive.map((a) => ({ i: a.i, p: a.p })) }));
+      } catch {}
+    };
+    // skins you get for finishing missions (they can't be bought)
+    const unlockMissionSkins = () => {
+      let got: string | null = null;
+      for (const sk of SKINS)
+        if (sk.mission && mDone >= sk.mission && !owned.includes(sk.id)) {
+          owned.push(sk.id);
+          got = sk.name;
+        }
+      if (got) saveShop();
+      return got;
+    };
+    unlockMissionSkins();
+    // how far a mission is right now
+    const missionValue = (a: { i: number; p: number; wait?: boolean }) => {
+      const m = MISSIONS[a.i];
+      if (m.type === "gemsRun") return a.wait ? 0 : s.gems;
+      if (m.type === "distRun") return a.wait ? 0 : Math.floor(s.dist);
+      if (m.type === "world") return a.wait ? 0 : s.zone;
+      return a.p;
+    };
+    // finished missions pay out, and the next one on the list takes their place
+    const checkMissions = () => {
+      for (let k = 0; k < mActive.length; k++) {
+        const a = mActive[k];
+        const m = MISSIONS[a.i];
+        if (missionValue(a) < m.n) continue;
+        bank += m.reward;
+        mDone++;
+        s.pops.push({ x: W / 2, y: 62 + k * 10, text: `MISSION DONE! +${m.reward}`, life: 2.4, color: "#ffd24a" });
+        sfx.buy();
+        // the next mission that you don't already have
+        let ni = mNext % MISSIONS.length;
+        for (let tries = 0; tries < MISSIONS.length && mActive.some((x) => x.i === ni); tries++) {
+          mNext++;
+          ni = mNext % MISSIONS.length;
+        }
+        mNext++;
+        mActive[k] = { i: ni, p: 0, wait: true };
+        const skin = unlockMissionSkins();
+        if (skin) s.pops.push({ x: W / 2, y: 30, text: `NEW SKIN: ${skin}!`, life: 3, color: "#ffffff" });
+        saveShop();
+        saveMissions();
+      }
+    };
+    // something happened that missions count (a spell picked up, a log jumped...)
+    const missionEvent = (type: MissionType) => {
+      let hit = false;
+      for (const a of mActive)
+        if (MISSIONS[a.i].type === type) {
+          a.p++;
+          hit = true;
+        }
+      if (hit) checkMissions();
+    };
 
     // ---------- game state ----------
     // the pause menu (ESC). row 0 = RESUME, 1 = RESTART
@@ -830,6 +1131,24 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       double: 0,
       boost: 0,
       shield: 0, // how many hits the shield can still take
+      bonus: 0, // bonus gems this run (boss, groove): they go to your saved gems, not into the score
+      groove: 0, // the GROOVE meter (on-beat moves)
+      grooveT: 0, // seconds since the last on-beat move
+      fever: 0, // seconds of GROOVE bonus left
+      beatUsed: false, // this beat already counted a move
+      // THE BOSS. stage: off = no fight, wait = he's coming at the next world gate, intro, warn = lane blinks,
+      // charge = he runs down the lane, rest = a short break between charges
+      boss: {
+        stage: "off" as "off" | "wait" | "intro" | "warn" | "charge" | "rest",
+        at: 0, // where on the path the fight starts
+        zone: 0, // which world change this fight belongs to
+        t: 0, // seconds in this stage
+        n: 0, // charges done
+        hits: 0, // how many times he got you
+        lanes: [] as number[], // the lane(s) he charges down
+        z: 0, // where he is during a charge (distance from the camera)
+        struck: false,
+      },
       zone: 0, // how many times the world has changed in this run
       // where each world starts (distance) and which one it is. The new world comes towards you from the horizon.
       zones: [{ from: -1e9, theme: 0 }] as { from: number; theme: number }[],
@@ -867,6 +1186,14 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       s.double = 0;
       s.boost = 0;
       s.shield = 0;
+      s.bonus = 0;
+      s.groove = 0;
+      s.grooveT = 0;
+      s.fever = 0;
+      s.beatUsed = false;
+      s.boss.stage = "off";
+      s.boss.lanes = [];
+      for (const a of mActive) a.wait = false; // "in one run" missions count from this run on
       // a little line of gems to start with
       for (let i = 0; i < 8; i++) s.gemList.push({ at: 14 + i * 1.6, lane: 0, taken: false });
       sfx.start();
@@ -975,9 +1302,10 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       s.t = 0;
       s.shake = 0.5;
       s.score = Math.floor(s.dist) + s.gems * 5;
-      // the gems from this run go into your saved gems
-      bank += s.gems;
+      // the gems from this run (and the bonus ones) go into your saved gems
+      bank += s.gems + s.bonus;
       saveShop();
+      saveMissions();
       if (s.score > best) {
         best = s.score;
         s.newBest = true;
@@ -1029,7 +1357,8 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           const sk = SKINS[shop.row];
           if (!sk) return;
           if (!owned.includes(sk.id)) {
-            if (bank < sk.price) {
+            if (sk.mission || bank < sk.price) {
+              // (a mission skin can't be bought, you earn it)
               sfx.no();
               return;
             }
@@ -1061,6 +1390,14 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
         shopInput(a);
         return;
       }
+      if (s.mode === "missions") {
+        // SPACE / OK / tap closes the missions
+        if (a === "go") {
+          s.mode = missionsFrom;
+          sfx.lane();
+        }
+        return;
+      }
       if (s.mode !== "running") {
         if (boardRef.current?.busy()) return; // the Top 10 / name box is open: close it first (OK)
         // start / restart (after game over wait a moment so you don't skip the screen by accident)
@@ -1076,32 +1413,154 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           s.mode = "shop";
           sfx.lane();
         }
+        // LEFT = show the missions
+        if (a === "left" && !(s.mode === "caught" && s.t < 0.9)) {
+          missionsFrom = s.mode === "caught" ? "caught" : "ready";
+          s.mode = "missions";
+          sfx.lane();
+        }
         return;
       }
       if (a === "left" && s.lane > -1) {
         s.lane--;
         sfx.lane();
+        onBeatMove();
       }
       if (a === "right" && s.lane < 1) {
         s.lane++;
         sfx.lane();
+        onBeatMove();
       }
       if (a === "jump" || a === "go") {
         if (s.jumpY <= 0.001) {
           s.vy = 4.3;
           s.slide = 0;
           sfx.jump();
+          onBeatMove();
         }
       }
       if (a === "slide") {
         if (s.jumpY > 0.001) s.vy = -9; // in the air: drop down fast
         s.slide = 0.65;
         sfx.slide();
+        onBeatMove();
+      }
+    };
+
+    // MUSIC: a move made right on the beat fills the GROOVE meter. A full meter = GROOVE_SECONDS of bonus gems.
+    const onBeatMove = () => {
+      const k = beatKick();
+      if (k < BEAT_WINDOW || s.beatUsed) return; // (no music, off the beat, or this beat already counted)
+      s.beatUsed = true;
+      s.grooveT = 0;
+      sfx.beat();
+      missionEvent("beats");
+      if (s.fever > 0) return;
+      const p = playerScreen();
+      s.groove++;
+      if (s.groove >= GROOVE_MAX) {
+        s.groove = 0;
+        s.fever = GROOVE_SECONDS;
+        sfx.zone();
+        s.pops.push({ x: W / 2, y: 30, text: "GROOVE! BONUS GEMS", life: 1.8, color: "#ffd24a" });
+      } else s.pops.push({ x: p.x, y: p.y - 48, text: "ON BEAT", life: 0.5, color: "#ffd24a" });
+    };
+
+    // BEARMANPIG ran into you during a boss charge (the same as hitting an obstacle)
+    const bossHit = () => {
+      if (s.invuln > 0 || s.boost > 0) return; // blinking or boosting: he can't touch you
+      const p = playerScreen();
+      burst(p.x, p.y - 14, 14, ["#6b3d1f", "#8a5530", "#ff8fb8"]);
+      if (s.shield > 0) {
+        s.shield--;
+        s.invuln = 1;
+        s.shake = 0.2;
+        sfx.shield();
+        s.pops.push({ x: p.x, y: p.y - 46, text: "SAVED!", life: 0.9, color: "#6ae0ff" });
+        return;
+      }
+      if (s.chase > CHASE_DEADLY) {
+        caught();
+        return;
+      }
+      sfx.stumble();
+      s.chase = Math.min(1, s.chase + 0.65);
+      s.speedMul = 0.55;
+      s.invuln = 1.1;
+      s.shake = 0.35;
+      s.pops.push({ x: p.x, y: p.y - 46, text: "OINK!", life: 0.9, color: PINK });
+    };
+
+    // THE BOSS FIGHT, step by step (called every frame while you run)
+    const bossWarn = () => {
+      const b = s.boss;
+      b.stage = "warn";
+      b.t = 0;
+      b.lanes = [s.lane]; // he aims at the lane you're in
+      if (b.n === BOSS_CHARGES - 1) {
+        // the last charge takes two lanes: only one is safe
+        const others = [-1, 0, 1].filter((l) => l !== s.lane);
+        b.lanes.push(others[Math.floor(Math.random() * others.length)]);
+      }
+      sfx.warn();
+    };
+    const bossStep = (dt: number, myLane: number) => {
+      const b = s.boss;
+      if (b.stage === "off") return;
+      b.t += dt;
+      if (b.stage === "wait") {
+        if (s.dist < b.at) return;
+        b.stage = "intro";
+        b.t = 0;
+        b.n = 0;
+        b.hits = 0;
+        sfx.roar();
+        s.pops.push({ x: W / 2, y: 58, text: "BEARMANPIG ATTACKS!", life: 1.6, color: "#ff3b5c" });
+      } else if (b.stage === "intro") {
+        if (b.t > 0.9) bossWarn();
+      } else if (b.stage === "warn") {
+        if (b.t > Math.max(0.6, BOSS_WARN - b.zone * 0.05)) {
+          b.stage = "charge";
+          b.t = 0;
+          b.z = 0.9;
+          b.struck = false;
+          sfx.charge();
+        }
+      } else if (b.stage === "charge") {
+        const before = b.z;
+        b.z = 0.9 + Math.pow(b.t / 0.75, 1.6) * 40; // from right behind the camera to far ahead
+        if (!b.struck && before < PZ + 0.4 && b.z >= PZ - 0.4 && b.lanes.includes(myLane)) {
+          b.struck = true;
+          b.hits++;
+          bossHit();
+        }
+        if (b.t > 0.75) {
+          b.stage = "rest";
+          b.t = 0;
+          b.n++;
+        }
+      } else if (b.stage === "rest" && b.t > 0.45) {
+        if (b.n < BOSS_CHARGES) bossWarn();
+        else {
+          // beaten: he drops far back, you get bonus gems (half if he hit you), the path fills up again
+          let reward = BOSS_GEMS + 10 * b.zone;
+          if (b.hits > 0) reward = Math.floor(reward / 2);
+          s.bonus += reward;
+          s.chase = 0;
+          b.stage = "off";
+          b.lanes = [];
+          s.nextAt = Math.max(s.nextAt, s.dist + FAR);
+          sfx.zone();
+          s.pops.push({ x: W / 2, y: 58, text: `${b.hits ? "BEARMANPIG BEATEN!" : "PERFECT DODGE!"} +${reward} GEMS`, life: 2.2, color: "#ffd24a" });
+          missionEvent("boss");
+        }
       }
     };
 
     // TAPS / CLICKS on the game picture (x, y in game pixels)
-    const SHOP_ROW_Y = (r: number) => 32 + r * 13; // the same rows drawShopScreen uses
+    const SHOP_Y0 = 30; // where the first shop row is
+    const SHOP_DY = 12; // how far apart the shop rows are
+    const SHOP_ROW_Y = (r: number) => SHOP_Y0 + r * SHOP_DY; // the same rows drawShopScreen uses
     tapRef.current = (x, y) => {
       if (pause.on) {
         // tap RESUME or RESTART
@@ -1127,7 +1586,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           return;
         }
         // a spell (left) or skin (right) row: first tap picks it, tapping it again buys / puts it on
-        const r = Math.floor((y - SHOP_ROW_Y(0) + 3) / 13);
+        const r = Math.floor((y - SHOP_ROW_Y(0) + 3) / SHOP_DY);
         const col = x < 171 ? 0 : 1;
         const last = (col === 0 ? SPELL_ROWS.length : SKINS.length) - 1;
         if (r < 0 || r > last || r >= SHOP_BACK) return;
@@ -1139,9 +1598,14 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
         }
         return;
       }
+      if (s.mode === "missions") {
+        inputRef.current?.("go"); // a tap anywhere closes the missions
+        return;
+      }
       if (s.mode === "ready" || (s.mode === "caught" && s.t > 0.9)) {
-        // the skin picture on the right = open the shop, anywhere else = run
+        // the skin picture on the right = open the shop, your gems on the left = the missions, anywhere else = run
         if (x > W - 92 && y > 24 && y < 96) inputRef.current?.("slide");
+        else if (x < 116 && y > 24 && y < 96) inputRef.current?.("left");
         else inputRef.current?.("go");
         return;
       }
@@ -1160,6 +1624,16 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           pause.row = 0;
           sfx.lane();
         }
+        return;
+      }
+      // FX: M = sounds on / off, - and = make them quieter / louder
+      if (k === "m" || k === "M") {
+        fxApi.current?.toggle();
+        return;
+      }
+      if (k === "-" || k === "_" || k === "=" || k === "+") {
+        setFxVolume((fxOn ? fxVol : 0) + (k === "-" || k === "_" ? -0.1 : 0.1));
+        tone(520, 780, 0.08, "square", 0.05);
         return;
       }
       if (k === "ArrowLeft" || k === "a" || k === "A") inputRef.current?.("left");
@@ -1206,6 +1680,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       stars: THEMES[0].stars,
       volcano: THEMES[0].volcano,
       crystals: THEMES[0].crystals,
+      snow: THEMES[0].snow,
       near: THEMES[0],
     };
     const updateLook = () => {
@@ -1221,6 +1696,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       look.stars = cur.stars + (next.stars - cur.stars) * t;
       look.volcano = cur.volcano + (next.volcano - cur.volcano) * t;
       look.crystals = cur.crystals + (next.crystals - cur.crystals) * t;
+      look.snow = cur.snow + (next.snow - cur.snow) * t;
       look.near = t < 0.5 ? cur : next;
     };
 
@@ -1482,7 +1958,8 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       let gx = g.lane * LANE;
       if (s.magnet > 0 && s.mode === "running") gx += (s.px - gx) * Math.min(1, Math.max(0, 1 - (z - PZ) / 6));
       const q = proj(gx, z);
-      const size = Math.max(1, Math.round(0.13 * q.s));
+      // MUSIC: the gems swell on every beat
+      const size = Math.max(1, Math.round(0.13 * q.s * (1 + Math.max(0, beatKick()) * 0.4)));
       const cy = Math.round(q.y - (0.32 + Math.sin(t * 5 + g.at) * 0.06) * q.s);
       const cx = Math.round(q.x);
       for (let i = -size; i <= size; i++) {
@@ -1625,6 +2102,27 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
         }
         ctx.globalAlpha = 1;
       }
+      // FROZEN LAND: a big snow mountain (and a smaller one) at the horizon
+      if (look.snow > 0.02) {
+        ctx.globalAlpha = look.snow;
+        const peak = (px: number, vh: number, base: number) => {
+          const top = HOR - vh;
+          for (let y = 0; y < vh; y++) {
+            const v = y / vh; // 0 = the top .. 1 = the foot
+            const hw = Math.max(1, Math.round(v * base * (1 + 0.07 * Math.sin(y * 0.9))));
+            const mid = Math.round(px + hw * 0.15 + Math.sin(y * 0.6) * 1.5); // where the light side ends
+            const snowy = v < 0.4 + 0.07 * Math.sin(y * 2.1 + px); // the white cap, with a ragged edge
+            ctx.fillStyle = snowy ? "#ffffff" : "#5a7490";
+            ctx.fillRect(px - hw, top + y, mid - (px - hw), 1);
+            ctx.fillStyle = snowy ? "#c4d8e8" : "#384c64";
+            ctx.fillRect(mid, top + y, px + hw - mid, 1);
+          }
+        };
+        const mx = Math.round(W * 0.68 - shift * 0.3);
+        peak(mx - 62, 26, 46);
+        peak(mx, 42, 68);
+        ctx.globalAlpha = 1;
+      }
       // far tree line
       ctx.fillStyle = css(look.far);
       for (let x = 0; x < W; x++) {
@@ -1647,6 +2145,19 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           ctx.fillStyle = look.near.vineLight;
           for (let y = Math.round(h) + 3; y < h + len; y += 4) ctx.fillRect(x + 1, y, 1, 1);
         }
+      }
+      // FROZEN LAND: snow falling over the whole picture
+      if (look.snow > 0.02) {
+        ctx.globalAlpha = look.snow;
+        ctx.fillStyle = "#ffffff";
+        for (let i = 0; i < 46; i++) {
+          const fall = 18 + (i % 5) * 7;
+          const sy = (hash(i, 52) * H + t * fall) % H;
+          const sx = (((hash(i, 51) * W + Math.sin(t * 1.3 + i) * 5 + shift * 0.4 - t * 6) % W) + W) % W;
+          const big = i % 4 === 0 ? 2 : 1;
+          ctx.fillRect(Math.round(sx), Math.round(sy), big, big);
+        }
+        ctx.globalAlpha = 1;
       }
       // fireflies
       for (let i = 0; i < 12; i++) {
@@ -1737,6 +2248,22 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           },
         });
       }
+      // BOSS: BEARMANPIG charging down his lane(s), from right behind you into the distance
+      if (s.boss.stage === "charge") {
+        const bz = s.boss.z;
+        for (const l of s.boss.lanes)
+          items.push({
+            z: bz,
+            draw: () => {
+              const q = proj(l * LANE, bz);
+              const ww = 0.83 * q.s;
+              const hh = 1.02 * q.s;
+              ctx.globalAlpha = 1 - Math.pow(fogAt(bz), 1.4);
+              ctx.drawImage(bmp[Math.floor(t * 14) % 2], Math.round(q.x - ww / 2), Math.round(q.y - hh), Math.round(ww), Math.round(hh));
+              ctx.globalAlpha = 1;
+            },
+          });
+      }
       items.sort((a, b) => b.z - a.z);
       // everything farther than the player, then the player, then nearer things
       let i = 0;
@@ -1773,7 +2300,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       ctx.fillStyle = "rgba(0,0,0,0.35)";
       ctx.fillRect(Math.round(p.x - shw), Math.round(p.y - 2), shw * 2, 3);
       if (s.invuln > 0 && Math.floor(t * 16) % 2 === 0) return; // blink after a stumble
-      const fit = fits[skinIdx];
+      const fit = fitNow(skinIdx);
       const dude = fit.run;
       const dudeStand = fit.stand;
       const onFire = !!SKINS[skinIdx].fire;
@@ -1810,6 +2337,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     const drawMonster = (t: number) => {
       const vis = s.chaseVis;
       if (vis < 0.03) return;
+      if (s.boss.stage !== "off" && s.boss.stage !== "wait") return; // boss fight: he's busy charging
       const top = H + 2 - vis * (H + 2 - 106) + Math.sin(t * 14) * 2;
       const x = W / 2 + (s.mx * F) / PZ - 27;
       const frame = bmp[Math.floor(t * 8) % 2];
@@ -1817,7 +2345,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     };
 
     const drawHud = () => {
-      text(`${Math.floor(s.dist)}M`, 4, 4, GREEN, 8, "left");
+      text(`${Math.floor(s.dist)}M`, 16, 4, GREEN, 8, "left"); // (to the right of the FX speaker)
       // gem icon + count
       const gx = W - 12;
       ctx.fillStyle = "#3ee05a";
@@ -1834,6 +2362,56 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
         ctx.fillStyle = s.chase > CHASE_DEADLY ? "#ff3b5c" : PINK;
         ctx.fillRect(W / 2 - 20, 6, w, 3);
       }
+    };
+
+    // BOSS: the lane(s) he's about to charge down blink red, with a big ! at the bottom
+    const drawBossWarn = () => {
+      const b = s.boss;
+      if (s.mode !== "running" || (b.stage !== "warn" && b.stage !== "charge")) return;
+      const blink = Math.floor(clock * 10) % 2 === 0;
+      const zs = [1.8, 3, 5, 8, 12, 18];
+      for (const l of b.lanes) {
+        ctx.fillStyle = `rgba(255,40,60,${b.stage === "charge" ? 0.5 : blink ? 0.45 : 0.18})`;
+        ctx.beginPath();
+        zs.forEach((z, i) => {
+          const q = proj(l * LANE - LANE * 0.45, z);
+          if (i === 0) ctx.moveTo(q.x, q.y);
+          else ctx.lineTo(q.x, q.y);
+        });
+        for (let i = zs.length - 1; i >= 0; i--) {
+          const q = proj(l * LANE + LANE * 0.45, zs[i]);
+          ctx.lineTo(q.x, q.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        if (b.stage === "warn") text("!", proj(l * LANE, PZ).x, H - 24, blink ? "#ffffff" : "#ff3b5c", 16);
+      }
+    };
+
+    // BOSS + MUSIC bits of the HUD
+    const drawExtraHud = () => {
+      const b = s.boss;
+      if (b.stage !== "off" && b.stage !== "wait")
+        text(`BEARMANPIG ${Math.min(b.n + 1, BOSS_CHARGES)}/${BOSS_CHARGES}`, W / 2, 14, "#ff3b5c");
+      const k = beatKick();
+      if (k < 0) return; // no music: no groove meter
+      if (s.fever > 0) {
+        text("GROOVE 2X", W - 6, 15, Math.floor(clock * 6) % 2 ? "#ffd24a" : "#ffffff", 8, "right");
+        ctx.fillStyle = "#000";
+        ctx.fillRect(W - 80, 25, 74, 4);
+        ctx.fillStyle = "#ffd24a";
+        ctx.fillRect(W - 79, 26, Math.round((72 * s.fever) / GROOVE_SECONDS), 2);
+        return;
+      }
+      const gx0 = W - 6 - GROOVE_MAX * 5;
+      for (let i = 0; i < GROOVE_MAX; i++) {
+        ctx.fillStyle = i < s.groove ? "#ffd24a" : "#2a2a2a";
+        ctx.fillRect(gx0 + i * 5, 16, 4, 4);
+      }
+      // a little dot that flashes on the beat (move when it's big)
+      const d = 2 + Math.round(k * 4);
+      ctx.fillStyle = k > BEAT_WINDOW ? "#ffffff" : "#8a8a8a";
+      ctx.fillRect(gx0 - 9 - Math.floor(d / 2), 18 - Math.floor(d / 2), d, d);
     };
 
     // the spells that are on right now, bottom left, each with a bar that runs out
@@ -1859,7 +2437,8 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       text("YOUR GEMS", lx, 44, "#b6ffb0");
       text(String(bank), lx, 56, GREEN, 16);
       const rx = W - 48;
-      ctx.drawImage(fits[skinIdx].stand, rx - 12, 30, 24, 36);
+      text(touchRef.current ? "TAP: MISSIONS" : "LEFT: MISSIONS", 60, 84, "#ffffff");
+      ctx.drawImage(fitNow(skinIdx).stand, rx - 12, 30, 24, 36);
       if (SKINS[skinIdx].fire) fireHair(rx - 12, 30, clock);
       text(SKINS[skinIdx].name, rx, 72, "#ffd24a");
       text(touchRef.current ? "TAP: SHOP" : "DOWN: SHOP", rx, 84, "#ffffff");
@@ -1873,7 +2452,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       text(`GEMS ${bank}`, W - 6, 4, GREEN, 8, "right");
       text("SPELLS", 10, 18, "#9ad19a", 8, "left");
       text("SKINS", 178, 18, "#9ad19a", 8, "left");
-      const rowY = (r: number) => 32 + r * 13;
+      const rowY = SHOP_ROW_Y;
       const RED = "#ff7a7a";
       let info = "BACK TO THE GAME";
 
@@ -1882,7 +2461,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
         const on = shop.col === 0 && shop.row === i;
         if (on) {
           ctx.fillStyle = "#4a1447";
-          ctx.fillRect(6, y - 3, 162, 13);
+          ctx.fillRect(6, y - 2, 162, SHOP_DY);
         }
         const level = lv[r.kind];
         const cost = SPELL_COSTS[level];
@@ -1911,16 +2490,26 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
         const on = shop.col === 1 && shop.row === i;
         if (on) {
           ctx.fillStyle = "#4a1447";
-          ctx.fillRect(174, y - 3, 140, 13);
+          ctx.fillRect(174, y - 2, 140, SHOP_DY);
         }
         const have = owned.includes(sk.id);
         text(sk.name, 178, y, on ? "#ffffff" : "#ffd24a", 8, "left");
         if (i === skinIdx) text("ON", 310, y, GREEN, 8, "right");
         else if (have) text("OWNED", 310, y, "#9ad19a", 8, "right");
+        else if (sk.mission) text(`${Math.min(mDone, sk.mission)}/${sk.mission}`, 310, y, "#ffd24a", 8, "right"); // missions done / needed
         else text(String(sk.price), 310, y, bank >= sk.price ? GREEN : RED, 8, "right");
         if (on) {
           const k = touchRef.current ? "TAP AGAIN" : "SPACE";
-          info = i === skinIdx ? "YOU'RE WEARING IT" : have ? `${k} = PUT IT ON` : bank >= sk.price ? `${k} = BUY IT` : `YOU NEED ${sk.price - bank} MORE GEMS`;
+          info =
+            i === skinIdx
+              ? "YOU'RE WEARING IT"
+              : have
+              ? `${k} = PUT IT ON`
+              : sk.mission
+              ? `FINISH ${sk.mission - mDone} MORE MISSIONS`
+              : bank >= sk.price
+              ? `${k} = BUY IT`
+              : `YOU NEED ${sk.price - bank} MORE GEMS`;
         }
       });
 
@@ -1932,11 +2521,47 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       text("BACK", W / 2, rowY(SHOP_BACK) + 4, backOn ? "#ffffff" : "#9ad19a");
 
       // what the picked row does, and the skin it would give you
-      text(info, 10, 120, "#b6ffb0", 8, "left");
+      text(info, 10, 124, "#b6ffb0", 8, "left");
       const show = shop.col === 1 && shop.row < SHOP_BACK && SKINS[shop.row] ? shop.row : skinIdx;
-      ctx.drawImage(fits[show].stand, W - 38, 108, 24, 36);
-      if (SKINS[show].fire) fireHair(W - 38, 108, clock);
+      ctx.drawImage(fitNow(show).stand, W - 38, 110, 24, 36);
+      if (SKINS[show].fire) fireHair(W - 38, 110, clock);
       text(touchRef.current ? "TAP = PICK   TAP AGAIN = BUY" : "ARROWS / CLICK = PICK   SPACE = BUY", W / 2 - 14, 140, "#6f9a6f");
+      // close button (top left)
+      ctx.fillStyle = "#4a1447";
+      ctx.fillRect(4, 2, 22, 12);
+      text("X", 15, 4, "#ffffff");
+    };
+
+    // THE MISSIONS: your 3 missions with a bar each, and how close the mission skin is
+    const drawMissionsScreen = () => {
+      ctx.fillStyle = "rgba(0,12,6,0.92)";
+      ctx.fillRect(0, 0, W, H);
+      text("MISSIONS", W / 2, 4, "#ffd24a");
+      text(`GEMS ${bank}`, W - 6, 4, GREEN, 8, "right");
+      mActive.forEach((a, k) => {
+        const m = MISSIONS[a.i];
+        const y = 22 + k * 27;
+        const v = Math.max(0, Math.min(m.n, missionValue(a)));
+        text(missionText(m), 12, y, "#ffffff", 8, "left");
+        text(`+${m.reward}`, W - 12, y, GREEN, 8, "right");
+        ctx.fillStyle = "#000";
+        ctx.fillRect(12, y + 11, 222, 7);
+        ctx.fillStyle = "#3a3a3a";
+        ctx.fillRect(13, y + 12, 220, 5);
+        ctx.fillStyle = "#ffd24a";
+        ctx.fillRect(13, y + 12, Math.round((220 * v) / m.n), 5);
+        text(`${v}/${m.n}`, W - 12, y + 10, "#b6ffb0", 8, "right");
+      });
+      // the skin you only get from missions
+      const sk = SKINS.find((x) => x.mission);
+      if (sk) {
+        const i = SKINS.indexOf(sk);
+        const have = owned.includes(sk.id);
+        text(`MISSIONS DONE: ${mDone}`, 12, 108, "#b6ffb0", 8, "left");
+        text(have ? `YOU HAVE THE ${sk.name} SKIN!` : `${sk.mission! - mDone} MORE = ${sk.name} SKIN`, 12, 120, "#ffd24a", 8, "left");
+        ctx.drawImage(fitNow(i).stand, W - 38, 102, 24, 36);
+      }
+      text(touchRef.current ? "TAP = BACK" : "SPACE = BACK", W / 2 - 14, 140, "#6f9a6f");
       // close button (top left)
       ctx.fillStyle = "#4a1447";
       ctx.fillRect(4, 2, 22, 12);
@@ -2010,7 +2635,16 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           if (s.boost <= 0) s.invuln = Math.max(s.invuln, 1.2); // a safe moment when the boost ends
         }
 
-        generate(s.dist + FAR + 5);
+        // (no new obstacles while BEARMANPIG is coming or fighting: the fight happens on a clear path)
+        if (s.boss.stage === "off") generate(s.dist + FAR + 5);
+        // MUSIC: one move per beat counts, the meter slowly empties if you stop moving on the beat
+        if (beatKick() < BEAT_WINDOW) s.beatUsed = false;
+        if (s.fever > 0) s.fever -= dt;
+        s.grooveT += dt;
+        if (s.grooveT > 3 && s.groove > 0) {
+          s.groove--;
+          s.grooveT = 0;
+        }
 
         // hits
         const myLane = Math.round(s.px / LANE);
@@ -2018,7 +2652,15 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           if (o.hit) continue;
           const d = o.at - s.dist;
           if (d > 0.3) break;
-          if (d < -0.3) continue;
+          if (d < -0.3) {
+            // got past it without touching it: missions count jumps and slides
+            if (!o.passed) {
+              o.passed = true;
+              if (o.kind === "root") missionEvent("jumps");
+              else if (o.kind === "branch") missionEvent("slides");
+            }
+            continue;
+          }
           if (o.kind === "rock" && o.lanes.includes(myLane) && s.jumpY < 0.42) stumble(o);
           else if (o.kind === "root" && s.jumpY < 0.22) stumble(o);
           else if (o.kind === "branch" && !(s.slide > 0 && s.jumpY < 0.3)) stumble(o);
@@ -2033,6 +2675,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           if (s.magnet > 0 || (g.lane === myLane && s.jumpY < 0.9)) {
             g.taken = true;
             s.gems += s.double > 0 ? 2 : 1;
+            if (s.fever > 0) s.bonus += s.double > 0 ? 2 : 1; // GROOVE: every gem gives a bonus gem too
             sfx.gem();
             const p = playerScreen();
             burst(p.x, p.y - 20, 5, ["#b6ff9e", "#3ee05a", "#fff"]);
@@ -2049,12 +2692,14 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           else if (sp.kind === "double") s.double = doubleSecs();
           else if (sp.kind === "boost") s.boost = boostSecs();
           else s.shield = shieldHits();
+          missionEvent("spells");
           sfx.spell();
           const p = playerScreen();
           burst(p.x, p.y - 20, 12, [SPELL_INFO[sp.kind].color, "#ffffff"]);
           s.pops.push({ x: p.x, y: p.y - 50, text: SPELL_INFO[sp.kind].name, life: 1.1, color: SPELL_INFO[sp.kind].color });
         }
         s.spells = s.spells.filter((sp) => sp.at > s.dist - 3);
+        if (s.mode === "running") bossStep(dt, myLane);
         // forget things behind us
         s.obs = s.obs.filter((o) => o.at > s.dist - 3);
         s.gemList = s.gemList.filter((g) => g.at > s.dist - 3);
@@ -2069,12 +2714,21 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           if (s.zones.length > 4) s.zones.shift();
           s.pops.push({ x: W / 2, y: 46, text: THEMES[ti].name, life: 2.2, color: THEMES[ti].title });
           sfx.zone();
+          // BOSS: BEARMANPIG attacks right where the new world begins (once the obstacles already on the path are behind you)
+          if (s.boss.stage === "off") {
+            s.boss.stage = "wait";
+            s.boss.at = s.dist + FAR + 7;
+            s.boss.zone = zone;
+            s.boss.t = 0;
+          }
         }
+        if (s.mode === "running") checkMissions();
       } else if (s.mode === "ready") {
         s.chase = 0.55 + Math.sin(clock * 1.5) * 0.1; // he's lurking
       }
 
-      const gotYou = s.mode === "caught" || (s.mode === "shop" && shop.from === "caught");
+      const gotYou =
+        s.mode === "caught" || (s.mode === "shop" && shop.from === "caught") || (s.mode === "missions" && missionsFrom === "caught");
       const target = gotYou ? 1.45 : s.chase;
       s.chaseVis += (target - s.chaseVis) * Math.min(1, dt * (s.mode === "caught" ? 5 : 2.5));
       s.mx += (s.px - s.mx) * Math.min(1, dt * 3);
@@ -2167,6 +2821,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       if (s.shake > 0) ctx.translate(Math.round((Math.random() - 0.5) * 4), Math.round((Math.random() - 0.5) * 4));
       drawFloor();
       drawSky(clock);
+      drawBossWarn();
       drawWorld(clock);
       drawMonster(clock);
       for (const p of s.parts) {
@@ -2182,7 +2837,16 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       for (const p of s.pops) text(p.text, p.x, p.y, p.color);
 
       if (s.mode === "running") {
+        // GROOVE: a golden frame around the picture that flashes with the beat
+        if (s.fever > 0) {
+          ctx.fillStyle = `rgba(255,210,74,${0.14 + Math.max(0, beatKick()) * 0.3})`;
+          ctx.fillRect(0, 0, W, 3);
+          ctx.fillRect(0, H - 3, W, 3);
+          ctx.fillRect(0, 3, 3, H - 6);
+          ctx.fillRect(W - 3, 3, 3, H - 6);
+        }
         drawHud();
+        drawExtraHud();
         drawSpellHud();
         drawSwipeHints();
       }
@@ -2190,7 +2854,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       if (s.mode === "ready") {
         ctx.fillStyle = "rgba(0,20,8,0.55)";
         ctx.fillRect(0, 0, W, H);
-        text(GAME_TITLE, W / 2, 12, GREEN, 16);
+        text(GAME_TITLE, W / 2, 12 - Math.round(Math.max(0, beatKick()) * 2), GREEN, 16); // (bounces to the music)
         drawFace(W / 2, 36, 2);
         text("RUN FROM", W / 2, 72, "#ffffff");
         text("BEARMANPIG!", W / 2, 83, PINK);
@@ -2201,6 +2865,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       }
 
       if (s.mode === "shop") drawShopScreen();
+      if (s.mode === "missions") drawMissionsScreen();
 
       if (s.mode === "caught") {
         const a = Math.min(0.7, s.t * 1.2);
@@ -2212,11 +2877,12 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
           text("GOT YOU!", W / 2, 71, "#ffffff");
           text(`SCORE ${s.score}`, W / 2, 88, GREEN);
           text(s.newBest ? "NEW BEST!" : `BEST ${best}`, W / 2, 100, s.newBest ? PINK : "#9ad19a");
-          text(`${Math.floor(s.dist)}M  ${s.gems} GEMS`, W / 2, 112, "#b6ffb0");
+          text(`${Math.floor(s.dist)}M  ${s.gems}${s.bonus ? `+${s.bonus}` : ""} GEMS`, W / 2, 112, "#b6ffb0");
           if (s.t > 0.9 && Math.floor(clock * 2) % 2 === 0) text(touchRef.current ? "TAP = AGAIN" : "SPACE = AGAIN", W / 2, 128, GREEN);
           drawShop();
         }
       }
+      if (fxShown()) drawFx();
     };
 
     const loop = (now: number) => {
@@ -2238,6 +2904,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       document.removeEventListener("visibilitychange", onHidden);
       inputRef.current = null;
       tapRef.current = null;
+      fxApi.current = null;
       try {
         ac?.close();
       } catch {}
@@ -2260,6 +2927,35 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     return dy > 0 ? "slide" : "jump";
   };
 
+  // a screen point in game pixels (the picture is fitted inside the canvas box)
+  const toGame = (cx: number, cy: number) => {
+    const c = canvasRef.current;
+    if (!c) return null;
+    const r = c.getBoundingClientRect();
+    const sc = Math.min(r.width / W, r.height / H);
+    return { x: (cx - r.left - (r.width - W * sc) / 2) / sc, y: (cy - r.top - (r.height - H * sc) / 2) / sc };
+  };
+  // FX speaker + slider: did this press land on them? (then it's not a swipe or a tap)
+  const fxPress = (cx: number, cy: number, id: number) => {
+    const g = toGame(cx, cy);
+    const what = g ? fxApi.current?.hit(g.x, g.y) : null;
+    if (!g || !what) return false;
+    if (what === "icon") fxApi.current?.toggle();
+    else {
+      fxDrag.current = id;
+      fxApi.current?.setFromY(g.y);
+    }
+    return true;
+  };
+  const fxMove = (cx: number, cy: number) => {
+    const g = toGame(cx, cy);
+    if (g) fxApi.current?.setFromY(g.y);
+  };
+  const fxEnd = () => {
+    fxDrag.current = -1;
+    fxApi.current?.done();
+  };
+
   // a tap / click at a screen point: inside the picture = tap that spot, outside = OK
   const tapAt = (cx: number, cy: number) => {
     const c = canvasRef.current;
@@ -2280,6 +2976,11 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     const start = (e: TouchEvent) => {
       if (swipe.current.on || onUi(e.target)) return;
       const t = e.changedTouches[0];
+      // the FX speaker / slider
+      if (fxDrag.current === -1 && fxPress(t.clientX, t.clientY, t.identifier)) {
+        if (e.cancelable) e.preventDefault();
+        return;
+      }
       if (!touchRef.current) {
         const r = canvasRef.current?.getBoundingClientRect();
         const M = 40;
@@ -2294,6 +2995,15 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       return null;
     };
     const move = (e: TouchEvent) => {
+      // dragging the FX slider
+      if (fxDrag.current >= 0) {
+        for (let i = 0; i < e.changedTouches.length; i++)
+          if (e.changedTouches[i].identifier === fxDrag.current) {
+            fxMove(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
+            if (e.cancelable) e.preventDefault();
+          }
+        return;
+      }
       const sw = swipe.current;
       if (!sw.on) return;
       const t = find(e);
@@ -2311,6 +3021,10 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       sw.fired = true;
     };
     const end = (e: TouchEvent) => {
+      if (fxDrag.current >= 0) {
+        for (let i = 0; i < e.changedTouches.length; i++) if (e.changedTouches[i].identifier === fxDrag.current) fxEnd();
+        return;
+      }
       const sw = swipe.current;
       if (!sw.on) return;
       const t = find(e);
@@ -2342,9 +3056,18 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       onPointerDown={(e) => {
         if (e.pointerType !== "mouse") return;
         e.stopPropagation();
+        // the FX speaker / slider
+        if (fxPress(e.clientX, e.clientY, -2)) {
+          if (fxDrag.current === -2) e.currentTarget.setPointerCapture(e.pointerId);
+          return;
+        }
         swipe.current = { x: e.clientX, y: e.clientY, on: true, fired: false, id: -1, last: "" };
       }}
       onPointerMove={(e) => {
+        if (e.pointerType === "mouse" && fxDrag.current === -2) {
+          fxMove(e.clientX, e.clientY);
+          return;
+        }
         const sw = swipe.current;
         if (e.pointerType !== "mouse" || !sw.on || sw.fired) return;
         const dir = swipeDir(e.clientX - sw.x, e.clientY - sw.y);
@@ -2355,12 +3078,19 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
       onPointerUp={(e) => {
         if (e.pointerType !== "mouse") return;
         e.stopPropagation();
+        if (fxDrag.current === -2) {
+          fxEnd();
+          return;
+        }
         const sw = swipe.current;
         if (sw.on && !sw.fired) tapAt(e.clientX, e.clientY);
         sw.on = false;
       }}
       onPointerCancel={(e) => {
-        if (e.pointerType === "mouse") swipe.current.on = false;
+        if (e.pointerType === "mouse") {
+          swipe.current.on = false;
+          if (fxDrag.current === -2) fxDrag.current = -1;
+        }
       }}
       style={{
         position: "absolute",
