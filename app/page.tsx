@@ -14,6 +14,7 @@ const HexGame = dynamic(() => import("./components/HexGame"), { ssr: false });
 const MazeGame = dynamic(() => import("./components/MazeGame"), { ssr: false });
 const SuperGame = dynamic(() => import("./components/SuperGame"), { ssr: false });
 const JungleGame = dynamic(() => import("./components/JungleGame"), { ssr: false });
+const JetGame = dynamic(() => import("./components/JetGame"), { ssr: false });
 const HellGame = dynamic(() => import("./components/HellGame"), { ssr: false });
 const HellPad = dynamic(() => import("./components/HellPad"), { ssr: false });
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
@@ -173,6 +174,7 @@ const ITEM_ICONS: Record<string, string> = {
   "Pink Bird": "/icons/pinkbird.gif",
   "Pink Snake": "/icons/pinksnake.gif",
   "Pink Jungle": "/icons/pinkjungle.gif",
+  "Pink Jetpack": "/icons/pinkjet.gif",
   "Pink Hell": "/icons/pinkhell.gif",
   Back: "/icons/arrow.gif",
 };
@@ -212,8 +214,8 @@ const TRACKS: { title: string; file: string; bpm?: number; offset?: number; link
   { title: "gods psp (ft. TOMBFELL)", file: "/music/09.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee/gods-psp" },
 ];
 
-// PINKMANE VOID beats. These 5 join your songs in the music player while you're playing ANY game;
-// they leave the player again when you go back to the menu. Put the mp3 files in public/music/ with exactly these names
+// GAME BEATS. While you're playing ANY game the music player holds only ENDER PEARLS, your first beat and these 5 beats
+// (see GAME_TRACKS below); your other songs come back when you go back to the menu. Put the mp3 files in public/music/ with exactly these names
 // (until a file is there, that beat is simply skipped). Rename them, set the real bpm, add a SoundCloud link whenever you like.
 const VOID_BEATS: typeof TRACKS = [
   { title: "pinkmane's random ass beat 2", file: "/music/beat-2.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
@@ -222,6 +224,13 @@ const VOID_BEATS: typeof TRACKS = [
   { title: "pinkmane's random ass beat 5", file: "/music/beat-5.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
   { title: "pinkmane's random ass beat 6", file: "/music/beat-6.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
 ];
+
+// MUSIC WHILE A GAME IS OPEN: the first GAME_KEEP entries of TRACKS (ender pearls + pinkmane's random ass beat), then the beats.
+// To keep more or fewer of your own songs in the games, change GAME_KEEP (they are taken from the top of TRACKS).
+// !! If another chat gives you a new page.tsx and the songs are back in the games, this block and the two places
+// !! that use GAME_TRACKS / GAME_KEEP further down are what went missing.
+const GAME_KEEP = 2;
+const GAME_TRACKS: typeof TRACKS = [...TRACKS.slice(0, GAME_KEEP), ...VOID_BEATS];
 
 // RELEASES (iPod: Socials > Releases). Newest first. The highlighted one shows its cover on the iPod screen,
 // and clicking the cover (or pressing OK / Enter) opens its link.
@@ -273,7 +282,7 @@ const STRUCTURED_DATA = {
 // Clicking "Games" on the iPod turns on the PSP with this list. The highlighted game shows a little moving preview
 // (public/previews/<file>.gif, a few seconds recorded from the real game) with what it is and how to play.
 // The order here = the order on the PSP. Rename / reorder freely; "name" must match ITEM_ICONS for the icon.
-type GameId = "pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle" | "hell";
+type GameId = "pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle" | "hell" | "jet";
 const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; how: string; psp: boolean }[] = [
   {
     name: "Pinkmane Void",
@@ -297,6 +306,14 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     preview: "/previews/hell.gif",
     blurb: "Demons pour out of the portals in waves. Grab the shotgun and blast them all, BEARMANPIG waits every 5th wave!",
     how: "WASD = move · mouse = aim · click = shoot · phone: joystick + FIRE",
+    psp: true,
+  },
+  {
+    name: "Pink Jetpack",
+    id: "jet",
+    preview: "/previews/jet.gif",
+    blurb: "DEMO. Fly through the night city on a jetpack that shoots weed leaves. Dodge the zappers and the rockets!",
+    how: "hold space / hold the screen = fly up · let go = fall",
     psp: true,
   },
   {
@@ -439,7 +456,13 @@ function GamePicker({
           <>
             <button className="gp-preview" onClick={() => onOpen(selected)} onMouseDown={(e) => e.preventDefault()} aria-label={`Play ${game.name}`}>
               {/* key = the game, so the GIF starts from its first frame when you move to it */}
-              <img key={game.id} src={game.preview} alt={`${game.name} preview`} draggable={false} />
+              <img
+                key={game.id}
+                src={game.preview}
+                alt={`${game.name} preview`}
+                draggable={false}
+                onError={(e) => (e.currentTarget.style.visibility = "hidden")} // a missing preview file: leave the space empty
+              />
             </button>
             <div className="gp-title">
               {game.name.toUpperCase()}
@@ -963,7 +986,8 @@ export default function Home() {
   // The song list. In PINKMANE VOID on the handheld the VOID_BEATS are added after your songs (your songs keep their places in the list).
   // (now in EVERY game, on the PSP and on the iPod: the beats join the player while any game is open)
   const inVoid = playing;
-  const tracks = inVoid ? [...TRACKS, ...VOID_BEATS] : TRACKS;
+  // (in a game: only ENDER PEARLS + the beats. In the menus: all your songs.)
+  const tracks = inVoid ? GAME_TRACKS : TRACKS;
   const tracksRef = useRef(tracks);
   tracksRef.current = tracks;
   // PHONES + TABLETS: on a phone or tablet, Pink Maze and Pinkmane Void get their own full-screen
@@ -1106,9 +1130,11 @@ export default function Home() {
       .catch(() => {});
   };
 
-  // Leaving PINKMANE VOID: the beats leave the player too. If one is on, go back to your first song (and keep it paused if it was paused).
+  // Opening or leaving a game swaps the song list (menus: all your songs, games: ENDER PEARLS + the beats).
+  // The first GAME_KEEP songs are in both lists, so they just keep playing. Anything else that's on isn't in the new list:
+  // go to the first song of the new list (and keep it paused if the music was paused).
   useEffect(() => {
-    if (inVoid || trackRef.current < TRACKS.length) return;
+    if (trackRef.current < GAME_KEEP) return;
     const audio = songRef.current;
     if (audio && !audio.paused) {
       loadAndPlay(0);
@@ -1469,7 +1495,7 @@ export default function Home() {
       // In Pink Snake the arrow keys steer (the game handles them itself)
       if (
         playing &&
-        (activeGame === "snake" || activeGame === "hex" || activeGame === "maze" || activeGame === "super" || activeGame === "jungle" || activeGame === "hell") &&
+        (activeGame === "snake" || activeGame === "hex" || activeGame === "maze" || activeGame === "super" || activeGame === "jungle" || activeGame === "hell" || activeGame === "jet") &&
         e.key.startsWith("Arrow")
       )
         return;
@@ -1498,6 +1524,8 @@ export default function Home() {
     const handleWheel = (e: WheelEvent) => {
       // In Pink Hell the game uses the mouse wheel itself (switch weapon)
       if (playing && activeGame === "hell") return;
+      // Pink Jetpack has nothing to spin
+      if (playing && activeGame === "jet") return;
       // In Pink Vortex the mouse wheel spins the paddle, in Pink Snake it turns the snake
       if (playing && activeGame === "vortex") {
         spinRef.current += e.deltaY > 0 ? 14 : -14;
@@ -1911,6 +1939,14 @@ activeGame === "hell" ? (
                   fontFamily={pixelFont.style.fontFamily}
                   muted={isMuted}
                 />
+              ) : activeGame === "jet" ? (
+                <JetGame
+                  actionSignal={jumpSignal}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                  touch={isTouch}
+                  beatRef={beatRef}
+                />
               ) : activeGame === "jungle" ? (
                 <JungleGame
                   actionSignal={jumpSignal}
@@ -1918,6 +1954,7 @@ activeGame === "hell" ? (
                   fontFamily={pixelFont.style.fontFamily}
                   muted={isMuted}
                   touch={isTouch}
+                  beatRef={beatRef}
                 />
               ) : activeGame === "maze" ? (
                 <MazeGame
@@ -2449,6 +2486,8 @@ activeGame === "hell" ? (
                   ? "PINK JUNGLE"
                   : activeGame === "hell"
                   ? "PINK HELL"
+                  : activeGame === "jet"
+                  ? "PINK JETPACK"
                   : "PINK RUN"
                 : menu === "main"
                 ? "PINKMANE"
@@ -2785,6 +2824,8 @@ activeGame === "hell" ? (
                 ? "swipe to change lane / jump / duck · tap to jump · PAUSE top left"
                 : activeGame === "hell"
                 ? "joystick = move · hold FIRE = shoot (auto aim) · PAUSE top left"
+                : activeGame === "jet"
+                ? "hold the screen to fly up · let go to fall · PAUSE top left"
                 : "tap screen or OK to jump · ◀▶ songs"
               : "swipe wheel to scroll · ◀▶ songs"}
           </span>
@@ -2889,7 +2930,7 @@ activeGame === "hell" ? (
             <button className="tp-small" onClick={goBack} aria-label="Leave the game">
               EXIT
             </button>
-            {!gamePicker && (activeGame === "super" || activeGame === "jungle" || activeGame === "hell") && (
+            {!gamePicker && (activeGame === "super" || activeGame === "jungle" || activeGame === "hell" || activeGame === "jet") && (
               <button className="tp-small" onClick={() => tapKey("Escape")} aria-label="Pause">
                 PAUSE
               </button>
@@ -2916,7 +2957,7 @@ activeGame === "hell" ? (
 
           {/* Left thumb. Pink Jungle: nothing (you swipe). Pinkmane Void: two squares, walk left and walk right (slide between them without lifting).
               Pink Maze needs all four directions, so it keeps the round pad. */}
-          {gamePicker || activeGame === "jungle" ? null : activeGame === "hell" ? (
+          {gamePicker || activeGame === "jungle" || activeGame === "jet" ? null : activeGame === "hell" ? (
             // Pink Hell: a pink joystick on the left, a big FIRE button + GUN on the right (components/HellPad.tsx)
             <HellPad onWeapon={() => tapKey("q")} />
           ) : activeGame === "super" ? (
@@ -2988,7 +3029,7 @@ activeGame === "hell" ? (
             </button>
           )}
           {/* Pink Jungle on phones has no thumb buttons: you swipe on the screen instead */}
-          {!gamePicker && activeGame !== "jungle" && activeGame !== "hell" && (
+          {!gamePicker && activeGame !== "jungle" && activeGame !== "hell" && activeGame !== "jet" && (
           <button
             className={`tp-btn tp-a ${tpAOn ? "tp-on" : ""}`}
             aria-label={activeGame === "super" ? "Jump" : "Start"}
@@ -3352,6 +3393,12 @@ activeGame === "hell" ? (
                   [["ESC"], "pause"],
                   [["BACKSPACE"], "menu"],
                 ]
+              : activeGame === "jet"
+              ? [
+                  [["SPACE", "W", "↑", "MOUSE"], "hold = fly"],
+                  [["ESC"], "pause"],
+                  [["BACKSPACE"], "menu"],
+                ]
               : activeGame === "vortex"
               ? [
                   [["MOUSE WHEEL", "↑", "↓"], "spin"],
@@ -3406,6 +3453,8 @@ activeGame === "hell" ? (
               ? "d-pad / stick = walk · bottom button = jump · left button = fire · d-pad down = go into the Void · right button = back"
               : activeGame === "jungle"
               ? "d-pad left/right = change lane · up = jump · down = slide · bottom button = start / jump · right button = back"
+              : activeGame === "jet"
+              ? "hold d-pad up or hold the screen = fly up · let go = fall · bottom button = start · right button = back"
               : activeGame === "vortex"
               ? "d-pad up/down or drag the screen = spin · bottom button = launch · right button = back"
               : activeGame === "snake"
