@@ -156,6 +156,7 @@ const ITEM_ICONS: Record<string, string> = {
   Releases: "/icons/releases.gif",
   SoundCloud: "/icons/soundcloud.gif",
   Spotify: "/icons/spotify.gif",
+  YouTube: "/icons/youtube.gif",
   "Apple Music": "/icons/apple-music.gif",
   Bandcamp: "/icons/bandcamp.gif",
   Instagram: "/icons/instagram.gif",
@@ -248,6 +249,7 @@ const PHONE_ROWS = 4;
 // SEO: official profile links, readable by search engines
 const ARTIST_LINKS = [
   { label: "PINKMANE on Spotify", url: "https://open.spotify.com/artist/1fH0OQSGa851zXYDKeWvnb" },
+  { label: "PINKMANE on YouTube", url: "https://www.youtube.com/@PINKMANEEE" },
   { label: "PINKMANE on Apple Music", url: "https://music.apple.com/us/artist/pinkmane/1879203655" },
   { label: "PINKMANE on SoundCloud", url: "https://soundcloud.com/pinkmanee" },
   { label: "PINKMANE on Bandcamp", url: "https://pinkmane.bandcamp.com/" },
@@ -263,7 +265,7 @@ const STRUCTURED_DATA = {
   url: "https://pinkmane.site",
   genre: ["Cloud rap", "Trap"],
   description:
-    "PINKMANE is an artist and producer who codes and makes music in their free time. Cloud rap and trap, made mostly with Serum 2. Music on Spotify, Apple Music, SoundCloud and Bandcamp.",
+    "PINKMANE is an artist and producer who codes and makes music in their free time. Cloud rap and trap, made mostly with Serum 2. Music on Spotify, YouTube, Apple Music, SoundCloud and Bandcamp.",
   sameAs: ARTIST_LINKS.map((link) => link.url),
 };
 
@@ -1057,7 +1059,7 @@ export default function Home() {
 
   const menus = {
     main: ["Music", "Socials", "Merch", "Games"],
-    music: ["SoundCloud", "Spotify", "Apple Music", "Bandcamp", "Back"],
+    music: ["SoundCloud", "Spotify", "YouTube", "Apple Music", "Bandcamp", "Back"],
     socials: ["Instagram", "Twitch", "Releases", "Back"],
     releases: [...RELEASES.map((r) => r.name), "Back"],
     // Games: the main game first, the rest live one step deeper in Mini Games
@@ -1311,6 +1313,9 @@ export default function Home() {
           "https://open.spotify.com/artist/1fH0OQSGa851zXYDKeWvnb?si=Q4FugsHUSbup63vp4j0XEA",
           "_blank"
         );
+      }
+      if (item === "YouTube") {
+        window.open("https://www.youtube.com/@PINKMANEEE", "_blank");
       }
       if (item === "SoundCloud") {
         window.open("https://soundcloud.com/pinkmanee", "_blank");
@@ -2255,7 +2260,7 @@ activeGame === "hell" ? (
         <p>
           PINKMANE is an artist and producer who codes and makes music in their
           free time. Cloud rap and trap, made mostly with Serum 2. Releases include ENDER PEARLS and TOPSHELF.
-          Stream PINKMANE on Spotify, Apple Music and SoundCloud, get the music
+          Stream PINKMANE on Spotify, YouTube, Apple Music and SoundCloud, get the music
           on Bandcamp, follow on Instagram and Twitch, and shop official merch.
         </p>
         <nav aria-label="PINKMANE links">
