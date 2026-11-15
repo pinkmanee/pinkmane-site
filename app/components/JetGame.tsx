@@ -2,6 +2,21 @@
 
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
+import {
+  type ShopRow,
+  type ShopHooks,
+  type ShopBox,
+  newShopUi,
+  shopMove,
+  shopAct,
+  shopTap,
+  drawPinkShop,
+  drawSidePanels,
+  panelShopHit,
+  PAUSE_ROWS,
+  drawPauseMenu,
+  pauseTapRow,
+} from "./PinkShop";
 
 // PINK JETPACK (DEMO): an endless side-scrolling jetpack game.
 // Pinkmane flies through the night city. His jetpack shoots WEED LEAVES downwards, that's what pushes him up.
@@ -14,7 +29,9 @@ import { ScorePanel, type ScoreApi } from "./Scoreboard";
 // and a good score goes on the online Top 10 (the same box as PINK JUNGLE, board id "jet").
 // SOUND EFFECTS: the speaker icon top left turns them on / off (or press M), the little slider under it sets how loud
 // (drag it, or press - and +). Your choice is saved in the browser.
-// This is a first demo: no shop and no skins yet.
+// PINK SHOP (the same shop screen as the other games, see PinkShop.ts): S / DOWN or tap SHOP on the start / game over screen,
+//   or SHOP in the pause menu. Gems you collect are saved and spent there on outfits, jetpack trails and upgrades.
+// PAUSE MENU: RESUME / RESTART / SHOP / GAME MENU (back to the PSP game list).
 
 type Props = {
   // Goes up by 1 every time the player presses OK / A on the handheld (= start, or a short puff of the jetpack)
@@ -36,6 +53,9 @@ const BEST_KEY = "pinkmane-jet-best";
 // Where the sound effects settings are saved in the browser
 const FX_KEY = "pinkmane-jet-fx"; // "on" / "off"
 const FX_VOL_KEY = "pinkmane-jet-fx-volume"; // 0 to 1
+// Where your saved gems and the shop things are kept in the browser
+const BANK_KEY = "pinkmane-jet-gems";
+const SHOP_KEY = "pinkmane-jet-shop";
 // Your pixel dude, the same picture PINKMANE VOID uses (walking frames side by side, each 24 x 35, he looks to the right).
 // If the picture can't be loaded, a simple drawn Pinkmane is used instead.
 const DUDE_IMAGE = "/game/pinkdude.png";
@@ -59,6 +79,45 @@ const LEAF_EVERY = 0.035; // seconds between two weed leaves while you fly (smal
 const LEAF_FALL = 170; // how fast the leaves fall (smaller = they stay on the screen longer)
 const PIG_GEMS = 3; // bonus gems for hitting a piglet with a leaf
 const PIG_EVERY = 240; // about how many pixels between two piglets (smaller = more piglets)
+
+// ---------- PINK SHOP ----------
+// OUTFITS: price 0 = free. file = the outfit picture PINKMANE VOID uses (the same layout as pinkdude.png).
+// If a file is missing, the classic picture is repainted with the 3 colours in recolor (dark, main, light) instead.
+// ghost = drawn a bit see-through.
+const OUTFITS: { id: string; name: string; price: number; file?: string; recolor?: [string, string, string]; ghost?: boolean }[] = [
+  { id: "classic", name: "CLASSIC PINKMANE", price: 0 },
+  { id: "trippy", name: "TRIPPY PINKMANE", price: 150, file: "/game/pinkdude-pinkfit.png", recolor: ["#a8287e", "#ff5fd2", "#ffb8ee"] },
+  { id: "icy", name: "ICY PINKMANE", price: 250, file: "/game/pinkdude-icy.png", recolor: ["#2a9ad0", "#8fd9ff", "#e8f8ff"] },
+  { id: "ghost", name: "GHOSTY PINKMANE", price: 350, file: "/game/pinkdude-ghost.png", recolor: ["#7ab8a8", "#bfe9d8", "#f0fff8"], ghost: true },
+  { id: "toxic", name: "TOXIC PINKMANE", price: 450, recolor: ["#2c8a33", "#6fdc5a", "#b8ff9a"] },
+  { id: "bloody", name: "BLOODY PINKMANE", price: 550, recolor: ["#7a0c0c", "#d21e1e", "#ff6a6a"] },
+  { id: "shadow", name: "SHADOW PINKMANE", price: 650, recolor: ["#1e1230", "#3b2456", "#7a5aa8"] },
+  { id: "gold", name: "GOLD PINKMANE", price: 900, recolor: ["#b8860b", "#ffd700", "#fff3a0"] },
+];
+// JETPACK TRAILS: what comes out of the jetpack (they hit piglets just like the weed leaves)
+const TRAILS: { id: string; name: string; price: number; info: [string, string] }[] = [
+  { id: "leaves", name: "WEED LEAVES", price: 0, info: ["THE CLASSIC: WEED LEAVES", "THEY POP THE PIGLETS"] },
+  { id: "fire", name: "FIRE", price: 120, info: ["YOUR JETPACK SPITS FLAMES", "THEY POP THE PIGLETS TOO"] },
+  { id: "ice", name: "ICE", price: 180, info: ["ICE CRYSTALS AND FROSTY LEAVES", "THEY POP THE PIGLETS TOO"] },
+  { id: "rainbow", name: "RAINBOW", price: 260, info: ["LEAVES IN EVERY COLOUR", "THEY POP THE PIGLETS TOO"] },
+  { id: "gold", name: "GOLD LEAVES", price: 400, info: ["SOLID GOLD WEED LEAVES", "THEY POP THE PIGLETS TOO"] },
+];
+// UPGRADES: one price per level
+const UPGRADES: { id: "magnet" | "shield" | "pigs"; name: string; prices: number[]; info: [string, string] }[] = [
+  { id: "magnet", name: "GEM MAGNET", prices: [60, 150, 300], info: ["PULLS NEARBY GEMS TO YOU", "A BIGGER PULL EVERY LEVEL"] },
+  { id: "shield", name: "SHIELD", prices: [120, 300], info: ["BLOCKS ONE HIT EVERY RUN", "LEVEL 2 BLOCKS TWO HITS"] },
+  { id: "pigs", name: "PIGGY BANK", prices: [50, 120, 250], info: ["MORE GEMS FROM EVERY PIGLET", "+1 GEM PER PIGLET EACH LEVEL"] },
+];
+const MAGNET_RANGE = [0, 22, 34, 48]; // how far the magnet reaches at each level (pixels)
+const SHOP_ROWS: ShopRow[] = [
+  { kind: "head", label: "OUTFITS" },
+  ...OUTFITS.map((o): ShopRow => ({ kind: "item", id: `outfit:${o.id}`, name: o.name, prices: [o.price], wear: true, info: [o.name, ""] })),
+  { kind: "head", label: "JETPACK TRAILS" },
+  ...TRAILS.map((t): ShopRow => ({ kind: "item", id: `trail:${t.id}`, name: t.name, prices: [t.price], wear: true, info: t.info })),
+  { kind: "head", label: "UPGRADES" },
+  ...UPGRADES.map((u): ShopRow => ({ kind: "item", id: `up:${u.id}`, name: u.name, prices: u.prices, info: u.info })),
+  { kind: "back" },
+];
 
 // ---------- Screen ----------
 // wide picture, the same shape as PINK JUNGLE, so it fills the PINKMANE handheld screen
@@ -91,6 +150,12 @@ const ROOF = "#1c0e36"; // the ceiling
 const LEAF_MAP = ["...G...", ".G.G.G.", "..GLG..", "GGLLLGG", "..GLG..", ".G.d.G.", "...d..."];
 const LEAF_COLORS: Record<string, string> = { G: "#3ee05a", L: "#b6ff9e", d: "#1d6b2a" };
 const LEAF_COLORS_DARK: Record<string, string> = { G: "#2c8a33", L: "#3ee05a", d: "#1d6b2a" };
+// the FIRE trail: a little flame (5 x 7)
+const FLAME_MAP = ["..Y..", ".YYY.", ".YOY.", "YOOOY", "YORoY", ".ORO.", "..R.."];
+const FLAME_COLORS: Record<string, string> = { Y: "#ffe34a", O: "#ff8a1a", R: "#e0301a", o: "#fff3b0" };
+// the ICE trail: an ice crystal (5 x 5)
+const ICE_MAP = ["..W..", "W.W.W", ".WCW.", "W.W.W", "..W.."];
+const ICE_COLORS: Record<string, string> = { W: "#e8f8ff", C: "#6ae0ff" };
 // a piglet (11 x 8), looking to the left
 const PIG_MAP = [".PP....PP..", "PPPPPPPPPP.", "PKPPPPPPPPc", "NNPPPPPPPP.", "NNPPPPPPPP.", ".PPPPPPPPP.", ".P.P..P.P..", ".A.A..A.A.."];
 const PIG_COLORS: Record<string, string> = { P: "#ff8fb8", N: "#ff5f9a", K: "#111111", c: "#ff5f9a", A: "#8a3a5a" };
@@ -155,7 +220,7 @@ type Gem = { x: number; y: number; taken: boolean };
 type Pig = { x: number; dir: number; dead: boolean };
 // A rocket is on the SCREEN, not in the world: warn = the ! follows you, lock = the ! stops and blinks fast, fly = it's coming
 type Rocket = { stage: "warn" | "lock" | "fly"; t: number; x: number; y: number };
-type Leaf = { x: number; y: number; vx: number; vy: number; dark: boolean; wob: number };
+type Leaf = { x: number; y: number; vx: number; vy: number; pic: HTMLCanvasElement; wob: number };
 type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string };
 type Popup = { x: number; y: number; text: string; life: number; color: string };
 type Mode = "ready" | "running" | "dead";
@@ -180,6 +245,8 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
   const fxTapRef = useRef<((x: number, y: number) => boolean) | null>(null);
   const fxDragRef = useRef<((y: number) => void) | null>(null);
   const fxDragging = useRef(false);
+  // true while the shop or the pause menu is open (a tap outside the picture then does nothing, instead of flying / buying)
+  const menuOpenRef = useRef<(() => boolean) | null>(null);
 
   // OK / A from the page = start, or a short puff while flying.
   // (SPACE also arrives here, but the game already handles the keyboard itself, so that one is skipped.)
@@ -201,12 +268,57 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
 
     // ---------- sprites ----------
     const leafImg = [buildMap(LEAF_MAP, LEAF_COLORS), buildMap(LEAF_MAP, LEAF_COLORS_DARK)];
+    // the pictures each jetpack trail shoots out (one is picked at random for every particle)
+    const recolorLeaf = (G: string, L: string, d: string) => buildMap(LEAF_MAP, { G, L, d });
+    const trailPics: Record<string, HTMLCanvasElement[]> = {
+      leaves: leafImg,
+      fire: [buildMap(FLAME_MAP, FLAME_COLORS), buildMap(FLAME_MAP, { ...FLAME_COLORS, Y: "#ffd24a", o: "#ffffff" })],
+      ice: [buildMap(ICE_MAP, ICE_COLORS), recolorLeaf("#6ae0ff", "#e8f8ff", "#2a9ad0"), recolorLeaf("#8fd9ff", "#ffffff", "#2a9ad0")],
+      rainbow: ["#ff3b3b", "#ffa23a", "#ffe34a", "#3ee05a", "#6ae0ff", "#b46aff"].map((c) => recolorLeaf(c, "#ffffff", "#111111")),
+      gold: [recolorLeaf("#ffd24a", "#fff3b0", "#b8860b"), recolorLeaf("#e0b020", "#ffd24a", "#8a6a0b")],
+    };
     const pigImg = buildMap(PIG_MAP, PIG_COLORS);
     const drawnDude = [buildDude(false), buildDude(true)];
     let dudeImg: HTMLImageElement | null = null;
+    // the outfits: their own picture if it loads, otherwise the classic picture repainted
+    const outfitPics: Record<string, CanvasImageSource | null> = {};
+    const repaint = (src: HTMLImageElement, cols: [string, string, string]) => {
+      const c = document.createElement("canvas");
+      c.width = src.width;
+      c.height = src.height;
+      const g = c.getContext("2d")!;
+      g.drawImage(src, 0, 0);
+      const d = g.getImageData(0, 0, c.width, c.height);
+      const a = d.data;
+      const rgb = cols.map((h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]);
+      for (let i = 0; i < a.length; i += 4) {
+        const r = a[i];
+        const gg = a[i + 1];
+        const b = a[i + 2];
+        if (a[i + 3] === 0 || !(r > 120 && b > 100 && gg < 140 && r - gg > 50)) continue; // only the pink parts (the hair)
+        const l = (r + gg + b) / 765;
+        const pick = rgb[l < 0.45 ? 0 : l > 0.75 ? 2 : 1];
+        a[i] = pick[0];
+        a[i + 1] = pick[1];
+        a[i + 2] = pick[2];
+      }
+      g.putImageData(d, 0, 0);
+      return c;
+    };
     const img = new Image();
     img.onload = () => {
-      if (img.width >= SW * 2 && img.height >= SH) dudeImg = img;
+      if (img.width < SW * 2 || img.height < SH) return;
+      dudeImg = img;
+      for (const o of OUTFITS) {
+        if (o.recolor && !outfitPics[o.id]) outfitPics[o.id] = repaint(img, o.recolor);
+        if (o.file) {
+          const own = new Image();
+          own.onload = () => {
+            if (own.width >= SW * 2 && own.height >= SH) outfitPics[o.id] = own;
+          };
+          own.src = o.file;
+        }
+      }
     };
     img.src = DUDE_IMAGE;
 
@@ -286,6 +398,16 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
         tone(110, 30, 0.6, "square", 0.08, 0.04);
       },
       click: () => tone(420, 380, 0.04, "square", 0.03),
+      buy: () => {
+        tone(520, 1040, 0.1, "square", 0.06);
+        tone(780, 1560, 0.1, "square", 0.06, 0.1);
+        tone(1040, 2080, 0.2, "square", 0.06, 0.2);
+      },
+      no: () => tone(200, 120, 0.18, "square", 0.06),
+      shield: () => {
+        tone(900, 300, 0.18, "triangle", 0.09);
+        tone(1400, 700, 0.1, "square", 0.04, 0.03);
+      },
     };
 
     // ---------- best score ----------
@@ -294,8 +416,40 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       best = Number(localStorage.getItem(BEST_KEY)) || 0;
     } catch {}
 
+    // ---------- saved gems + shop ----------
+    let bank = 0;
+    let owned: string[] = []; // shop ids of the outfits + trails you bought
+    const lv = { magnet: 0, shield: 0, pigs: 0 };
+    let outfit = "classic";
+    let trail = "leaves";
+    try {
+      bank = Math.max(0, Math.floor(Number(localStorage.getItem(BANK_KEY)) || 0));
+      const d = JSON.parse(localStorage.getItem(SHOP_KEY) || "null") as {
+        owned?: string[];
+        lv?: Record<string, number>;
+        outfit?: string;
+        trail?: string;
+      } | null;
+      if (d) {
+        if (Array.isArray(d.owned)) owned = d.owned.filter((x) => typeof x === "string");
+        for (const u of UPGRADES) lv[u.id] = Math.max(0, Math.min(u.prices.length, Math.floor(Number(d.lv?.[u.id]) || 0)));
+        if (d.outfit && OUTFITS.some((o) => o.id === d.outfit && (o.price === 0 || owned.includes(`outfit:${o.id}`)))) outfit = d.outfit;
+        if (d.trail && TRAILS.some((t) => t.id === d.trail && (t.price === 0 || owned.includes(`trail:${t.id}`)))) trail = d.trail;
+      }
+    } catch {}
+    const saveShop = () => {
+      try {
+        localStorage.setItem(BANK_KEY, String(bank));
+        localStorage.setItem(SHOP_KEY, JSON.stringify({ owned, lv, outfit, trail }));
+      } catch {}
+    };
+    const outfitDef = () => OUTFITS.find((o) => o.id === outfit) ?? OUTFITS[0];
+    // the picture to draw for an outfit (a canvas / image with the 24 x 35 frames side by side, or the drawn one)
+    const outfitPic = (id: string) => outfitPics[id] ?? dudeImg;
+
     // ---------- game state ----------
-    const pause = { on: false };
+    const pause = { on: false, row: 0 };
+    const shop = { open: false, from: "ready" as "ready" | "dead" | "pause", ui: newShopUi(SHOP_ROWS) };
     const s = {
       mode: "ready" as Mode,
       t: 0, // seconds in this mode
@@ -322,6 +476,8 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       leaves: [] as Leaf[],
       parts: [] as Particle[],
       pops: [] as Popup[],
+      shield: 0, // hits the SHIELD upgrade can still block this run
+      invuln: 0, // seconds you can't be hit (just after the shield saved you)
     };
     const meters = () => Math.floor(s.scroll / 10);
     const flying = () => s.mode === "running" && (hold.key || hold.mouse || hold.touch || s.puff > 0);
@@ -354,15 +510,116 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       s.leaves = [];
       s.parts = [];
       s.pops = [];
+      s.shield = lv.shield;
+      s.invuln = 0;
       // a little line of gems to start with
       for (let i = 0; i < 8; i++) s.gemList.push({ x: 150 + i * 12, y: 80, taken: false });
       sfx.start();
     };
 
-    pressRef.current = () => {
-      if (pause.on) {
+    // ---------- the shop + pause menu ----------
+    const openShop = (from: "ready" | "dead" | "pause") => {
+      shop.open = true;
+      shop.from = from;
+      shop.ui.msg = "";
+      sfx.click();
+    };
+    const closeShop = () => {
+      shop.open = false;
+      sfx.click();
+    };
+    const shopHooks: ShopHooks = {
+      money: () => bank,
+      moneyName: "GEMS",
+      icon: (c, x, y) => gemIcon(c, x, y),
+      level: (id) => {
+        const [kind, key] = id.split(":");
+        if (kind === "up") return lv[key as keyof typeof lv] ?? 0;
+        const free = kind === "outfit" ? OUTFITS.find((o) => o.id === key)?.price === 0 : TRAILS.find((t) => t.id === key)?.price === 0;
+        return free || owned.includes(id) ? 1 : 0;
+      },
+      worn: (id) => id === `outfit:${outfit}` || id === `trail:${trail}`,
+      buy: (id, price) => {
+        bank -= price;
+        const [kind, key] = id.split(":");
+        if (kind === "up") lv[key as keyof typeof lv]++;
+        else {
+          owned.push(id);
+          if (kind === "outfit") outfit = key;
+          else trail = key;
+        }
+        saveShop();
+      },
+      wear: (id) => {
+        const [kind, key] = id.split(":");
+        if (kind === "outfit") outfit = key;
+        else trail = key;
+        saveShop();
+      },
+      preview: (c, id, box, t) => drawPreview(c, id, box, t),
+      sound: (w) => (w === "buy" ? sfx.buy() : w === "no" ? sfx.no() : sfx.click()),
+    };
+    const shopOk = () => {
+      if (shopAct(SHOP_ROWS, shop.ui, shopHooks) === "close") closeShop();
+    };
+    // GAME MENU: back to the PSP game list (the gems from the run you left are kept)
+    const toMenu = () => {
+      boardRef.current?.hide();
+      runId++;
+      if (s.mode === "running") {
+        bank += s.gems;
+        saveShop();
+      }
+      pause.on = false;
+      s.mode = "ready";
+      s.t = 0;
+      s.zaps = [];
+      s.rockets = [];
+      s.gemList = [];
+      s.pigs = [];
+      s.leaves = [];
+      s.parts = [];
+      s.pops = [];
+      s.y = FLOOR - SH;
+      s.vy = 0;
+      s.rot = 0;
+      s.speed = START_SPEED;
+      s.puff = 0;
+      // then leave to the PSP game list, the same way VOID's pause HOME does
+      // (one tiny wait, so the page is listening when the key arrives)
+      window.setTimeout(() => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace" }));
+      }, 0);
+    };
+    const pauseChoose = () => {
+      const pick = PAUSE_ROWS[pause.row];
+      if (pick === "RESUME") {
         pause.on = false;
         sfx.click();
+      } else if (pick === "RESTART") {
+        pause.on = false;
+        reset();
+      } else if (pick === "SHOP") openShop("pause");
+      else toMenu();
+    };
+    const setPause = (on: boolean) => {
+      if (s.mode !== "running") return;
+      pause.on = on;
+      pause.row = 0;
+      letGo();
+      sfx.click();
+    };
+    // the shop can be opened from the start screen, or the game over screen once the Top 10 box is closed
+    const canOpenShop = () => !boardRef.current?.busy() && (s.mode === "ready" || (s.mode === "dead" && s.t > 0.8));
+
+    menuOpenRef.current = () => shop.open || pause.on;
+    pressRef.current = () => {
+      if (shop.open) {
+        shopOk();
+        return;
+      }
+      if (pause.on) {
+        pauseChoose();
         return;
       }
       if (boardRef.current?.busy()) return; // the Top 10 / name box is open: close it first (OK)
@@ -370,7 +627,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       else if (s.mode === "dead" && s.t > 0.8) reset(); // (wait a moment so you don't skip the game over screen by accident)
     };
     puffRef.current = () => {
-      if (s.mode === "running") s.puff = 0.16;
+      if (s.mode === "running" && !pause.on && !shop.open) s.puff = 0.16;
     };
 
     const burst = (x: number, y: number, n: number, colors: string[], power = 90) => {
@@ -455,6 +712,16 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
     };
 
     const die = (why: string, boom: boolean) => {
+      // SHIELD upgrade: it breaks instead of you
+      if (s.mode === "running" && s.shield > 0) {
+        s.shield--;
+        s.invuln = 1.2;
+        s.shake = 0.25;
+        sfx.shield();
+        burst(PX + SW / 2, s.y + SH / 2, 16, ["#6ae0ff", "#2a9ad0", "#ffffff"], 110);
+        s.pops.push({ x: PX + SW / 2, y: s.y - 6, text: "SAVED!", life: 0.9, color: "#6ae0ff" });
+        return;
+      }
       s.mode = "dead";
       s.t = 0;
       s.why = why;
@@ -465,6 +732,9 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       else sfx.zap();
       burst(PX + SW / 2, s.y + SH / 2, 22, boom ? ["#ffd24a", "#ff7a1a", "#e0301a", "#ffffff"] : ["#ffffff", "#ffe34a", PINK], 130);
       s.score = meters() + s.gems * 5;
+      // the gems from this run go into your saved gems
+      bank += s.gems;
+      saveShop();
       if (s.score > best) {
         best = s.score;
         s.newBest = true;
@@ -488,12 +758,38 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       const k = e.key;
-      // ESC / P (or the PAUSE button on phones) = pause / resume, only while flying
-      if (k === "Escape" || k === "p" || k === "P") {
-        if (s.mode === "running") {
-          pause.on = !pause.on;
+      // THE SHOP: up / down pick, SPACE (or OK / ENTER) buys, ESC goes back
+      if (shop.open) {
+        if (k === "ArrowUp" || k === "w" || k === "W") shopMove(SHOP_ROWS, shop.ui, -1, shopHooks);
+        else if (k === "ArrowDown" || k === "s" || k === "S") shopMove(SHOP_ROWS, shop.ui, 1, shopHooks);
+        else if (k === " ") {
+          hold.key = true; // (so the page's OK signal for this SPACE doesn't buy twice)
+          shopOk();
+        } else if (k === "Escape") closeShop();
+        return;
+      }
+      // THE PAUSE MENU: up / down pick, SPACE (or OK / ENTER) chooses, ESC / P resumes
+      if (pause.on) {
+        if (k === "ArrowUp" || k === "w" || k === "W") {
+          pause.row = (pause.row + PAUSE_ROWS.length - 1) % PAUSE_ROWS.length;
           sfx.click();
-        }
+        } else if (k === "ArrowDown" || k === "s" || k === "S") {
+          pause.row = (pause.row + 1) % PAUSE_ROWS.length;
+          sfx.click();
+        } else if (k === " ") {
+          hold.key = true;
+          pauseChoose();
+        } else if (k === "Escape" || k === "p" || k === "P") setPause(false);
+        return;
+      }
+      // ESC / P (or the PAUSE button on phones) = pause, only while flying
+      if (k === "Escape" || k === "p" || k === "P") {
+        setPause(true);
+        return;
+      }
+      // S / DOWN on the start or game over screen = the shop
+      if ((k === "ArrowDown" || k === "s" || k === "S") && canOpenShop()) {
+        openShop(s.mode === "dead" ? "dead" : "ready");
         return;
       }
       // M = sound effects on / off, - and + = quieter / louder
@@ -527,12 +823,25 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
     const onHidden = () => {
       if (!document.hidden) return;
       letGo();
-      if (s.mode === "running") pause.on = true;
+      if (s.mode === "running" && !pause.on) {
+        pause.on = true;
+        pause.row = 0;
+      }
     };
     // the speaker icon + slider (clicks / taps come from the canvas and touch code below)
     const onSlider = (x: number, y: number) => x < 18 && y >= FX_SLIDER.top - 5 && y <= FX_SLIDER.bottom + 5;
     const fxFromY = (y: number) => setFxVolume((FX_SLIDER.bottom - y) / (FX_SLIDER.bottom - FX_SLIDER.top));
+    // a click / tap on the picture: the shop, the pause menu, the SHOP panel, or the speaker / slider.
+    // Returns true when it was used (then it doesn't make you fly).
     fxTapRef.current = (x, y) => {
+      if (shop.open) {
+        if (shopTap(SHOP_ROWS, shop.ui, shopHooks, x, y) === "close") closeShop();
+        return true;
+      }
+      if (!pause.on && panelShopHit(x, y, W) && canOpenShop()) {
+        openShop(s.mode === "dead" ? "dead" : "ready");
+        return true;
+      }
       if (x >= FX_ICON.x && x < FX_ICON.x + FX_ICON.w && y >= FX_ICON.y && y < FX_ICON.y + FX_ICON.h) {
         toggleFx();
         return true;
@@ -542,11 +851,19 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
         fxFromY(y);
         return true;
       }
+      if (pause.on) {
+        const row = pauseTapRow(x, y, W);
+        if (row >= 0) {
+          pause.row = row;
+          pauseChoose();
+        }
+        return true;
+      }
       return false;
     };
     fxDragRef.current = (y) => {
       if (y < 0) fx.drag = false;
-      else fxFromY(y);
+      else if (fx.drag) fxFromY(y);
     };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
@@ -737,6 +1054,98 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       }
     };
 
+    // the money icon (a little green gem, 7 x 8)
+    const gemIcon = (c: CanvasRenderingContext2D, x: number, y: number) => {
+      c.fillStyle = "#0b3d14";
+      c.fillRect(x + 1, y, 5, 1);
+      c.fillRect(x, y + 1, 7, 3);
+      c.fillRect(x + 1, y + 4, 5, 2);
+      c.fillRect(x + 2, y + 6, 3, 1);
+      c.fillStyle = "#3ee05a";
+      c.fillRect(x + 2, y + 1, 3, 1);
+      c.fillRect(x + 1, y + 2, 5, 2);
+      c.fillRect(x + 2, y + 4, 3, 1);
+      c.fillRect(x + 3, y + 5, 1, 1);
+      c.fillStyle = "#b6ff9e";
+      c.fillRect(x + 2, y + 2, 1, 1);
+    };
+    // Pinkmane in an outfit (x, y = top left), with his jetpack, standing still. scale = how big.
+    const drawDude = (c: CanvasRenderingContext2D, id: string, x: number, y: number, scale: number) => {
+      c.save();
+      c.translate(Math.round(x), Math.round(y));
+      c.scale(scale, scale);
+      c.fillStyle = "#111";
+      c.fillRect(1, 12, 8, 15);
+      c.fillStyle = "#8a8a9a";
+      c.fillRect(2, 13, 6, 13);
+      c.fillStyle = "#3ee05a";
+      c.fillRect(2, 17, 6, 3);
+      const pic = outfitPic(id);
+      if (OUTFITS.find((o) => o.id === id)?.ghost) c.globalAlpha = 0.7;
+      if (pic) c.drawImage(pic, 0, 0, SW, SH, 0, 0, SW, SH);
+      else c.drawImage(drawnDude[0], 0, 0);
+      c.restore();
+    };
+    // what comes out of a jetpack at (x, y), as a little looping animation
+    const drawTrailDemo = (c: CanvasRenderingContext2D, id: string, x: number, y: number, t: number, n = 8, len = 40) => {
+      const pics = trailPics[id] ?? leafImg;
+      for (let k = 0; k < n; k++) {
+        const ph = (t * 1.4 + k / n) % 1;
+        const pic = pics[k % pics.length];
+        c.globalAlpha = 1 - ph * 0.6;
+        c.drawImage(pic, Math.round(x - 3 - ph * 12 + Math.sin(k * 2.3 + t * 5) * 3), Math.round(y + ph * len));
+      }
+      c.globalAlpha = 1;
+    };
+    // the picture in the shop's preview box
+    const drawPreview = (c: CanvasRenderingContext2D, id: string | null, b: ShopBox, t: number) => {
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      // a bit of night sky behind
+      c.fillStyle = "#2a1258";
+      c.fillRect(b.x, b.y + b.h - 14, b.w, 14);
+      c.fillStyle = PINK;
+      c.fillRect(b.x, b.y + b.h - 14, b.w, 1);
+      const [kind, key] = (id ?? "").split(":");
+      if (kind === "outfit") {
+        drawDude(c, key, cx - SW, b.y + 6, 2);
+        return;
+      }
+      if (kind === "trail") {
+        drawDude(c, outfit, cx - SW / 2, b.y + 8, 1);
+        drawTrailDemo(c, key, cx - SW / 2 + 5, b.y + 37, t, 9, 44);
+        return;
+      }
+      drawDude(c, outfit, cx - SW / 2, cy - SH / 2 - 6, 1);
+      const px = cx;
+      const py = cy - 6;
+      if (key === "magnet") {
+        // gems flying in from all around
+        for (let k = 0; k < 7; k++) {
+          const a = k * 0.9 + t * 0.6;
+          const d = 42 - ((t * 26 + k * 6) % 34);
+          gemIcon(c, Math.round(px + Math.cos(a) * d - 3), Math.round(py + Math.sin(a) * d - 4));
+        }
+      } else if (key === "shield") {
+        for (let k = 0; k < 24; k++) {
+          const a = (k / 24) * Math.PI * 2 + t * 2;
+          c.fillStyle = k % 2 ? "#6ae0ff" : "#ffffff";
+          c.fillRect(Math.round(px + Math.cos(a) * 17), Math.round(py + Math.sin(a) * 23), 2, 2);
+        }
+      } else if (key === "pigs") {
+        c.save();
+        c.translate(Math.round(cx - 16), b.y + b.h - 14 - 16);
+        c.scale(2, 2);
+        c.drawImage(pigImg, 0, 0);
+        c.restore();
+        c.font = `8px ${fontFamily}`;
+        c.textAlign = "center";
+        c.fillStyle = GREEN;
+        const next = Math.min(lv.pigs + 1, 3);
+        c.fillText(`+${PIG_GEMS + next}`, cx + 22, b.y + b.h - 34);
+      }
+    };
+
     const drawPlayer = (t: number) => {
       const onGround = s.y >= FLOOR - SH - 0.5;
       // shadow on the ground (smaller the higher you are)
@@ -768,13 +1177,28 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
         ctx.fillRect(2, 29, 6, 2 + (Math.floor(t * 24) % 3));
       }
 
-      // Pinkmane: running on the ground, legs still in the air
+      // Pinkmane in his outfit: running on the ground, legs still in the air (blinking just after the shield saved him)
       const frame = s.mode === "running" && onGround ? Math.floor(s.scroll / 9) % 2 : 0;
-      if (dudeImg) {
+      const pic = outfitPic(outfit);
+      const blink = s.invuln > 0 && Math.floor(t * 16) % 2 === 0;
+      if (outfitDef().ghost) ctx.globalAlpha = 0.7;
+      if (blink) ctx.globalAlpha = 0.3;
+      if (pic) {
         // each frame in the picture is 24 x 35 (the picture can hold more than 2 of them, only the first 2 are used)
-        ctx.drawImage(dudeImg, frame * SW, 0, SW, SH, 0, 0, SW, SH);
+        ctx.drawImage(pic, frame * SW, 0, SW, SH, 0, 0, SW, SH);
       } else ctx.drawImage(drawnDude[frame], 0, 0);
+      ctx.globalAlpha = 1;
       ctx.restore();
+      // the SHIELD: a sparkling bubble around him
+      if (s.shield > 0 && s.mode === "running") {
+        const bx = PX + SW / 2;
+        const by = s.y + SH / 2;
+        for (let k = 0; k < 20; k++) {
+          const a = (k / 20) * Math.PI * 2 + t * 2;
+          ctx.fillStyle = k % 2 ? "#6ae0ff" : "#ffffff";
+          ctx.fillRect(Math.round(bx + Math.cos(a) * 16), Math.round(by + Math.sin(a) * 21), 2, 2);
+        }
+      }
     };
 
     // the speaker icon (on the ceiling, top left) with a pink X when the sounds are off
@@ -826,6 +1250,14 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       ctx.fillRect(gx + 3, 20, 1, 2);
       text(String(s.gems), gx - 2, 15, GREEN, 8, "right");
       if (best > 0) text(`BEST ${best}`, W / 2, 15, "#b48ad0");
+      // shields left this run
+      for (let i = 0; i < s.shield; i++) {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(W - 60 - i * 9, 15, 7, 8);
+        ctx.fillStyle = "#6ae0ff";
+        ctx.fillRect(W - 59 - i * 9, 16, 5, 5);
+        ctx.fillRect(W - 58 - i * 9, 21, 3, 1);
+      }
       // how to play, during the first seconds of a run
       if (s.t < 4.5 && meters() < 60) {
         ctx.globalAlpha = Math.min(1, (4.5 - s.t) / 0.8);
@@ -846,6 +1278,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       s.t += dt;
       if (s.puff > 0) s.puff -= dt;
       if (s.shake > 0) s.shake -= dt;
+      if (s.invuln > 0) s.invuln -= dt;
       const floorY = FLOOR - SH;
 
       if (s.mode === "running") {
@@ -877,7 +1310,10 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
                 y: s.y + 29,
                 vx: -s.speed * 0.3 + (Math.random() - 0.5) * 50,
                 vy: LEAF_FALL + Math.random() * 60,
-                dark: Math.random() < 0.35,
+                pic: (() => {
+                  const pics = trailPics[trail] ?? leafImg;
+                  return pics[Math.floor(Math.random() * pics.length)];
+                })(),
                 wob: Math.random() * 6,
               });
           }
@@ -898,6 +1334,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
         for (const z of s.zaps) {
           if (z.spin) z.ang += z.spin * dt;
           const cx = z.x - s.scroll;
+          if (s.invuln > 0) continue; // (just saved by the shield: can't be hit for a moment)
           if (cx < PX - 40 || cx > PX + SW + 40) continue;
           const e = zapEnds(z);
           const n = Math.ceil(z.len / 3);
@@ -912,9 +1349,18 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
           if (s.mode !== "running") break;
         }
 
-        // gems
+        // gems (the GEM MAGNET pulls the ones close to you in)
+        const reach = MAGNET_RANGE[lv.magnet] ?? 0;
         for (const g of s.gemList) {
           if (g.taken) continue;
+          if (reach > 0) {
+            const dx = hx + HB.w / 2 - (g.x - s.scroll);
+            const dy = hy + HB.h / 2 - g.y;
+            if (dx * dx + dy * dy < reach * reach) {
+              g.x += dx * Math.min(1, dt * 7);
+              g.y += dy * Math.min(1, dt * 7);
+            }
+          }
           const x = g.x - s.scroll;
           if (x > hx - 7 && x < hx + HB.w + 7 && g.y > hy - 6 && g.y < hy + HB.h + 6) {
             g.taken = true;
@@ -959,7 +1405,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
           }
         } else {
           r.x -= (s.speed + ROCKET_SPEED) * dt;
-          if (s.mode === "running" && r.x < hx + HB.w && r.x + 16 > hx && r.y + 3 > hy && r.y - 3 < hy + HB.h) {
+          if (s.mode === "running" && s.invuln <= 0 && r.x < hx + HB.w && r.x + 16 > hx && r.y + 3 > hy && r.y - 3 < hy + HB.h) {
             r.x = -99;
             die("BOOM!", true);
           }
@@ -983,8 +1429,9 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
           sfx.pig();
           burst(px + 5, FLOOR - 5, 12, ["#ff8fb8", "#ff5f9a", "#3ee05a", "#ffffff"], 80);
           if (s.mode === "running") {
-            s.gems += PIG_GEMS;
-            s.pops.push({ x: px + 5, y: FLOOR - 22, text: `+${PIG_GEMS}`, life: 0.9, color: GREEN });
+            const got = PIG_GEMS + lv.pigs; // (the PIGGY BANK upgrade adds 1 per level)
+            s.gems += got;
+            s.pops.push({ x: px + 5, y: FLOOR - 22, text: `+${got}`, life: 0.9, color: GREEN });
           }
           break;
         }
@@ -1029,7 +1476,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
         const x = p.x - s.scroll;
         if (x > -14 && x < W + 4) drawPig(p, t);
       }
-      for (const l of s.leaves) ctx.drawImage(leafImg[l.dark ? 1 : 0], Math.round(l.x) - 3, Math.round(l.y) - 3);
+      for (const l of s.leaves) ctx.drawImage(l.pic, Math.round(l.x) - 3, Math.round(l.y) - 3);
       drawPlayer(t);
       for (const r of s.rockets) drawRocket(r, t);
       for (const p of s.parts) {
@@ -1054,6 +1501,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
         if (Math.floor(clock * 2) % 2 === 0) text(touchRef.current ? "TAP TO START" : "SPACE = START", W / 2, 106, GREEN);
         if (best > 0) text(`BEST ${best}`, W / 2, 122, "#b48ad0");
         text(touchRef.current ? "TAP THE SPEAKER = SOUNDS" : "M = SOUNDS   - / + = FX VOLUME", W / 2, 136, "#9a7ab8");
+        drawPanels(t);
       }
 
       if (s.mode === "dead") {
@@ -1065,27 +1513,52 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
           text(s.newBest ? "NEW BEST!" : `BEST ${best}`, W / 2, 64, s.newBest ? PINK : "#b48ad0");
           text(`${meters()}M  ${s.gems} GEMS`, W / 2, 80, "#d8a8ff");
           if (s.t > 0.8 && Math.floor(clock * 2) % 2 === 0) text(touchRef.current ? "TAP = AGAIN" : "SPACE = AGAIN", W / 2, 104, GREEN);
+          text(`+${s.gems} GEMS SAVED`, W / 2, 118, GREEN);
+          drawPanels(t);
         }
       }
 
-      drawFxIcon();
-      if (s.mode !== "running" || pause.on || fx.drag) drawFxSlider(); // (hidden while you fly, so it never covers the game)
+      if (!shop.open) {
+        drawFxIcon();
+        if (s.mode !== "running" || pause.on || fx.drag) drawFxSlider(); // (hidden while you fly, so it never covers the game)
+      }
 
       if (pause.on) {
-        ctx.fillStyle = "rgba(14,4,24,0.75)";
-        ctx.fillRect(0, 0, W, H);
-        text("PAUSED", W / 2, 40, PINK, 16);
-        text(`${meters()}M  ${s.gems} GEMS`, W / 2, 70, "#d8a8ff");
-        if (Math.floor(pauseClock * 2) % 2 === 0) text(touchRef.current ? "TAP = RESUME" : "SPACE / ESC = RESUME", W / 2, 92, GREEN);
+        drawPauseMenu(ctx, fontFamily, { W, H, row: pause.row, t: pauseClock, touch: touchRef.current, stats: `${meters()}M  ${s.gems} GEMS` });
         drawFxIcon();
         drawFxSlider();
       }
+      // the shop covers everything
+      if (shop.open)
+        drawPinkShop(ctx, fontFamily, SHOP_ROWS, shop.ui, shopHooks, {
+          W,
+          H,
+          touch: touchRef.current,
+          backLine: shop.from === "pause" ? "BACK TO YOUR GAME" : "BACK TO THE START SCREEN",
+        });
     };
+    // the two side panels on the start + game over screens: your gems, and the SHOP
+    const drawPanels = (t: number) =>
+      drawSidePanels(ctx, fontFamily, {
+        W,
+        money: bank,
+        moneyName: "GEMS",
+        icon: gemIcon,
+        touch: touchRef.current,
+        t,
+        preview: (c, cx, cy) => {
+          drawDude(c, outfit, cx - SW / 2, cy - SH / 2 - 6, 1);
+          drawTrailDemo(c, trail, cx - SW / 2 + 5, cy + 6, t, 6, 18);
+        },
+      });
 
     const loop = (now: number) => {
       const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
       last = now;
-      if (pause.on) pauseClock += dt; // only for the blinking text
+      if (shop.open) {
+        shop.ui.t += dt; // (the game behind the shop waits)
+        pauseClock += dt;
+      } else if (pause.on) pauseClock += dt; // only for the blinking text
       else step(dt);
       render();
       raf = requestAnimationFrame(loop);
@@ -1101,6 +1574,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       document.removeEventListener("visibilitychange", onHidden);
       pressRef.current = null;
       puffRef.current = null;
+      menuOpenRef.current = null;
       fxTapRef.current = null;
       fxDragRef.current = null;
       letGo();
@@ -1138,6 +1612,10 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       const g = toGame(t.clientX, t.clientY);
       if (g && fxTapRef.current?.(g.x, g.y)) {
         fxFinger = t.identifier;
+        if (e.cancelable) e.preventDefault();
+        return;
+      }
+      if (menuOpenRef.current?.()) {
         if (e.cancelable) e.preventDefault();
         return;
       }
@@ -1204,6 +1682,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
           e.currentTarget.setPointerCapture(e.pointerId);
           return;
         }
+        if (menuOpenRef.current?.()) return;
         holdRef.current.mouse = true;
         pressRef.current?.();
       }}

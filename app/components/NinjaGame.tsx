@@ -2,12 +2,29 @@
 
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
+import {
+  type ShopRow,
+  type ShopHooks,
+  type ShopBox,
+  newShopUi,
+  shopMove,
+  shopAct,
+  shopTap,
+  drawPinkShop,
+  drawSidePanels,
+  panelShopHit,
+  PAUSE_ROWS,
+  drawPauseMenu,
+  pauseTapRow,
+} from "./PinkShop";
 
 // PINK NINJA: a weed slicing game. Weed nugs in all kinds of colours fly up from the bottom of the screen, you chop them in half
 // (and the kief falls out).
 //   DRAG the mouse (button held down) / SWIPE with your finger  = slice
 //   SPACE / OK / tap                                            = start / play again
-//   ESC / P, the II button (top right) or PAUSE on phones       = pause
+//   ESC / P, the II button (top right) or PAUSE on phones       = the pause menu: RESUME / RESTART / SHOP / GAME MENU
+// KIEF: every nug you chop gives kief (a golden nug = 5). It's saved and spent in the PINK SHOP (the same shop screen as the
+//   other games, see PinkShop.ts) on blade trails and upgrades. S / DOWN or tap SHOP on the start / game over screen.
 //   M = game sounds on / off, - and = = quieter / louder, or the speaker + slider in the top left corner
 // Slice 3 or more in one swipe = COMBO (bonus points). A GOLDEN NUG is rare and worth 5.
 // Let a nug fall without slicing it = you lose a life (3 lives). Slice a BOMB = game over straight away.
@@ -34,6 +51,8 @@ const GAME_TITLE = "PINK NINJA";
 const BEST_KEY = "pinkmane-ninja-best";
 const FX_KEY = "pinkmane-ninja-fx"; // "on" / "off": the game sounds
 const FX_VOL_KEY = "pinkmane-ninja-fx-volume"; // 0..1
+const BANK_KEY = "pinkmane-ninja-kief"; // your saved kief
+const SHOP_KEY = "pinkmane-ninja-shop"; // what you bought in the shop
 // The online Top 10 after each game (true = on, false = off). Its board is "ninja" in app/api/scores/shared.ts.
 const SHOW_TOP10 = true;
 // The background picture (if it can't be loaded, a dark dojo is drawn instead)
@@ -52,6 +71,36 @@ const BOMB_CHANCE_MAX = 0.3; // the highest chance that a thrown thing is a bomb
 const COMBO_MIN = 3; // slices in one swipe that count as a combo
 const CUT_REACH = 2; // how many pixels next to something still count as hitting it (bigger = easier)
 const CUT_REACH_TOUCH = 4; // ...on phones (a finger is less exact than a mouse)
+
+// ---------- PINK SHOP ----------
+// BLADES: the trail your swipe leaves (price 0 = free)
+type BladeId = "classic" | "smoke" | "fire" | "lightning" | "rainbow" | "beat" | "gold";
+const BLADES: { id: BladeId; name: string; price: number; info: [string, string] }[] = [
+  { id: "classic", name: "PINK BLADE", price: 0, info: ["THE CLASSIC PINK BLADE", ""] },
+  { id: "smoke", name: "SMOKE TRAIL", price: 60, info: ["A THICK WHITE SMOKE TRAIL", "IT HANGS IN THE AIR LONGER"] },
+  { id: "fire", name: "FIRE BLADE", price: 120, info: ["FLAMES AND SPARKS", ""] },
+  { id: "lightning", name: "LIGHTNING", price: 200, info: ["A JAGGED BLUE ZAP", "IT FLICKERS AS YOU SWIPE"] },
+  { id: "rainbow", name: "RAINBOW", price: 300, info: ["EVERY COLOUR AT ONCE", ""] },
+  { id: "beat", name: "BEAT BLADE", price: 400, info: ["PUMPS TO YOUR MUSIC", "THICKER + BRIGHTER ON THE BEAT"] },
+  { id: "gold", name: "GOLD BLADE", price: 600, info: ["SOLID GOLD, WITH SPARKLES", ""] },
+];
+// how long each blade's trail stays (seconds)
+const BLADE_LIFE: Partial<Record<BladeId, number>> = { smoke: 0.25, lightning: 0.09 };
+// UPGRADES: one price per level
+type UpId = "life" | "guard" | "gold" | "reach";
+const UPGRADES: { id: UpId; name: string; prices: number[]; info: [string, string] }[] = [
+  { id: "life", name: "EXTRA LIFE", prices: [80, 250], info: ["DROP ONE MORE NUG", "BEFORE IT'S GAME OVER"] },
+  { id: "guard", name: "BOMB GUARD", prices: [300], info: ["THE FIRST BOMB YOU CUT", "EACH GAME DOESN'T END IT"] },
+  { id: "gold", name: "GOLD RUSH", prices: [100, 250], info: ["GOLDEN NUGS COME MORE OFTEN", "X2 AT LEVEL 1, X3 AT LEVEL 2"] },
+  { id: "reach", name: "BIG BLADE", prices: [80, 200], info: ["YOUR BLADE CUTS A BIT WIDER", "EASIER TO HIT EVERYTHING"] },
+];
+const SHOP_ROWS: ShopRow[] = [
+  { kind: "head", label: "BLADES" },
+  ...BLADES.map((b): ShopRow => ({ kind: "item", id: `blade:${b.id}`, name: b.name, prices: [b.price], wear: true, info: b.info })),
+  { kind: "head", label: "UPGRADES" },
+  ...UPGRADES.map((u): ShopRow => ({ kind: "item", id: `up:${u.id}`, name: u.name, prices: u.prices, info: u.info })),
+  { kind: "back" },
+];
 
 // ---------- Screen ----------
 // wide picture, the same shape as the other PSP games, so it fills the PINKMANE handheld screen
@@ -298,11 +347,14 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       if (bgImg.width > 0) bg = bgImg;
     };
     bgImg.src = BG_IMAGE;
-    const totalWeight = ITEMS.reduce((n, it) => n + it.weight, 0);
+    // (the GOLD RUSH upgrade makes golden nugs come 2x / 3x as often)
+    const weightOf = (i: number) => ITEMS[i].weight * (ITEMS[i].shiny ? 1 + lv.gold : 1);
     const pickItem = () => {
-      let r = Math.random() * totalWeight;
+      let total = 0;
+      for (let i = 0; i < ITEMS.length; i++) total += weightOf(i);
+      let r = Math.random() * total;
       for (let i = 0; i < ITEMS.length; i++) {
-        r -= ITEMS[i].weight;
+        r -= weightOf(i);
         if (r <= 0) return i;
       }
       return 0;
@@ -406,6 +458,16 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
         tone(120, 30, 0.6, "sawtooth", 0.12);
       },
       click: () => tone(420, 380, 0.04, "square", 0.03),
+      buy: () => {
+        tone(520, 1040, 0.1, "square", 0.06);
+        tone(780, 1560, 0.1, "square", 0.06, 0.1);
+        tone(1040, 2080, 0.2, "square", 0.06, 0.2);
+      },
+      no: () => tone(200, 120, 0.18, "square", 0.06),
+      guard: () => {
+        tone(900, 300, 0.18, "triangle", 0.09);
+        tone(1400, 700, 0.1, "square", 0.04, 0.03);
+      },
     };
 
     // ---------- best score ----------
@@ -414,8 +476,32 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       best = Number(localStorage.getItem(BEST_KEY)) || 0;
     } catch {}
 
+    // ---------- saved kief + shop ----------
+    let bank = 0;
+    let owned: string[] = []; // the blades you bought
+    const lv: Record<UpId, number> = { life: 0, guard: 0, gold: 0, reach: 0 };
+    let blade: BladeId = "classic";
+    try {
+      bank = Math.max(0, Math.floor(Number(localStorage.getItem(BANK_KEY)) || 0));
+      const d = JSON.parse(localStorage.getItem(SHOP_KEY) || "null") as { owned?: string[]; lv?: Record<string, number>; blade?: string } | null;
+      if (d) {
+        if (Array.isArray(d.owned)) owned = d.owned.filter((x) => typeof x === "string");
+        for (const u of UPGRADES) lv[u.id] = Math.max(0, Math.min(u.prices.length, Math.floor(Number(d.lv?.[u.id]) || 0)));
+        const b = BLADES.find((x) => x.id === d.blade);
+        if (b && (b.price === 0 || owned.includes(`blade:${b.id}`))) blade = b.id;
+      }
+    } catch {}
+    const saveShop = () => {
+      try {
+        localStorage.setItem(BANK_KEY, String(bank));
+        localStorage.setItem(SHOP_KEY, JSON.stringify({ owned, lv, blade }));
+      } catch {}
+    };
+    const maxLives = () => START_LIVES + lv.life;
+
     // ---------- game state ----------
-    const pause = { on: false };
+    const pause = { on: false, row: 0 };
+    const shop = { open: false, from: "ready" as "ready" | "over" | "pause", ui: newShopUi(SHOP_ROWS) };
     let runId = 0; // goes up every run, so a late Top 10 box never opens in the middle of a new run
     const s = {
       mode: "ready" as Mode,
@@ -436,9 +522,11 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       flash: 0,
       why: "",
       newBest: false,
+      kiefRun: 0, // kief chopped this game (saved at the end)
+      guard: 0, // bombs the BOMB GUARD can still stop this game
     };
     // the blade: where the finger / mouse has been in the last moment (that's the trail you see)
-    const blade = { down: false, pts: [] as { x: number; y: number; t: number }[], swishT: 0, cut: 0, cutT: 0, cutX: 0, cutY: 0 };
+    const cut = { down: false, pts: [] as { x: number; y: number; t: number }[], swishT: 0, cut: 0, cutT: 0, cutX: 0, cutY: 0 };
     let clock = 0;
     let pauseClock = 0;
 
@@ -449,7 +537,9 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       s.t = 0;
       s.runT = 0;
       s.score = 0;
-      s.lives = START_LIVES;
+      s.lives = maxLives();
+      s.kiefRun = 0;
+      s.guard = lv.guard;
       s.wave = 0;
       s.waveT = 0.6;
       s.queue = [];
@@ -461,7 +551,7 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       s.misses = [];
       s.why = "";
       s.newBest = false;
-      blade.cut = 0;
+      cut.cut = 0;
       sfx.start();
     };
 
@@ -470,7 +560,10 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       s.t = 0;
       s.why = why;
       s.queue = [];
-      blade.down = false;
+      cut.down = false;
+      // the kief from this game goes into your saved kief
+      bank += s.kiefRun;
+      saveShop();
       if (s.score > best) {
         best = s.score;
         s.newBest = true;
@@ -566,16 +659,26 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
             color: it.kief[Math.floor(Math.random() * it.kief.length)],
           });
       s.score += it.points;
+      s.kiefRun += it.points;
       if (it.points > 1) s.pops.push({ x: t.x, y: t.y - 12, text: `+${it.points}`, life: 0.8, color: it.shiny ? YELLOW : GREEN });
-      blade.cut++;
-      blade.cutT = clock;
-      blade.cutX = t.x;
-      blade.cutY = t.y;
+      cut.cut++;
+      cut.cutT = clock;
+      cut.cutX = t.x;
+      cut.cutY = t.y;
       sfx.chop();
       if (it.shiny) sfx.gold();
     };
     const explode = (t: Thing) => {
       t.done = true;
+      // BOMB GUARD upgrade: this bomb just pops
+      if (s.guard > 0) {
+        s.guard--;
+        sfx.guard();
+        s.shake = 0.3;
+        burst(t.x, t.y, 20, ["#6ae0ff", "#ffffff", YELLOW, INK], 90);
+        s.pops.push({ x: t.x, y: t.y - 12, text: "GUARDED!", life: 1, color: "#6ae0ff" });
+        return;
+      }
       sfx.boom();
       s.shake = 0.6;
       s.flash = 1;
@@ -587,12 +690,12 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       if (s.mode !== "running" || pause.on) return;
       const len = Math.hypot(bx - ax, by - ay);
       if (len < 1.5) return; // (holding still doesn't cut)
-      if (len > 6 && clock - blade.swishT > 0.18) {
-        blade.swishT = clock;
+      if (len > 6 && clock - cut.swishT > 0.18) {
+        cut.swishT = clock;
         sfx.swish();
       }
       const ang = Math.atan2(by - ay, bx - ax);
-      const reach = touchRef.current ? CUT_REACH_TOUCH : CUT_REACH;
+      const reach = (touchRef.current ? CUT_REACH_TOUCH : CUT_REACH) + lv.reach * 1.5; // (+ the BIG BLADE upgrade)
       for (const t of s.things) {
         if (t.done) continue;
         const r = t.bomb ? BOMB_R : ITEMS[t.item].r;
@@ -607,9 +710,10 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
 
     // ---------- FX speaker + slider (top left) and the pause button (top right) ----------
     const FX_SLIDER = { x: 4, top: 18, bottom: 58 };
-    const PAUSE_BTN = { x: W - 62, y: 2, w: 16, h: 13 };
+    const PAUSE_BTN = { x: W - 88, y: 2, w: 16, h: 13 }; // (left of the lives, which can be up to 5 now)
     let fxDrag = false;
     const fxHit = (x: number, y: number) => {
+      if (shop.open) return null;
       if (x < 16 && y < 14) return "icon";
       if (x < 16 && y >= FX_SLIDER.top - 5 && y <= FX_SLIDER.bottom + 5) return "slider";
       return null;
@@ -620,24 +724,109 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
     const setPause = (on: boolean) => {
       if (s.mode !== "running") return;
       pause.on = on;
-      blade.down = false;
-      blade.pts = [];
+      pause.row = 0;
+      cut.down = false;
+      cut.pts = [];
       sfx.click();
     };
 
+    // ---------- the shop + pause menu ----------
+    const openShop = (from: "ready" | "over" | "pause") => {
+      shop.open = true;
+      shop.from = from;
+      shop.ui.msg = "";
+      cut.down = false;
+      sfx.click();
+    };
+    const closeShop = () => {
+      shop.open = false;
+      sfx.click();
+    };
+    const shopHooks: ShopHooks = {
+      money: () => bank,
+      moneyName: "KIEF",
+      icon: (c, x, y) => kiefIcon(c, x, y),
+      level: (id) => {
+        const [kind, key] = id.split(":");
+        if (kind === "up") return lv[key as UpId] ?? 0;
+        return BLADES.find((b) => b.id === key)?.price === 0 || owned.includes(id) ? 1 : 0;
+      },
+      worn: (id) => id === `blade:${blade}`,
+      buy: (id, price) => {
+        bank -= price;
+        const [kind, key] = id.split(":");
+        if (kind === "up") lv[key as UpId]++;
+        else {
+          owned.push(id);
+          blade = key as BladeId;
+        }
+        saveShop();
+      },
+      wear: (id) => {
+        blade = id.split(":")[1] as BladeId;
+        saveShop();
+      },
+      preview: (c, id, box, t) => drawPreview(c, id, box, t),
+      sound: (w) => (w === "buy" ? sfx.buy() : w === "no" ? sfx.no() : sfx.click()),
+    };
+    const shopOk = () => {
+      if (shopAct(SHOP_ROWS, shop.ui, shopHooks) === "close") closeShop();
+    };
+    // GAME MENU: back to the PSP game list (the kief from the game you left is kept)
+    const toMenu = () => {
+      boardRef.current?.hide();
+      runId++;
+      if (s.mode === "running") {
+        bank += s.kiefRun;
+        saveShop();
+      }
+      pause.on = false;
+      s.mode = "ready";
+      s.t = 0;
+      s.queue = [];
+      s.things = [];
+      s.halves = [];
+      s.misses = [];
+      cut.down = false;
+      cut.pts = [];
+      // then leave to the PSP game list, the same way VOID's pause HOME does
+      // (one tiny wait, so the page is listening when the key arrives)
+      window.setTimeout(() => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace" }));
+      }, 0);
+    };
+    const pauseChoose = () => {
+      const pick = PAUSE_ROWS[pause.row];
+      if (pick === "RESUME") setPause(false);
+      else if (pick === "RESTART") {
+        pause.on = false;
+        reset();
+      } else if (pick === "SHOP") openShop("pause");
+      else toMenu();
+    };
+    const canOpenShop = () => !boardRef.current?.busy() && (s.mode === "ready" || (s.mode === "over" && s.t > 0.8));
+
     // ---------- input ----------
     const press = () => {
-      if (boardRef.current?.busy()) return; // the Top 10 / name box is open: close it first
-      if (pause.on) {
-        setPause(false);
+      if (shop.open) {
+        shopOk();
         return;
       }
+      if (pause.on) {
+        pauseChoose();
+        return;
+      }
+      if (boardRef.current?.busy()) return; // the Top 10 / name box is open: close it first
       if (s.mode === "ready") reset();
       else if (s.mode === "over" && s.t > 0.8) reset(); // (wait a moment so you don't skip the game over screen by accident)
     };
     api.current = {
       press,
       down: (x, y) => {
+        if (shop.open) {
+          if (shopTap(SHOP_ROWS, shop.ui, shopHooks, x, y) === "close") closeShop();
+          return;
+        }
         if (boardRef.current?.busy()) return;
         const hit = fxHit(x, y);
         if (hit === "icon") {
@@ -654,29 +843,48 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
           setPause(true);
           return;
         }
-        if (pause.on || s.mode !== "running") {
-          press();
+        if (pause.on) {
+          const row = pauseTapRow(x, y, W);
+          if (row >= 0) {
+            pause.row = row;
+            pauseChoose();
+          }
           return;
         }
-        blade.down = true;
-        blade.pts = [{ x, y, t: clock }];
+        if (s.mode !== "running") {
+          if (panelShopHit(x, y, W) && canOpenShop()) openShop(s.mode === "over" ? "over" : "ready");
+          else press();
+          return;
+        }
+        cut.down = true;
+        cut.pts = [{ x, y, t: clock }];
       },
       move: (x, y) => {
         if (fxDrag) {
           fxFromY(y);
           return;
         }
-        if (!blade.down) return;
-        const last = blade.pts[blade.pts.length - 1];
+        if (!cut.down) return;
+        const last = cut.pts[cut.pts.length - 1];
         if (last) cutBetween(last.x, last.y, x, y);
-        blade.pts.push({ x, y, t: clock });
+        cut.pts.push({ x, y, t: clock });
+        // the FIRE and GOLD blades throw a few sparks
+        if ((blade === "fire" || blade === "gold") && Math.random() < 0.35 && s.parts.length < 300)
+          s.parts.push({
+            x,
+            y,
+            vx: (Math.random() - 0.5) * 40,
+            vy: -Math.random() * 40,
+            life: 0.3 + Math.random() * 0.2,
+            color: blade === "fire" ? (Math.random() < 0.5 ? "#ffd24a" : "#ff7a1a") : Math.random() < 0.5 ? "#ffffff" : "#ffd700",
+          });
       },
       up: () => {
         if (fxDrag) {
           fxDrag = false;
           sfx.click(); // a little test sound at the new volume
         }
-        blade.down = false;
+        cut.down = false;
       },
     };
 
@@ -685,8 +893,31 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return; // typing your name for the Top 10
       const k = e.key;
+      // THE SHOP: up / down pick, SPACE / OK buys (that comes from the page), ESC goes back
+      if (shop.open) {
+        if (k === "ArrowUp" || k === "w" || k === "W") shopMove(SHOP_ROWS, shop.ui, -1, shopHooks);
+        else if (k === "ArrowDown" || k === "s" || k === "S") shopMove(SHOP_ROWS, shop.ui, 1, shopHooks);
+        else if (k === "Escape") closeShop();
+        return;
+      }
+      // THE PAUSE MENU: up / down pick, SPACE / OK chooses, ESC / P resumes
+      if (pause.on) {
+        if (k === "ArrowUp" || k === "w" || k === "W") {
+          pause.row = (pause.row + PAUSE_ROWS.length - 1) % PAUSE_ROWS.length;
+          sfx.click();
+        } else if (k === "ArrowDown" || k === "s" || k === "S") {
+          pause.row = (pause.row + 1) % PAUSE_ROWS.length;
+          sfx.click();
+        } else if (k === "Escape" || k === "p" || k === "P") setPause(false);
+        return;
+      }
       if (k === "Escape" || k === "p" || k === "P") {
-        setPause(!pause.on);
+        setPause(true);
+        return;
+      }
+      // S / DOWN on the start or game over screen = the shop
+      if ((k === "ArrowDown" || k === "s" || k === "S") && canOpenShop()) {
+        openShop(s.mode === "over" ? "over" : "ready");
         return;
       }
       if (k === "m" || k === "M") {
@@ -701,8 +932,11 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
     // switching apps / tabs pauses the game
     const onHidden = () => {
       if (!document.hidden) return;
-      blade.down = false;
-      if (s.mode === "running") pause.on = true;
+      cut.down = false;
+      if (s.mode === "running" && !pause.on) {
+        pause.on = true;
+        pause.row = 0;
+      }
     };
     window.addEventListener("keydown", onKey);
     document.addEventListener("visibilitychange", onHidden);
@@ -874,23 +1108,152 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       ctx.fillRect(x + 9, y + 3, 2, h - 6);
     };
 
-    // the blade trail: a white line with a pink glow, thinner towards its end
-    const drawBlade = () => {
-      const pts = blade.pts;
+    // a blade trail in one of the BLADE styles. pts = oldest ... newest
+    const drawBladeWith = (c: CanvasRenderingContext2D, style: BladeId, pts: { x: number; y: number }[]) => {
       if (pts.length < 2) return;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      for (let i = 1; i < pts.length; i++) {
-        const k = i / pts.length; // 0 = oldest .. 1 = newest
-        ctx.strokeStyle = `rgba(255,95,210,${0.5 * k})`;
-        ctx.lineWidth = 1 + k * 4;
-        ctx.beginPath();
-        ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
-        ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.stroke();
-        ctx.strokeStyle = `rgba(255,255,255,${0.9 * k})`;
-        ctx.lineWidth = 0.5 + k * 1.5;
-        ctx.stroke();
+      c.lineCap = "round";
+      c.lineJoin = "round";
+      const n = pts.length;
+      const kick = beatKick();
+      const seg = (i: number, color: string, width: number) => {
+        c.strokeStyle = color;
+        c.lineWidth = width;
+        c.beginPath();
+        c.moveTo(pts[i - 1].x, pts[i - 1].y);
+        c.lineTo(pts[i].x, pts[i].y);
+        c.stroke();
+      };
+      if (style === "lightning") {
+        // a jagged zap that jumps around every frame
+        const zig = pts.map((p, i) => ({ x: p.x + (i > 0 && i < n - 1 ? (Math.random() - 0.5) * 6 : 0), y: p.y + (i > 0 && i < n - 1 ? (Math.random() - 0.5) * 6 : 0) }));
+        for (const [color, width] of [
+          ["rgba(80,140,255,0.45)", 5],
+          ["rgba(160,210,255,0.9)", 2],
+          ["#ffffff", 1],
+        ] as [string, number][]) {
+          c.strokeStyle = color;
+          c.lineWidth = width;
+          c.beginPath();
+          c.moveTo(zig[0].x, zig[0].y);
+          for (let i = 1; i < n; i++) c.lineTo(zig[i].x, zig[i].y);
+          c.stroke();
+        }
+        return;
+      }
+      for (let i = 1; i < n; i++) {
+        const k = i / n; // 0 = oldest .. 1 = newest
+        if (style === "smoke") {
+          seg(i, `rgba(220,220,230,${0.3 * k})`, 3 + k * 8);
+          seg(i, `rgba(255,255,255,${0.45 * k})`, 1 + k * 2);
+        } else if (style === "fire") {
+          seg(i, `rgba(224,48,26,${0.6 * k})`, 2 + k * 6);
+          seg(i, `rgba(255,138,26,${0.8 * k})`, 1 + k * 4);
+          seg(i, `rgba(255,227,74,${k})`, 0.5 + k * 1.5);
+        } else if (style === "rainbow") {
+          seg(i, `hsla(${(i * 28 + clock * 240) % 360},100%,60%,${0.85 * k})`, 1 + k * 4);
+          seg(i, `rgba(255,255,255,${0.6 * k})`, 0.5 + k);
+        } else if (style === "beat") {
+          seg(i, `hsla(${(clock * 90) % 360},100%,60%,${0.6 * k})`, (1 + k * 4) * (1 + kick * 1.5));
+          seg(i, `rgba(255,255,255,${0.9 * k})`, (0.5 + k * 1.5) * (1 + kick));
+        } else if (style === "gold") {
+          seg(i, `rgba(184,134,11,${0.6 * k})`, 1 + k * 4);
+          seg(i, `rgba(255,215,0,${0.9 * k})`, 0.5 + k * 2);
+        } else {
+          seg(i, `rgba(255,95,210,${0.5 * k})`, 1 + k * 4);
+          seg(i, `rgba(255,255,255,${0.9 * k})`, 0.5 + k * 1.5);
+        }
+      }
+      if (style === "gold" && Math.random() < 0.6) {
+        const p = pts[Math.floor(Math.random() * n)];
+        c.fillStyle = "#ffffff";
+        c.fillRect(Math.round(p.x + (Math.random() - 0.5) * 6), Math.round(p.y + (Math.random() - 0.5) * 6), 1, 1);
+      }
+    };
+    const drawBlade = () => drawBladeWith(ctx, blade, cut.pts);
+    // a looping swipe across an area (for the shop and the SHOP panel)
+    const demoSwipe = (x0: number, y0: number, w: number, h: number, t: number) => {
+      const ph = (t * 0.9) % 1.4;
+      const pts: { x: number; y: number }[] = [];
+      for (let i = 0; i < 16; i++) {
+        const u = ph - (15 - i) * 0.025;
+        if (u < 0 || u > 1) continue;
+        pts.push({ x: x0 + u * w, y: y0 + h * 0.8 - Math.sin(u * Math.PI) * h * 0.6 });
+      }
+      return { pts, ph };
+    };
+    // the money icon: a little pile of kief (8 x 7)
+    const kiefIcon = (c: CanvasRenderingContext2D, x: number, y: number) => {
+      c.fillStyle = INK;
+      c.fillRect(x + 2, y + 2, 4, 1);
+      c.fillRect(x + 1, y + 3, 6, 1);
+      c.fillRect(x, y + 4, 8, 3);
+      c.fillStyle = "#f0e6a0";
+      c.fillRect(x + 3, y + 3, 2, 1);
+      c.fillRect(x + 2, y + 4, 4, 1);
+      c.fillRect(x + 1, y + 5, 6, 1);
+      c.fillStyle = "#d8c870";
+      c.fillRect(x + 1, y + 6, 6, 1);
+      c.fillStyle = "#ffffff";
+      c.fillRect(x + 4, y + 4, 1, 1);
+      c.fillRect(x + 2, y + 5, 1, 1);
+      c.fillRect(x + 3, y, 1, 1);
+      c.fillRect(x + 6, y + 1, 1, 1);
+    };
+    // the picture in the shop's preview box
+    const drawPreview = (c: CanvasRenderingContext2D, id: string | null, b: ShopBox, t: number) => {
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      const [kind, key] = (id ?? "").split(":");
+      const nugAndSwipe = (style: BladeId) => {
+        const sw = demoSwipe(b.x + 6, b.y + 10, b.w - 12, b.h - 24, t);
+        if (sw.ph < 0.5) drawPic(pics[0], cx, cy, 0);
+        else {
+          const d = (sw.ph - 0.5) * 30;
+          drawPic(halfPics[0][0], cx - d * 0.4, cy - d * 0.5, -0.3 - d * 0.04);
+          drawPic(halfPics[0][1], cx + d * 0.4, cy + d * 0.5, -0.3 + d * 0.04);
+        }
+        drawBladeWith(c, style, sw.pts);
+      };
+      if (kind === "blade") {
+        nugAndSwipe(key as BladeId);
+        return;
+      }
+      c.font = `8px ${fontFamily}`;
+      c.textAlign = "center";
+      c.textBaseline = "top";
+      if (key === "life") {
+        const n = maxLives() + (lv.life < 2 ? 1 : 0);
+        for (let i = 0; i < n; i++) drawX(Math.round(cx - (n - 1) * 6 + i * 12), Math.round(cy - 10), i === n - 1 && lv.life < 2 ? GREEN : "#5a4a6a");
+        c.fillStyle = GREEN;
+        c.fillText(lv.life < 2 ? "+1 LIFE" : "MAXED", cx, cy + 8);
+      } else if (key === "guard") {
+        drawBomb(cx, cy + 2);
+        for (let k = 0; k < 24; k++) {
+          const a = (k / 24) * Math.PI * 2 + t * 2;
+          c.fillStyle = k % 2 ? "#6ae0ff" : "#ffffff";
+          c.fillRect(Math.round(cx + Math.cos(a) * 18), Math.round(cy + 2 + Math.sin(a) * 18), 2, 2);
+        }
+      } else if (key === "gold") {
+        drawPic(pics[ITEMS.length - 1], cx, cy - 6, Math.sin(t * 2) * 0.3);
+        if (Math.floor(t * 6) % 2 === 0) {
+          c.fillStyle = "#ffffff";
+          c.fillRect(Math.round(cx + Math.cos(t * 4) * 12), Math.round(cy - 6 + Math.sin(t * 4) * 12), 1, 1);
+        }
+        c.fillStyle = YELLOW;
+        c.fillText(`X${Math.min(lv.gold + 2, 3)}`, cx, cy + 14);
+      } else if (key === "reach") {
+        nugAndSwipe(blade);
+        c.strokeStyle = "rgba(255,255,255,0.25)";
+        c.lineWidth = 8 + lv.reach * 3;
+        const sw = demoSwipe(b.x + 6, b.y + 10, b.w - 12, b.h - 24, t);
+        if (sw.pts.length > 1) {
+          c.beginPath();
+          c.moveTo(sw.pts[0].x, sw.pts[0].y);
+          for (const p of sw.pts) c.lineTo(p.x, p.y);
+          c.stroke();
+        }
+      } else {
+        nugAndSwipe(blade);
       }
     };
 
@@ -945,15 +1308,15 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       s.halves = s.halves.filter((h) => h.y < H + 24);
 
       // a combo ends a moment after the last cut
-      if (blade.cut > 0 && clock - blade.cutT > 0.25) {
-        if (blade.cut >= COMBO_MIN) {
-          s.score += blade.cut;
-          s.pops.push({ x: Math.max(50, Math.min(W - 50, blade.cutX)), y: Math.max(26, blade.cutY - 14), text: `COMBO x${blade.cut}! +${blade.cut}`, life: 1.3, color: YELLOW });
+      if (cut.cut > 0 && clock - cut.cutT > 0.25) {
+        if (cut.cut >= COMBO_MIN) {
+          s.score += cut.cut;
+          s.pops.push({ x: Math.max(50, Math.min(W - 50, cut.cutX)), y: Math.max(26, cut.cutY - 14), text: `COMBO x${cut.cut}! +${cut.cut}`, life: 1.3, color: YELLOW });
           sfx.combo();
         }
-        blade.cut = 0;
+        cut.cut = 0;
       }
-      blade.pts = blade.pts.filter((p) => p.t > clock - 0.12); // the trail fades quickly
+      cut.pts = cut.pts.filter((p) => p.t > clock - (BLADE_LIFE[blade] ?? 0.12)); // the trail fades quickly
 
       for (const p of s.parts) {
         p.x += p.vx * dt;
@@ -1010,7 +1373,9 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       if (s.mode === "running") {
         text(String(s.score), 18, 4, YELLOW, 16, "left");
         if (best > 0) text(`BEST ${best}`, 18, 22, "#b48ad0", 8, "left");
-        for (let i = 0; i < START_LIVES; i++) drawX(W - 10 - i * 12, 9, i < START_LIVES - s.lives ? RED : "#5a4a6a");
+        const ml = maxLives();
+        for (let i = 0; i < ml; i++) drawX(W - 10 - i * 12, 9, i < ml - s.lives ? RED : "#5a4a6a");
+        if (s.guard > 0) drawBomb(W - 18 - ml * 12 - 52, 10); // the BOMB GUARD is still there
         if (!pause.on) drawPauseBtn();
         // how to play, during the first seconds
         if (s.t < 3.5) {
@@ -1026,15 +1391,16 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
         text(GAME_TITLE, W / 2, 14 - Math.round(beatKick() * 2), PINK, 16); // (bounces to the music)
         drawPic(pics[0], W / 2 - 92, 21, 0); // a nug on each side of the title
         drawPic(pics[5], W / 2 + 92, 21, 0);
-        text(touchRef.current ? "SWIPE TO CHOP THE NUGS" : "DRAG THE MOUSE TO CHOP THE NUGS", W / 2, 44, "#ffffff");
+        text(touchRef.current ? "SWIPE TO CHOP NUGS" : "DRAG TO CHOP NUGS", W / 2, 44, "#ffffff");
         text("DON'T CUT THE BOMBS", W / 2, 58, RED);
-        drawBomb(W / 2 + 90, 62);
-        text(`DROP ${START_LIVES} = GAME OVER`, W / 2, 72, "#d8a8ff");
+        drawBomb(W / 2 + 84, 62);
+        text(`DROP ${maxLives()} = GAME OVER`, W / 2, 72, "#d8a8ff");
         text(`${COMBO_MIN}+ IN ONE SWIPE = COMBO`, W / 2, 86, GREEN);
         text("GOLDEN NUG = +5", W / 2, 98, YELLOW);
         drawPic(pics[6], W / 2 - 78, 101, 0);
         if (Math.floor(clock * 2) % 2 === 0) text(touchRef.current ? "TAP TO START" : "SPACE / CLICK = START", W / 2, 116, YELLOW);
         if (best > 0) text(`BEST ${best}`, W / 2, 132, "#b48ad0");
+        drawPanels();
       }
 
       if (s.mode === "over") {
@@ -1044,32 +1410,54 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
           text(s.why, W / 2, 24, s.why === "BOOM!" ? RED : PINK, 16);
           text(`SCORE ${s.score}`, W / 2, 56, YELLOW);
           text(s.newBest ? "NEW BEST!" : `BEST ${best}`, W / 2, 70, s.newBest ? PINK : "#b48ad0");
+          text(`+${s.kiefRun} KIEF SAVED`, W / 2, 84, "#f0e6a0");
           if (s.t > 0.8 && Math.floor(clock * 2) % 2 === 0) text(touchRef.current ? "TAP = AGAIN" : "SPACE / CLICK = AGAIN", W / 2, 100, GREEN);
+          drawPanels();
         }
       }
 
-      if (pause.on) {
-        ctx.fillStyle = "rgba(14,4,24,0.75)";
-        ctx.fillRect(0, 0, W, H);
-        text("PAUSED", W / 2, 40, PINK, 16);
-        text(`SCORE ${s.score}`, W / 2, 70, YELLOW);
-        if (Math.floor(pauseClock * 2) % 2 === 0) text(touchRef.current ? "TAP = RESUME" : "SPACE / ESC / CLICK = RESUME", W / 2, 92, GREEN);
-      }
+      if (pause.on) drawPauseMenu(ctx, fontFamily, { W, H, row: pause.row, t: pauseClock, touch: touchRef.current, stats: `SCORE ${s.score}  +${s.kiefRun} KIEF` });
 
       // the bomb: a white flash
       if (s.flash > 0) {
         ctx.fillStyle = `rgba(255,255,255,${Math.min(1, s.flash) * 0.8})`;
         ctx.fillRect(0, 0, W, H);
       }
-      drawFx();
+      // the shop covers everything (the speaker + slider are hidden then: the shop's X sits there)
+      if (shop.open)
+        drawPinkShop(ctx, fontFamily, SHOP_ROWS, shop.ui, shopHooks, {
+          W,
+          H,
+          touch: touchRef.current,
+          backLine: shop.from === "pause" ? "BACK TO YOUR GAME" : "BACK TO THE START SCREEN",
+        });
+      else drawFx();
     };
+    // the two side panels on the start + game over screens: your kief, and the SHOP
+    const drawPanels = () =>
+      drawSidePanels(ctx, fontFamily, {
+        W,
+        money: bank,
+        moneyName: "KIEF",
+        icon: kiefIcon,
+        touch: touchRef.current,
+        t: clock,
+        preview: (c, cx, cy) => {
+          const sw = demoSwipe(cx - 22, cy - 18, 44, 36, clock);
+          drawPic(pics[0], cx, cy, 0);
+          drawBladeWith(c, blade, sw.pts);
+        },
+      });
 
     let raf = 0;
     let last = performance.now();
     const loop = (now: number) => {
       const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
       last = now;
-      if (pause.on) pauseClock += dt; // only for the blinking text
+      if (shop.open) {
+        shop.ui.t += dt; // (the game behind the shop waits)
+        clock += dt;
+      } else if (pause.on) pauseClock += dt; // only for the blinking text
       else step(dt);
       render();
       raf = requestAnimationFrame(loop);
