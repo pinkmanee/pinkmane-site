@@ -772,7 +772,7 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
     const shopOk = () => {
       if (shopAct(SHOP_ROWS, shop.ui, shopHooks) === "close") closeShop();
     };
-    // GAME MENU: back to the PSP game list (the kief from the game you left is kept)
+    // back to this game's start screen (the kief from the game you left is kept)
     const toMenu = () => {
       boardRef.current?.hide();
       runId++;
@@ -789,11 +789,6 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       s.misses = [];
       cut.down = false;
       cut.pts = [];
-      // then leave to the PSP game list, the same way VOID's pause HOME does
-      // (one tiny wait, so the page is listening when the key arrives)
-      window.setTimeout(() => {
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace" }));
-      }, 0);
     };
     const pauseChoose = () => {
       const pick = PAUSE_ROWS[pause.row];

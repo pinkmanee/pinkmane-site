@@ -31,7 +31,7 @@ import {
 // (drag it, or press - and +). Your choice is saved in the browser.
 // PINK SHOP (the same shop screen as the other games, see PinkShop.ts): S / DOWN or tap SHOP on the start / game over screen,
 //   or SHOP in the pause menu. Gems you collect are saved and spent there on outfits, jetpack trails and upgrades.
-// PAUSE MENU: RESUME / RESTART / SHOP / GAME MENU (back to the PSP game list).
+// PAUSE MENU: RESUME / RESTART / SHOP / GAME MENU (back to this game's start screen).
 
 type Props = {
   // Goes up by 1 every time the player presses OK / A on the handheld (= start, or a short puff of the jetpack)
@@ -562,7 +562,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
     const shopOk = () => {
       if (shopAct(SHOP_ROWS, shop.ui, shopHooks) === "close") closeShop();
     };
-    // GAME MENU: back to the PSP game list (the gems from the run you left are kept)
+    // back to this game's start screen (the gems from the run you left are kept)
     const toMenu = () => {
       boardRef.current?.hide();
       runId++;
@@ -585,11 +585,6 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       s.rot = 0;
       s.speed = START_SPEED;
       s.puff = 0;
-      // then leave to the PSP game list, the same way VOID's pause HOME does
-      // (one tiny wait, so the page is listening when the key arrives)
-      window.setTimeout(() => {
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace" }));
-      }, 0);
     };
     const pauseChoose = () => {
       const pick = PAUSE_ROWS[pause.row];
