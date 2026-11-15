@@ -322,55 +322,95 @@ export function drawSidePanels(
   text(o.touch ? "TAP HERE" : "S / DOWN", rx, 98, "#d8b8e8");
 }
 
-// ---------- the pause menu every game shares ----------
+// ---------- the pause menu every game shares (it looks exactly like PINKMANE VOID's) ----------
 // RESUME = keep playing, RESTART = a new run, SHOP = the shop (and back to the paused game),
 // GAME MENU = back to the PSP game list (NOT the iPod menu). UP / DOWN pick, OK / SPACE / tap chooses, ESC = resume.
+// Games without a shop use PAUSE_ROWS_SIMPLE (no SHOP row).
 export const PAUSE_ROWS = ["RESUME", "RESTART", "SHOP", "GAME MENU"] as const;
-export type PauseChoice = (typeof PAUSE_ROWS)[number];
-const PAUSE_Y0 = 40;
-const PAUSE_DY = 16;
-const PAUSE_W = 132;
+export const PAUSE_ROWS_SIMPLE = ["RESUME", "RESTART", "GAME MENU"] as const;
+export type PauseChoice = "RESUME" | "RESTART" | "SHOP" | "GAME MENU";
+const PAUSE_Y0 = 42; // the first row (the same spot as in VOID)
+const PAUSE_DY = 14; // how far apart the rows are
+const SCREEN = "#d7efbc"; // VOID's pale green
 
 export function drawPauseMenu(
   ctx: CanvasRenderingContext2D,
   font: string,
-  o: { W: number; H: number; row: number; t: number; touch: boolean; stats: string }
+  o: { W: number; H: number; row: number; t: number; touch: boolean; stats?: string; rows?: readonly string[] }
 ) {
   const { W, H } = o;
-  ctx.fillStyle = "rgba(14,4,24,0.82)";
+  const rows = o.rows ?? PAUSE_ROWS;
+  ctx.fillStyle = "rgba(22, 12, 29, 0.7)";
   ctx.fillRect(0, 0, W, H);
+  ctx.font = `8px ${font}`;
   ctx.textBaseline = "top";
   ctx.textAlign = "center";
-  ctx.font = `16px ${font}`;
-  ctx.fillStyle = INK;
-  ctx.fillText("PAUSED", W / 2 + 1, 13);
-  ctx.fillStyle = "#ff5fd2";
-  ctx.fillText("PAUSED", W / 2, 12);
-  ctx.font = `8px ${font}`;
-  const on = Math.floor(o.t * 3) % 2 === 0;
-  PAUSE_ROWS.forEach((label, i) => {
-    const y = PAUSE_Y0 + i * PAUSE_DY;
+  // a little box with text in it (pink when it's the picked row)
+  const box = (text: string, y: number, picked: boolean, pad = 10) => {
+    const w = ctx.measureText(text).width + pad;
+    ctx.fillStyle = picked ? PINK : SCREEN;
+    ctx.fillRect(Math.round(W / 2 - w / 2), y - 2, Math.round(w), 12);
+    ctx.fillStyle = picked ? "#ffffff" : INK;
+    ctx.fillText(text, W / 2, y);
+  };
+  box("PAUSED", 26, false, 8);
+  rows.forEach((label, i) => {
     const picked = i === o.row;
-    const x = Math.round(W / 2 - PAUSE_W / 2);
-    ctx.fillStyle = INK;
-    ctx.fillRect(x - 1, y - 4, PAUSE_W + 2, 14);
-    ctx.fillStyle = picked ? (on ? PINK : "#ff5fe0") : "#2a1040";
-    ctx.fillRect(x, y - 3, PAUSE_W, 12);
-    ctx.fillStyle = picked ? "#ffffff" : "#e8d0f0";
-    ctx.fillText(picked ? `> ${label} <` : label, W / 2, y);
+    box((picked ? "> " : "") + label, PAUSE_Y0 + i * PAUSE_DY, picked);
   });
-  ctx.fillStyle = "#d8b8e8";
-  ctx.fillText(o.stats, W / 2, PAUSE_Y0 + PAUSE_ROWS.length * PAUSE_DY + 4);
-  ctx.fillStyle = "#9a7ab8";
-  ctx.fillText(o.touch ? "TAP TO CHOOSE" : "UP/DOWN + OK   ESC = RESUME", W / 2, H - 13);
+  if (o.stats) {
+    const y = PAUSE_Y0 + rows.length * PAUSE_DY + 4;
+    ctx.fillStyle = INK;
+    ctx.fillText(o.stats, W / 2 + 1, y + 1);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(o.stats, W / 2, y);
+  }
+  if (Math.floor(o.t * 2) % 2 === 0) box(o.touch ? "TAP TO CHOOSE" : "\u2191\u2193 CHOOSE \u00b7 OK CONFIRM", H - 28, false, 8);
 }
 
-// which pause row a click / tap is on (-1 = none)
-export function pauseTapRow(x: number, y: number, W: number) {
-  if (Math.abs(x - W / 2) > PAUSE_W / 2 + 4) return -1;
-  for (let i = 0; i < PAUSE_ROWS.length; i++) {
-    const ry = PAUSE_Y0 + i * PAUSE_DY;
-    if (y >= ry - 5 && y < ry + 11) return i;
+// which pause row a click / tap is on (-1 = none). n = how many rows that game's menu has.
+export function pauseTapRow(x: number, y: number, W: number, n: number = PAUSE_ROWS.length) {
+  if (Math.abs(x - W / 2) > 80) return -1;
+  const r = Math.floor((y - (PAUSE_Y0 - 2)) / PAUSE_DY);
+  return r >= 0 && r < n ? r : -1;
+}
+
+// UP / DOWN / OK / ESC on the pause menu. Returns what the key did:
+//   "move" (the row changed), "choose" (OK pressed), "resume" (ESC / P), or null (not a pause key)
+export function pauseKey(p: { row: number }, n: number, key: string): "move" | "choose" | "resume" | null {
+  if (key === "ArrowUp" || key === "w" || key === "W") {
+    p.row = (p.row + n - 1) % n;
+    return "move";
   }
-  return -1;
+  if (key === "ArrowDown" || key === "s" || key === "S") {
+    p.row = (p.row + 1) % n;
+    return "move";
+  }
+  if (key === "Enter" || key === " ") return "choose";
+  if (key === "Escape" || key === "p" || key === "P") return "resume";
+  return null;
+}
+
+// the small II button the games draw in a corner (phones tap it, computers can click it). x, y = its top left corner.
+export const PAUSE_BTN_W = 13;
+export const PAUSE_BTN_H = 11;
+export function drawPauseButton(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  ctx.fillStyle = INK;
+  ctx.fillRect(x, y, PAUSE_BTN_W, PAUSE_BTN_H);
+  ctx.fillStyle = PINK;
+  ctx.fillRect(x + 1, y + 1, PAUSE_BTN_W - 2, PAUSE_BTN_H - 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(x + 4, y + 3, 2, 5);
+  ctx.fillRect(x + 7, y + 3, 2, 5);
+}
+// did a tap at (px, py) hit the II button at (x, y)? (a few pixels extra all round, so it's easy to hit with a thumb)
+export const pauseBtnHit = (px: number, py: number, x: number, y: number) =>
+  px >= x - 4 && px <= x + PAUSE_BTN_W + 4 && py >= y - 4 && py <= y + PAUSE_BTN_H + 4;
+
+// GAME MENU: leave to the PSP game list, the same way VOID's pause menu does
+// (one tiny wait, so the page is listening when the key arrives)
+export function leaveToGameMenu() {
+  window.setTimeout(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace" }));
+  }, 0);
 }

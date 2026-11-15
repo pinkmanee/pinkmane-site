@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
+import { PAUSE_ROWS_SIMPLE, drawPauseMenu, leaveToGameMenu, pauseKey, pauseTapRow } from "./PinkShop";
 
 // PINK HELL: a top-down 2D shooter, a bit like the old 90s demon shooters.
 // Pinkmane is stuck in a hell dungeon and the demons come out of the glowing portals in waves.
@@ -9,7 +10,7 @@ import { ScorePanel, type ScoreApi } from "./Scoreboard";
 //   MOUSE              = aim (the red crosshair), Pinkmane always looks where you aim
 //   CLICK (hold)       = shoot
 //   1 / 2, Q, wheel    = switch weapon (PISTOL never runs out, SHOTGUN needs shells)
-//   ESC / P            = pause (it also pauses by itself if you switch to another tab or window)
+//   ESC / P            = pause menu: RESUME / RESTART / GAME MENU (it also pauses by itself if you switch to another tab or window)
 // On phones + tablets (see HellPad.tsx): pink joystick = walk (Pinkmane looks the way he walks),
 // FIRE button = shoot (hold it, it aims at the nearest demon by itself), GUN = switch weapon, PAUSE button at the top.
 // You can also touch the game screen where you want to shoot.
@@ -661,7 +662,24 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       stick.mx = stick.my = 0;
       stick.fire = false;
       s.needRelease = false;
+      pauseRow = 0;
       tone(on ? 600 : 400, on ? 300 : 800, 0.12, "square", 0.04);
+    };
+    // the pause menu (the same one in every game, see PinkShop.ts)
+    let pauseRow = 0;
+    const pauseChoose = () => {
+      const pick = PAUSE_ROWS_SIMPLE[pauseRow];
+      if (pick === "RESUME") setPause(false);
+      else if (pick === "RESTART") {
+        // a brand new run, blood washed away
+        s.paused = false;
+        s.mode = "ready";
+        bakeMap();
+        go();
+      } else {
+        s.paused = false;
+        leaveToGameMenu();
+      }
     };
     const toCanvas = (cx: number, cy: number) => {
       const r = canvas.getBoundingClientRect();
@@ -714,7 +732,12 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       }
       onMove(e);
       if (s.paused) {
-        setPause(false); // a click / tap on the pause screen = back to the game
+        // a click / tap on a pause menu row picks it
+        const r = pauseTapRow(mouse.x, mouse.y, W, PAUSE_ROWS_SIMPLE.length);
+        if (r >= 0) {
+          pauseRow = r;
+          pauseChoose();
+        }
         return;
       }
       mouse.down = true;
@@ -725,12 +748,21 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       if (tag === "INPUT" || tag === "TEXTAREA") return; // typing your name for the Top 10
       const k = e.key.toLowerCase();
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)) e.preventDefault();
-      if (e.repeat) return;
-      if (k === "escape" || k === "p") {
-        setPause(!s.paused);
+      if (s.paused) {
+        // UP / DOWN / OK / SPACE move and pick on the pause menu, ESC / P = back to the game
+        const pm = { row: pauseRow };
+        const did = pauseKey(pm, PAUSE_ROWS_SIMPLE.length, e.key);
+        pauseRow = pm.row;
+        if (did === "move") sfx.switch();
+        else if (!e.repeat && did === "choose") pauseChoose();
+        else if (!e.repeat && did === "resume") setPause(false);
         return;
       }
-      if (s.paused) return;
+      if (e.repeat) return;
+      if (k === "escape" || k === "p") {
+        setPause(true);
+        return;
+      }
       keys.add(k);
       if (k === "1") switchWeapon(0);
       if (k === "2") switchWeapon(1);
@@ -1765,14 +1797,10 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         }
       }
       if (s.paused) {
-        ctx.fillStyle = "rgba(20,0,0,0.65)";
-        ctx.fillRect(0, 0, W, H);
-        text("PAUSED", W / 2, 30, RED, 24);
-        text(`WAVE ${s.wave}   SCORE ${s.score}`, W / 2, 66, "#ffffff");
-        if (Math.floor(clock * 2) % 2 === 0) text(touchy ? "PRESS PLAY" : "ESC / CLICK = PLAY", W / 2, 90, YELLOW);
-        text(touchy ? "EXIT = MENU" : "BACKSPACE = MENU", W / 2, 110, "#c08080");
+        drawPauseMenu(ctx, fontFamily, { W, H, row: pauseRow, t: clock, touch: touchy, rows: PAUSE_ROWS_SIMPLE, stats: `WAVE ${s.wave}  SCORE ${s.score}` });
       }
-      if (!s.paused) drawCrosshair();
+      // (the crosshair stays while paused too: it's your mouse pointer for clicking the menu)
+      if (!s.paused || !touchy) drawCrosshair();
     };
 
     let raf = 0;

@@ -43,7 +43,8 @@ type Mode =
   | "wax"; // the wax moment (PINK RUN INFINITE only): frozen on the wax bong hit after the 20k boss
 
 // The pause (Esc) menu, top to bottom
-const PAUSE_OPTIONS = ["RESUME", "RESTART", "PICK OUTFIT", "SHOP", "GAME TYPE", "HOME"];
+// (GAME MENU = back to the PSP game list, the same name as in every other game)
+const PAUSE_OPTIONS = ["RESUME", "RESTART", "PICK OUTFIT", "SHOP", "GAME TYPE", "GAME MENU"];
 
 // One column of the level
 type Column = {
@@ -5746,7 +5747,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
         s.fromPause = false;
         s.homeChoice = s.gameMode === "levels" ? 1 : 0;
         s.mode = "home";
-      } else if (picked === "HOME") {
+      } else if (picked === "GAME MENU") {
         goHome();
       } else {
         resumeGame();

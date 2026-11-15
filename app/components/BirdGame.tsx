@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { PAUSE_ROWS_SIMPLE, drawPauseButton, drawPauseMenu, leaveToGameMenu, pauseBtnHit, pauseKey, pauseTapRow } from "./PinkShop";
 
 type Props = {
   // Goes up by 1 every time the player presses OK / Enter / Space
@@ -153,6 +154,8 @@ function getOwnerCode() {
 
 export default function BirdGame({ actionSignal, fontFamily, muted }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // the pause menu (the same one in every game, see PinkShop.ts)
+  const pauseRef = useRef({ on: false, row: 0, t: 0 });
   const firstSignal = useRef(actionSignal);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
@@ -694,6 +697,52 @@ export default function BirdGame({ actionSignal, fontFamily, muted }: Props) {
     }
   };
 
+  // ---------- PAUSE: the same menu in every game (see PinkShop.ts) ----------
+  // ESC / P, or the little II button at the top = RESUME / RESTART / GAME MENU (GAME MENU = back to the PSP game list)
+  const PAUSE_BTN = { x: 26, y: 4 };
+  const pauseActive = () => state.current.mode === "running"; // the II button only shows while you play
+  const setPause = (on: boolean) => {
+    const p = pauseRef.current;
+    if (on && state.current.mode === "entry") return; // (typing your name for the Top 10)
+    p.on = on;
+    p.row = 0;
+  };
+  const pauseChoose = () => {
+    const p = pauseRef.current;
+    const pick = PAUSE_ROWS_SIMPLE[p.row];
+    p.on = false;
+    if (pick === "RESTART") {
+      newGame();
+      state.current.mode = "ready";
+    } else if (pick === "GAME MENU") leaveToGameMenu();
+  };
+  const pauseStats = () => {
+    const s = state.current;
+    return `SCORE ${s.score}`;
+  };
+  // a click / tap on the screen, in game pixels
+  const toGamePt = (el: HTMLCanvasElement, cx: number, cy: number) => {
+    const rect = el.getBoundingClientRect();
+    const scale = Math.min(rect.width / W, rect.height / H);
+    return { x: (cx - rect.left - (rect.width - W * scale) / 2) / scale, y: (cy - rect.top - (rect.height - H * scale) / 2) / scale };
+  };
+  // a tap while paused picks a row; a tap on the II button pauses. true = the tap was used up here
+  const pauseTap = (x: number, y: number) => {
+    if (pauseRef.current.on) {
+      const r = pauseTapRow(x, y, W, PAUSE_ROWS_SIMPLE.length);
+      if (r >= 0) {
+        pauseRef.current.row = r;
+        pauseChoose();
+      }
+      return true;
+    }
+    if (pauseActive() && pauseBtnHit(x, y, PAUSE_BTN.x, PAUSE_BTN.y)) {
+      setPause(true);
+      return true;
+    }
+    return false;
+  };
+
   // Start the game loop once
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -740,18 +789,50 @@ export default function BirdGame({ actionSignal, fontFamily, muted }: Props) {
     loadBoard();
     newGame();
 
+    // PAUSE keys. This listens BEFORE the page does, so while paused UP / DOWN / OK / SPACE only move the pause menu
+    // (they don't steer, jump or skip songs). BACKSPACE still goes back to the game list.
+    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false; // phone / tablet: the menu says TAP
+    const onPauseKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      const p = pauseRef.current;
+      if (!p.on) {
+        if ((e.key === "Escape" || e.key === "p" || e.key === "P") && state.current.mode !== "entry") {
+          setPause(true);
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+        return;
+      }
+      if (e.key === "Backspace") return;
+      const did = pauseKey(p, PAUSE_ROWS_SIMPLE.length, e.key);
+      if (!did) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.repeat && did !== "move") return;
+      if (did === "choose") pauseChoose();
+      else if (did === "resume") setPause(false);
+    };
+    window.addEventListener("keydown", onPauseKey, true);
+
     let raf = 0;
     let last = performance.now();
     const loop = (now: number) => {
       const dt = Math.min(0.033, (now - last) / 1000);
       last = now;
-      update(dt);
+      const pz = pauseRef.current;
+      if (pz.on) {
+        pz.t += dt;
+      } else update(dt);
       draw(ctx);
+      if (pz.on) drawPauseMenu(ctx, fontFamily, { W, H, row: pz.row, t: pz.t, touch: coarse, rows: PAUSE_ROWS_SIMPLE, stats: pauseStats() });
+      else if (pauseActive()) drawPauseButton(ctx, PAUSE_BTN.x, PAUSE_BTN.y);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => {
       cancelAnimationFrame(raf);
+      window.removeEventListener("keydown", onPauseKey, true);
       window.removeEventListener("keydown", onKey);
       audioCtxRef.current?.close().catch(() => {});
     };
@@ -760,7 +841,11 @@ export default function BirdGame({ actionSignal, fontFamily, muted }: Props) {
 
   // React to OK / Enter / Space from the iPod controls
   useEffect(() => {
-    if (actionSignal !== firstSignal.current) press();
+    // (OK while paused = choose the highlighted pause row)
+    if (actionSignal !== firstSignal.current) {
+      if (pauseRef.current.on) pauseChoose();
+      else press();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actionSignal]);
 
@@ -779,6 +864,10 @@ export default function BirdGame({ actionSignal, fontFamily, muted }: Props) {
         width={W}
         height={H}
         onPointerDown={(e) => {
+          {
+            const pt = toGamePt(e.currentTarget, e.clientX, e.clientY);
+            if (pauseTap(pt.x, pt.y)) return;
+          }
           // Tapping the speaker icon (top-left) turns game sounds on/off instead of flapping
           const rect = e.currentTarget.getBoundingClientRect();
           const scale = Math.min(rect.width / W, rect.height / H);

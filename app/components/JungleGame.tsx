@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
+import { PAUSE_ROWS_SIMPLE, drawPauseMenu, leaveToGameMenu, pauseTapRow } from "./PinkShop";
 
 // PINK JUNGLE: an endless 3-lane jungle runner. Pinkmane runs down an old mossy temple path
 // and BEARMANPIG (half bear, half pig, half man) chases him.
@@ -127,7 +128,6 @@ const FH = H - HOR;
 
 // ---------- Colours (green theme) ----------
 const GREEN = "#7dff6a";
-const GREEN_DARK = "#1d6b2a";
 const PINK = "#ff5fd2";
 const BRICKS: [number, number, number][] = [
   [78, 98, 72],
@@ -1095,7 +1095,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     };
 
     // ---------- game state ----------
-    // the pause menu (ESC). row 0 = RESUME, 1 = RESTART
+    // the pause menu (ESC), the same one in every game (see PinkShop.ts): RESUME / RESTART / GAME MENU
     const pause = { on: false, row: 0 };
     let pauseClock = 0;
 
@@ -1373,16 +1373,32 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     };
 
     inputRef.current = (a) => {
-      // PAUSED: up / down picks RESUME or RESTART, OK / SPACE / A / tap picks it
+      // PAUSED: up / down picks a row, OK / SPACE / A / tap picks it
       if (pause.on) {
-        if (a === "jump" || a === "slide" || a === "left" || a === "right") {
-          pause.row = pause.row === 0 ? 1 : 0;
+        const n = PAUSE_ROWS_SIMPLE.length;
+        if (a === "jump" || a === "left") {
+          pause.row = (pause.row + n - 1) % n;
+          sfx.lane();
+        }
+        if (a === "slide" || a === "right") {
+          pause.row = (pause.row + 1) % n;
           sfx.lane();
         }
         if (a === "go") {
+          const pick = PAUSE_ROWS_SIMPLE[pause.row];
           pause.on = false;
-          if (pause.row === 1) reset();
-          else sfx.lane();
+          if (pick === "RESUME") {
+            sfx.lane();
+            return;
+          }
+          // leaving the run: the gems you got so far go into your saved gems
+          if (s.mode === "running") {
+            bank += s.gems + s.bonus;
+            saveShop();
+            saveMissions();
+          }
+          if (pick === "RESTART") reset();
+          else leaveToGameMenu();
         }
         return;
       }
@@ -1563,8 +1579,8 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     const SHOP_ROW_Y = (r: number) => SHOP_Y0 + r * SHOP_DY; // the same rows drawShopScreen uses
     tapRef.current = (x, y) => {
       if (pause.on) {
-        // tap RESUME or RESTART
-        const row = y >= 58 && y < 76 ? 0 : y >= 76 && y < 94 ? 1 : -1;
+        // tap a row
+        const row = pauseTapRow(x, y, W, PAUSE_ROWS_SIMPLE.length);
         if (row >= 0) {
           pause.row = row;
           inputRef.current?.("go");
@@ -2798,21 +2814,15 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     };
 
     const drawPause = () => {
-      ctx.fillStyle = "rgba(0,15,5,0.72)";
-      ctx.fillRect(0, 0, W, H);
-      text("PAUSED", W / 2, 22, GREEN, 16);
-      const opts = ["RESUME", "RESTART"];
-      opts.forEach((o, i) => {
-        const y = 62 + i * 18;
-        const on = pause.row === i;
-        if (on) {
-          ctx.fillStyle = GREEN_DARK;
-          ctx.fillRect(W / 2 - 46, y - 4, 92, 15);
-        }
-        text(on ? `> ${o} <` : o, W / 2, y, on ? "#ffffff" : "#9ad19a");
+      drawPauseMenu(ctx, fontFamily, {
+        W,
+        H,
+        row: pause.row,
+        t: pauseClock,
+        touch: touchRef.current,
+        rows: PAUSE_ROWS_SIMPLE,
+        stats: `${Math.floor(s.dist)}M  ${s.gems} GEMS`,
       });
-      text(`${Math.floor(s.dist)}M  ${s.gems} GEMS`, W / 2, 110, "#b6ffb0");
-      if (Math.floor(pauseClock * 2) % 2 === 0) text(touchRef.current ? "TAP RESUME TO PLAY" : "ESC / PAUSE = RESUME", W / 2, 128, GREEN);
     };
 
     const render = () => {
