@@ -17,6 +17,7 @@ import {
   pauseTapRow,
   shopAct,
   shopMove,
+  shopSide,
   shopTap,
   type ShopHooks,
   type ShopRow,
@@ -1439,6 +1440,8 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     const shopInput = (a: "left" | "right" | "jump" | "slide" | "go") => {
       if (a === "jump") shopMove(JUNGLE_SHOP_ROWS, shopUi, -1, shopHooks);
       else if (a === "slide") shopMove(JUNGLE_SHOP_ROWS, shopUi, 1, shopHooks);
+      else if (a === "left") shopSide(JUNGLE_SHOP_ROWS, shopUi, -1, shopHooks);
+      else if (a === "right") shopSide(JUNGLE_SHOP_ROWS, shopUi, 1, shopHooks);
       else if (a === "go" && shopAct(JUNGLE_SHOP_ROWS, shopUi, shopHooks) === "close") closeShop();
     };
     const openShop = (fromPause: boolean) => {
@@ -2996,6 +2999,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
 
     const start = (e: TouchEvent) => {
       if (swipe.current.on || onUi(e.target)) return;
+      if (boardRef.current?.busy()) return; // the Top 10 box is open: leave the touch to it
       const t = e.changedTouches[0];
       // the FX speaker / slider
       if (fxDrag.current === -1 && fxPress(t.clientX, t.clientY, t.identifier)) {

@@ -80,6 +80,8 @@ const LAVA_DAMAGE = 30; // per second while standing in lava
 const DROP_CHANCE = 0.35; // chance a dead demon drops something
 const SHELLS_PICKUP = 8;
 const MEDKIT_HP = 20;
+const DEMON_GAP = 14; // pigs + imps stay this far from you (they don't sit right on top of you any more)
+const BITE_BOUNCE = 110; // how hard a pig bounces back after a bite (so you get a moment to run)
 const BOSS_EVERY = 5; // the boss comes every this many waves
 const DARKNESS = 0.62; // 0 = no darkness, 1 = pitch black outside your light
 const LIGHT_RADIUS = 95; // how far your light reaches
@@ -1520,6 +1522,14 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
           }
         }
 
+        // keep a gap: a pig / imp that's right next to you backs off a little instead of sitting on top of you
+        if ((e.kind === "pig" || e.kind === "imp") && dist < e.r + DEMON_GAP) {
+          const push = 1 - dist / (e.r + DEMON_GAP);
+          wx = (-dx / dist) * (0.4 + push);
+          wy = (-dy / dist) * (0.4 + push);
+          speed = Math.max(speed, def.speed);
+        }
+
         // keep away from the other demons a bit
         for (const o of s.enemies) {
           if (o === e || o.hp <= 0 || o.kind === "boss" || e.kind === "boss") continue;
@@ -1545,10 +1555,15 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
         if (Math.abs(wx) > 0.1) e.face = wx > 0 ? 1 : -1;
         e.walk += dt * (speed / 6);
 
-        // bite
-        if (dist < e.r + 5 && e.biteCd <= 0) {
-          e.biteCd = 0.9;
+        // bite (pigs + imps bite from their gap, then bounce back)
+        const reach = e.kind === "pig" || e.kind === "imp" ? e.r + DEMON_GAP + 3 : e.r + 5;
+        if (dist < reach && e.biteCd <= 0) {
+          e.biteCd = e.kind === "pig" ? 1.1 : 0.9;
           hurtPlayer(def.bite, e.x, e.y);
+          if (e.kind === "pig" || e.kind === "imp") {
+            e.kx = (-dx / dist) * BITE_BOUNCE;
+            e.ky = (-dy / dist) * BITE_BOUNCE;
+          }
           if (e.kind === "skull") {
             e.wind = 0;
             e.kx = (-dx / dist) * 80;

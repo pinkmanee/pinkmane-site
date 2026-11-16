@@ -624,7 +624,8 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted, to
       ctx.globalAlpha = 1;
       ctx.restore();
 
-      // HUD (the speaker sits top left, so the score starts after it)
+      // HUD (the speaker sits top left, so the score starts after it). Not on the start screen: it has its own.
+      if (s.mode !== "ready") {
       ctx.font = `8px ${fontFamily}`;
       ctx.textBaseline = "top";
       ctx.fillStyle = INK;
@@ -637,6 +638,7 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted, to
       ctx.fillStyle = INK;
       ctx.textAlign = "right";
       ctx.fillText(`HI ${pad(s.best)}`, W - OX, 5);
+      }
 
       if (s.mode === "ready") {
         const top = boardRef.current?.top();

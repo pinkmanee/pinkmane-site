@@ -785,9 +785,9 @@ export default function VortexGame({ actionSignal, spinRef, fontFamily, muted, t
       ctx.textBaseline = "top";
       ctx.fillStyle = INK;
       ctx.textAlign = "left";
-      ctx.fillText(`LV ${s.level}`, 24, 5);
+      if (hud) ctx.fillText(`LV ${s.level}`, 24, 5);
       ctx.textAlign = "right";
-      ctx.fillText(pad(s.score), W - 6, 5);
+      if (hud) ctx.fillText(pad(s.score), W - 6, 5);
       if (hud) ctx.fillText(`HI ${pad(s.best)}`, W - 6, H - 12);
       for (let i = 0; hud && i < s.lives; i++) {
         ctx.fillStyle = PINK;

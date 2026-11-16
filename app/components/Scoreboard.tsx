@@ -349,7 +349,11 @@ export function ScorePanel({
         ref={canvasRef}
         width={width}
         height={height}
-        onClick={() => phase !== "entry" && close()}
+        // (closes the moment it's touched: a "click" can get lost on phones when a game is catching the touches)
+        onPointerDown={(e) => {
+          e.preventDefault();
+          if (phase !== "entry") close();
+        }}
         style={{
           position: "absolute",
           inset: 0,

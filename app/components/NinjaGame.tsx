@@ -8,10 +8,14 @@ import {
   type ShopBox,
   newShopUi,
   shopMove,
+  shopSide,
   shopAct,
   shopTap,
   drawPinkShop,
   drawSidePanels,
+  drawOverScreen,
+  drawStartScreen,
+  KIT,
   panelShopHit,
   PAUSE_ROWS,
   drawPauseMenu,
@@ -49,6 +53,11 @@ type Props = {
 const GAME_TITLE = "PINK NINJA";
 // Where things are saved in the browser
 const BEST_KEY = "pinkmane-ninja-best";
+// ZEN MODE (pick it with ← → on the start screen): no bombs, dropping a nug costs nothing, you get ZEN_TIME seconds.
+// It has its own best score and doesn't go on the online Top 10 (that one stays for the real game).
+const ZEN_TIME = 60;
+const ZEN_BEST_KEY = "pinkmane-ninja-zen-best";
+const MODE_KEY = "pinkmane-ninja-mode"; // "classic" / "zen"
 const FX_KEY = "pinkmane-ninja-fx"; // "on" / "off": the game sounds
 const FX_VOL_KEY = "pinkmane-ninja-fx-volume"; // 0..1
 const BANK_KEY = "pinkmane-ninja-kief"; // your saved kief
@@ -472,8 +481,20 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
 
     // ---------- best score ----------
     let best = 0;
+    let zenBest = 0;
+    let zen = false; // ZEN MODE
+    const bestNow = () => (zen ? zenBest : best);
+    const toggleZen = () => {
+      zen = !zen;
+      sfx.click();
+      try {
+        localStorage.setItem(MODE_KEY, zen ? "zen" : "classic");
+      } catch {}
+    };
     try {
       best = Number(localStorage.getItem(BEST_KEY)) || 0;
+      zenBest = Number(localStorage.getItem(ZEN_BEST_KEY)) || 0;
+      zen = localStorage.getItem(MODE_KEY) === "zen";
     } catch {}
 
     // ---------- saved kief + shop ----------
@@ -564,13 +585,15 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       // the kief from this game goes into your saved kief
       bank += s.kiefRun;
       saveShop();
-      if (s.score > best) {
-        best = s.score;
+      if (s.score > bestNow()) {
+        if (zen) zenBest = s.score;
+        else best = s.score;
         s.newBest = true;
         try {
-          localStorage.setItem(BEST_KEY, String(best));
+          localStorage.setItem(zen ? ZEN_BEST_KEY : BEST_KEY, String(s.score));
         } catch {}
       }
+      if (zen) return; // (ZEN MODE doesn't go on the online Top 10)
       // ONLINE TOP 10: after a moment the name box (good score) or the Top 10 pops up
       const myRun = runId;
       const score = s.score;
@@ -606,7 +629,7 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
     const startWave = () => {
       s.wave++;
       const n = Math.min(MAX_PER_WAVE, 1 + Math.floor(s.wave / 3) + (Math.random() < 0.4 ? 1 : 0));
-      const bombChance = s.wave >= BOMB_FROM_WAVE ? Math.min(BOMB_CHANCE_MAX, 0.06 + s.wave * 0.012) : 0;
+      const bombChance = zen ? 0 : s.wave >= BOMB_FROM_WAVE ? Math.min(BOMB_CHANCE_MAX, 0.06 + s.wave * 0.012) : 0;
       const maxBombs = s.wave > 15 ? 2 : 1;
       let bombs = 0;
       const together = Math.random() < 0.35; // sometimes all at once, otherwise one after the other
@@ -772,7 +795,7 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
     const shopOk = () => {
       if (shopAct(SHOP_ROWS, shop.ui, shopHooks) === "close") closeShop();
     };
-    // back to this game's start screen (the kief from the game you left is kept)
+    // GAME MENU: back to the PSP game list (the kief from the game you left is kept)
     const toMenu = () => {
       boardRef.current?.hide();
       runId++;
@@ -789,6 +812,11 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       s.misses = [];
       cut.down = false;
       cut.pts = [];
+      // then leave to the PSP game list, the same way VOID's pause HOME does
+      // (one tiny wait, so the page is listening when the key arrives)
+      window.setTimeout(() => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace" }));
+      }, 0);
     };
     const pauseChoose = () => {
       const pick = PAUSE_ROWS[pause.row];
@@ -848,6 +876,7 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
         }
         if (s.mode !== "running") {
           if (panelShopHit(x, y, W) && canOpenShop()) openShop(s.mode === "over" ? "over" : "ready");
+          else if (s.mode === "ready" && y >= 32 && y < 48 && Math.abs(x - W / 2) < 90) toggleZen(); // the mode line
           else press();
           return;
         }
@@ -883,6 +912,19 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       },
     };
 
+    // ← → on the start screen = CLASSIC / ZEN. (capture: true = before the page, so it doesn't also skip the song)
+    const onModeKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || e.repeat) return;
+      const k = e.key;
+      if (s.mode !== "ready" || shop.open || pause.on || boardRef.current?.busy()) return;
+      if (k === "ArrowLeft" || k === "ArrowRight" || k === "a" || k === "A" || k === "d" || k === "D") {
+        toggleZen();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    };
+    window.addEventListener("keydown", onModeKey, true);
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat) return;
       const tag = (e.target as HTMLElement | null)?.tagName;
@@ -892,6 +934,8 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       if (shop.open) {
         if (k === "ArrowUp" || k === "w" || k === "W") shopMove(SHOP_ROWS, shop.ui, -1, shopHooks);
         else if (k === "ArrowDown" || k === "s" || k === "S") shopMove(SHOP_ROWS, shop.ui, 1, shopHooks);
+        else if (k === "ArrowLeft" || k === "a" || k === "A") shopSide(SHOP_ROWS, shop.ui, -1, shopHooks);
+        else if (k === "ArrowRight" || k === "d" || k === "D") shopSide(SHOP_ROWS, shop.ui, 1, shopHooks);
         else if (k === "Escape") closeShop();
         return;
       }
@@ -1260,6 +1304,7 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       if (s.shake > 0) s.shake -= dt;
       if (s.flash > 0) s.flash -= dt * 2;
 
+      if (s.mode === "running" && zen && s.runT >= ZEN_TIME) gameOver("TIME'S UP!");
       if (s.mode === "running") {
         // time for the next throw (with music on: it waits for the next beat, but never long)
         s.waveT -= dt;
@@ -1284,7 +1329,9 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
         if (t.vy > 0 && t.y > H + r + 8) {
           t.done = true;
           // a nug got away: lose a life (a bomb falling away is fine)
-          if (!t.bomb && s.mode === "running") {
+          if (!t.bomb && s.mode === "running" && zen) {
+            s.misses.push({ x: Math.max(8, Math.min(W - 8, t.x)), life: 1.2 }); // (ZEN MODE: no lives lost)
+          } else if (!t.bomb && s.mode === "running") {
             s.lives--;
             s.misses.push({ x: Math.max(8, Math.min(W - 8, t.x)), life: 1.2 });
             sfx.miss();
@@ -1367,10 +1414,16 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
 
       if (s.mode === "running") {
         text(String(s.score), 18, 4, YELLOW, 16, "left");
-        if (best > 0) text(`BEST ${best}`, 18, 22, "#b48ad0", 8, "left");
+        if (bestNow() > 0) text(`BEST ${bestNow()}`, 18, 22, "#b48ad0", 8, "left");
         const ml = maxLives();
-        for (let i = 0; i < ml; i++) drawX(W - 10 - i * 12, 9, i < ml - s.lives ? RED : "#5a4a6a");
-        if (s.guard > 0) drawBomb(W - 18 - ml * 12 - 52, 10); // the BOMB GUARD is still there
+        if (zen) {
+          // ZEN MODE: the time left instead of lives
+          const left = Math.max(0, Math.ceil(ZEN_TIME - s.runT));
+          text(`${left}S`, W - 6, 4, left <= 10 && Math.floor(clock * 4) % 2 === 0 ? RED : GREEN, 16, "right");
+        } else {
+          for (let i = 0; i < ml; i++) drawX(W - 10 - i * 12, 9, i < ml - s.lives ? RED : "#5a4a6a");
+          if (s.guard > 0) drawBomb(W - 18 - ml * 12 - 52, 10); // the BOMB GUARD is still there
+        }
         if (!pause.on) drawPauseBtn();
         // how to play, during the first seconds
         if (s.t < 3.5) {
@@ -1381,34 +1434,49 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
       }
 
       if (s.mode === "ready") {
-        ctx.fillStyle = "rgba(14,4,24,0.6)";
-        ctx.fillRect(0, 0, W, H);
-        text(GAME_TITLE, W / 2, 14 - Math.round(beatKick() * 2), PINK, 16); // (bounces to the music)
-        drawPic(pics[0], W / 2 - 92, 21, 0); // a nug on each side of the title
-        drawPic(pics[5], W / 2 + 92, 21, 0);
-        text(touchRef.current ? "SWIPE TO CHOP NUGS" : "DRAG TO CHOP NUGS", W / 2, 44, "#ffffff");
-        text("DON'T CUT THE BOMBS", W / 2, 58, RED);
-        drawBomb(W / 2 + 84, 62);
-        text(`DROP ${maxLives()} = GAME OVER`, W / 2, 72, "#d8a8ff");
-        text(`${COMBO_MIN}+ IN ONE SWIPE = COMBO`, W / 2, 86, GREEN);
-        text("GOLDEN NUG = +5", W / 2, 98, YELLOW);
-        drawPic(pics[6], W / 2 - 78, 101, 0);
-        if (Math.floor(clock * 2) % 2 === 0) text(touchRef.current ? "TAP TO START" : "SPACE / CLICK = START", W / 2, 116, YELLOW);
-        if (best > 0) text(`BEST ${best}`, W / 2, 132, "#b48ad0");
+        // the start screen every game shares
+        const top = boardRef.current?.top();
+        drawStartScreen(ctx, fontFamily, {
+          W,
+          H,
+          t: clock,
+          title: GAME_TITLE,
+          sub: zen ? `< ZEN: ${ZEN_TIME} SEC, NO BOMBS >` : "< CLASSIC >",
+          lines: zen
+            ? [
+                [touchRef.current ? "SWIPE TO CHOP NUGS" : "DRAG TO CHOP NUGS", "#ffffff"],
+                ["NO BOMBS, NO LIVES", KIT.lilac],
+                [`CHOP ALL YOU CAN IN ${ZEN_TIME}S`, KIT.lilac],
+              ]
+            : [
+                [touchRef.current ? "SWIPE TO CHOP NUGS" : "DRAG TO CHOP NUGS", "#ffffff"],
+                ["DON'T CUT THE BOMBS", "#ff6a6a"],
+                [`DROP ${maxLives()} = GAME OVER`, KIT.lilac],
+              ],
+          start: touchRef.current ? "TAP TO START" : "SPACE = START",
+          best: !zen && top ? `#1 ${top.name} ${top.score}` : bestNow() > 0 ? `BEST ${bestNow()}` : undefined,
+          hint: touchRef.current ? "TAP THE MODE TO SWITCH" : "\u2190 \u2192 = MODE   M = SOUNDS   - / + = FX",
+          kick: beatKick(),
+        });
         drawPanels();
       }
 
       if (s.mode === "over") {
-        ctx.fillStyle = `rgba(14,4,24,${Math.min(0.72, s.t * 1.2)})`;
-        ctx.fillRect(0, 0, W, H);
-        if (s.t > 0.4) {
-          text(s.why, W / 2, 24, s.why === "BOOM!" ? RED : PINK, 16);
-          text(`SCORE ${s.score}`, W / 2, 56, YELLOW);
-          text(s.newBest ? "NEW BEST!" : `BEST ${best}`, W / 2, 70, s.newBest ? PINK : "#b48ad0");
-          text(`+${s.kiefRun} KIEF SAVED`, W / 2, 84, "#f0e6a0");
-          if (s.t > 0.8 && Math.floor(clock * 2) % 2 === 0) text(touchRef.current ? "TAP = AGAIN" : "SPACE / CLICK = AGAIN", W / 2, 100, GREEN);
-          drawPanels();
-        }
+        // the game over screen every game shares
+        drawOverScreen(ctx, fontFamily, {
+          W,
+          H,
+          t: clock,
+          age: s.t,
+          title: s.why,
+          score: `SCORE ${s.score}`,
+          best: `BEST ${bestNow()}`,
+          newBest: s.newBest,
+          stats: zen ? "ZEN MODE" : undefined,
+          again: touchRef.current ? "TAP = AGAIN" : "SPACE = AGAIN",
+          saved: `+${s.kiefRun} KIEF SAVED`,
+        });
+        if (s.t > 0.4) drawPanels();
       }
 
       if (pause.on) drawPauseMenu(ctx, fontFamily, { W, H, row: pause.row, t: pauseClock, touch: touchRef.current, stats: `SCORE ${s.score}  +${s.kiefRun} KIEF` });
@@ -1461,6 +1529,7 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
 
     return () => {
       cancelAnimationFrame(raf);
+      window.removeEventListener("keydown", onModeKey, true);
       window.removeEventListener("keydown", onKey);
       document.removeEventListener("visibilitychange", onHidden);
       api.current = null;

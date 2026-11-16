@@ -816,12 +816,14 @@ export default function MazeGame({ actionSignal, spinRef, fontFamily, muted, tou
       ctx.font = `8px ${fontFamily}`;
       ctx.textBaseline = "top";
       ctx.fillStyle = INK;
-      ctx.textAlign = "left";
-      ctx.fillText(pad(s.score), 24, 4);
-      ctx.textAlign = "center";
-      ctx.fillText(`LV ${s.level}`, W / 2, 4);
-      ctx.textAlign = "right";
-      ctx.fillText(`HI ${pad(s.best)}`, W - 6, 4);
+      if (s.mode !== "ready") {
+        ctx.textAlign = "left";
+        ctx.fillText(pad(s.score), 24, 4);
+        ctx.textAlign = "center";
+        ctx.fillText(`LV ${s.level}`, W / 2, 4);
+        ctx.textAlign = "right";
+        ctx.fillText(`HI ${pad(s.best)}`, W - 6, 4);
+      }
       if (playing() || s.mode === "dying") {
         for (let i = 0; i < Math.min(s.lives, 8); i++) drawFace(ctx, 14, 70 + i * 10, 0, arc.shop.wearingName("skin"));
         seedIcon(ctx, W - 22, 40);
