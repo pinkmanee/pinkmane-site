@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, SKIN_COLORS, drawOverScreen, drawStartScreen, drawText, makeArcade, type Arcade, type ShopRow } from "./PinkShop";
 
 // KONG BONG: Donkey Kong, PINKMANE style. BEARMANPIG sits at the top, throws speakers down the girders,
@@ -20,7 +21,7 @@ import { KIT, SKIN_COLORS, drawOverScreen, drawStartScreen, drawText, makeArcade
 //   - THE LIGHTER: grab it and for a few seconds you burn the speakers (and the fire) you touch. No climbing while you hold it.
 // Points: jump a speaker = 100, burn one = 300, a nug = 300, THE STASH = the BONUS (it counts down, so be quick).
 // MONEY: NUGS. 1 for every speaker you jump / burn, 3 for every nug, 10 for every stash.
-// (DEMO: no online Top 10 yet, just your own best on this device.)
+// ONLINE TOP 10: board id "kong" (see Scoreboard.tsx and app/api/scores/shared.ts).
 
 type Props = {
   // Goes up by 1 every time the player presses OK / Enter / Space
@@ -455,6 +456,7 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
   touchRef.current = touch;
   const pressRef = useRef<(() => void) | null>(null);
   const arcRef = useRef<Arcade | null>(null);
+  const boardRef = useRef<ScoreApi | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -470,6 +472,7 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
       t: 0, // seconds in this mode
       clock: 0,
       runT: 0,
+      playT: 0, // seconds this whole game has lasted (for the Top 10's cheat check)
       levelT: 0, // seconds into this level
       level: 1,
       lives: START_LIVES,
@@ -536,6 +539,7 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
       touch: isTouch,
       playing,
       menuScreen: () => s.mode === "ready" || (s.mode === "over" && s.t > 0.6),
+      busy: () => boardRef.current?.busy() ?? false,
       restart: () => {
         newGame();
         s.mode = "running";
@@ -604,11 +608,13 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
       s.exits = 0;
     };
     const newGame = () => {
+      boardRef.current?.hide();
       s.level = 1;
       s.lives = START_LIVES + arc.shop.lvl("life");
       s.score = 0;
       s.run = 0;
       s.runT = 0;
+      s.playT = 0;
       s.newBest = false;
       s.t = 0;
       s.parts = [];
@@ -641,6 +647,7 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
         s.mode = "running";
       } else if (s.mode === "running") jump();
       else if (s.mode === "over" && s.t > 0.8) {
+        if (boardRef.current?.busy()) return; // typing a name for the Top 10
         newGame();
         s.mode = "running";
       }
@@ -669,6 +676,7 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
       bankRun();
       s.run = got; // (shown as "+N NUGS SAVED")
       sfx.death();
+      boardRef.current?.gameOver(Math.floor(s.score), s.playT);
     };
 
     // BEARMANPIG's routine: grab a speaker, throw it, hit the bong, wait, again
@@ -971,6 +979,7 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
       }
       s.pops = s.pops.filter((q) => q.life > 0);
 
+      if (s.mode === "running" || s.mode === "dying" || s.mode === "clear") s.playT += dt;
       updateKong(dt);
       if (s.mode === "dying") {
         updateSpeakers(dt);
@@ -1343,6 +1352,7 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
       }
 
       if (s.mode === "ready") {
+        const top = boardRef.current?.top();
         drawStartScreen(ctx, fontFamily, {
           W,
           H,
@@ -1355,7 +1365,7 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
             ["GRAB THE LIGHTER!", KIT.lilac],
           ],
           start: isTouch() ? "TAP TO START" : "SPACE = START",
-          best: s.best > 0 ? `BEST ${pad(s.best)}` : "DEMO",
+          best: top ? `#1 ${top.name} ${pad(top.score)}` : s.best > 0 ? `BEST ${pad(s.best)}` : undefined,
           hint: isTouch() ? "TAP THE SPEAKER = SOUNDS" : "M = SOUNDS   - / + = FX VOLUME",
           dim: 0.5,
         });
@@ -1478,6 +1488,7 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
   }, [actionSignal]);
 
   return (
+    <>
     <canvas
       ref={canvasRef}
       width={W}
@@ -1494,5 +1505,7 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
         cursor: "pointer",
       }}
     />
+    <ScorePanel game="kong" title={GAME_TITLE} apiRef={boardRef} fontFamily={fontFamily} width={W} height={H} />
+    </>
   );
 }

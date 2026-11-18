@@ -38,6 +38,9 @@ export const GAMES: Record<string, GameCfg> = {
   // PINK NINJA: 1 point per nug (a golden nug = 5), a combo adds 1 per nug in it. The fastest throws are 6 nugs every
   // 1.2 seconds, all in one swipe = about 10 a second, so 25 a second leaves plenty of room.
   ninja: { key: "pinkninja:scores", rate: 25, base: 100, max: 200000 },
+  // KONG BONG: 100 a speaker jumped, 300 burned / per nug, 500 a fire, the stash bonus (max 3000) every level.
+  // A quick level with the lighter can average ~400 a second, so 700 a second leaves plenty of room.
+  kong: { key: "pinkkong:scores", rate: 700, base: 5000, max: 3000000 },
 };
 
 for (let n = 1; n <= LEVEL_COUNT; n++) {
