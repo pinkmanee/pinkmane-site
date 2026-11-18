@@ -6,6 +6,7 @@ import { KIT, SKIN_COLORS, silverGlow, drawOverScreen, drawStartScreen, drawText
 
 // PINK BOMBER: Bomberman, PINKMANE style. Drop BOMBS, blow up the speaker boxes, blow up the piglets + haters.
 // When every enemy is gone THE STASH opens (it's hidden under one of the speakers): walk onto it = next level.
+// The little piglet top right shows how many enemies are still alive.
 //   ← → ↑ ↓ (W A S D) = walk      SPACE / OK / A / tap = drop a bomb (and start)
 //   ESC / P / the II button = pause menu      S / DOWN on the start + game over screen = PINK SHOP
 //   M = sounds on / off, - and + = FX volume (or the speaker + slider top left)
@@ -281,6 +282,8 @@ export default function BomberGame({ actionSignal, fontFamily, muted, touch = fa
       parts: [] as Particle[],
       pops: [] as Popup[],
       shake: 0,
+      onLocked: false, // standing on THE STASH while it's still locked
+      lockedMsg: 0, // seconds the "KILL ALL ENEMIES FIRST" message still shows
     };
     try {
       s.best = Number(localStorage.getItem(BEST_KEY)) || 0;
@@ -760,6 +763,13 @@ export default function BomberGame({ actionSignal, fontFamily, muted, touch = fa
       s.powers = s.powers.filter((q) => q.t > -1);
       // THE STASH: open once every enemy is gone
       const alive = s.enemies.filter((e) => e.dead === 0).length;
+      const onStash = s.exit.shown && ptx === s.exit.x && pty === s.exit.y;
+      if (onStash && alive > 0 && !s.onLocked) {
+        s.lockedMsg = 2;
+        beep(200, 150, 0.12, 0.05, "square");
+      }
+      s.onLocked = onStash && alive > 0;
+      if (s.lockedMsg > 0) s.lockedMsg -= dt;
       if (s.exit.shown && alive === 0 && ptx === s.exit.x && pty === s.exit.y) {
         const bonus = Math.floor(s.time) * 10;
         s.score += bonus;
@@ -976,10 +986,18 @@ export default function BomberGame({ actionSignal, fontFamily, muted, touch = fa
         drawText(ctx, fontFamily, String(s.bombsMax), 153, 4, "#bfe9ff", 8, "left");
         drawPixels(ctx, ["..Y..", ".YOY.", "YOROY", ".ORO."], 166, 5, { Y: "#ffd84a", O: "#ff7a00", R: "#ff3b1a" });
         drawText(ctx, fontFamily, String(s.fire), 173, 4, "#ff7a00", 8, "left");
-        for (let i = 0; i < Math.min(5, s.lives); i++) drawPixels(ctx, DUDE[0].slice(0, 6), 188 + i * 9, 3, dudeColors(arc.shop.wearingName("skin")));
-        nugIcon(ctx, 238, 3);
-        drawText(ctx, fontFamily, String(s.run), 249, 4, "#6fdc5a", 8, "left");
+        // lives
+        drawPixels(ctx, DUDE[0].slice(0, 6), 188, 3, dudeColors(arc.shop.wearingName("skin")));
+        drawText(ctx, fontFamily, `x${s.lives}`, 198, 4, "#ffffff", 8, "left");
+        // money
+        nugIcon(ctx, 216, 3);
+        drawText(ctx, fontFamily, String(s.run), 227, 4, "#6fdc5a", 8, "left");
+        // ENEMIES LEFT (a little piglet + how many are still alive). Turns gold when they're all gone.
+        const left = s.enemies.filter((e) => e.dead === 0).length;
+        drawPixels(ctx, PIGLET[0], 260, 3, PIGLET_COLORS);
+        drawText(ctx, fontFamily, String(left), 272, 4, left === 0 ? GOLD : "#ff8ad8", 8, "left");
         const alive = s.enemies.filter((e) => e.dead === 0).length;
+        if (s.lockedMsg > 0 && s.mode === "running") drawText(ctx, fontFamily, `KILL ALL ENEMIES FIRST! (${alive} LEFT)`, W / 2, 128, "#ff6a6a");
         if (alive === 0 && !s.exit.shown && s.mode === "running" && Math.floor(s.clock * 2) % 2) drawText(ctx, fontFamily, "FIND THE STASH!", W / 2, 128, GOLD);
         if (alive === 0 && s.exit.shown && s.mode === "running" && Math.floor(s.clock * 2) % 2) drawText(ctx, fontFamily, "THE STASH IS OPEN!", W / 2, 128, GOLD);
       }
