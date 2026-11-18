@@ -342,8 +342,8 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     name: "Pink Bomber",
     id: "bomber",
     preview: "/previews/bomber.gif",
-    blurb: "Drop bong bombs, blow up the speakers and the piglets. Clear them all and THE STASH opens. Power-ups hide in the speakers. Don't stand in your own blast!",
-    how: "arrows = walk · space = drop a bong bomb",
+    blurb: "Drop bombs, blow up the speakers and the piglets. Clear them all and THE STASH opens. Power-ups hide in the speakers. Don't stand in your own blast!",
+    how: "arrows = walk · space = drop a bomb",
     psp: true,
   },
   {
@@ -3554,7 +3554,7 @@ activeGame === "bomber" ? (
               : activeGame === "kong"
               ? "d-pad = walk + climb ladders · bottom button = jump · right button = back"
               : activeGame === "bomber"
-              ? "d-pad = walk · bottom button = drop a bong bomb · right button = back"
+              ? "d-pad = walk · bottom button = drop a bomb · right button = back"
               : activeGame === "jet"
               ? "hold d-pad up or hold the screen = fly up · let go = fall · bottom button = start · right button = back"
               : activeGame === "vortex"

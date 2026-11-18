@@ -4,13 +4,13 @@ import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, SKIN_COLORS, silverGlow, drawOverScreen, drawStartScreen, drawText, makeArcade, type Arcade, type ShopRow } from "./PinkShop";
 
-// PINK BOMBER: Bomberman, PINKMANE style. Drop BONG BOMBS, blow up the speaker boxes, blow up the piglets + haters.
+// PINK BOMBER: Bomberman, PINKMANE style. Drop BOMBS, blow up the speaker boxes, blow up the piglets + haters.
 // When every enemy is gone THE STASH opens (it's hidden under one of the speakers): walk onto it = next level.
-//   ← → ↑ ↓ (W A S D) = walk      SPACE / OK / A / tap = drop a bong bomb (and start)
+//   ← → ↑ ↓ (W A S D) = walk      SPACE / OK / A / tap = drop a bomb (and start)
 //   ESC / P / the II button = pause menu      S / DOWN on the start + game over screen = PINK SHOP
 //   M = sounds on / off, - and + = FX volume (or the speaker + slider top left)
 //
-// POWER-UPS (inside some speakers):  +BONG = one more bomb at once   FIRE = bigger blast   SHOES = faster   NUG = money
+// POWER-UPS (inside some speakers):  +BOMB = one more bomb at once   FIRE = bigger blast   SHOES = faster   NUG = money
 // ENEMIES:  PIGLET = walks around   HATER (grey cloud, from level 3) = follows you   BOAR (from level 5) = fast
 // Every level gets a new colour, more enemies and more speakers. Don't stand in your own blast!
 // Points: speaker 10, piglet 100, hater 200, boar 400, power-up 50, the time left x10 when you clear a level.
@@ -107,7 +107,7 @@ const SKINS: { id: string; name: string; price: number }[] = [
 ];
 const SHOP_ROWS: ShopRow[] = [
   { kind: "head", label: "UPGRADES" },
-  { kind: "item", id: "up:bombs", name: "EXTRA BONG", prices: [150, 400], info: ["START WITH ONE MORE BOMB", ""] },
+  { kind: "item", id: "up:bombs", name: "EXTRA BOMB", prices: [150, 400], info: ["START WITH ONE MORE BOMB", ""] },
   { kind: "item", id: "up:fire", name: "BIG BLAST", prices: [120, 300], info: ["YOUR BLAST STARTS BIGGER", ""] },
   { kind: "item", id: "up:life", name: "EXTRA LIFE", prices: [150, 400], info: ["START WITH ONE MORE LIFE", ""] },
   { kind: "item", id: "up:speed", name: "FAST SHOES", prices: [100, 250], info: ["START A BIT FASTER", ""] },
@@ -173,32 +173,41 @@ const nugIcon = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
   ctx.fillRect(x, y + 1, 8, 6);
   drawPixels(ctx, NUG, x + 2, y + 2, { G: "#6fdc5a", L: "#ffffff" });
 };
-// a BONG BOMB (x, y = the middle of its tile). It pulses, the fuse burns down.
+// a round black bomb (x, y = the middle of its tile). It flashes red faster and faster as the fuse burns down.
+const BOMB = [
+  "...OOOO...",
+  ".OOKKKKOO.",
+  ".OKHHKKKO.",
+  "OKHHKKKKKO",
+  "OKHKKKKKKO",
+  "OKKKKKKKKO",
+  "OKKKKKKKKO",
+  ".OKKKKKKO.",
+  ".OOKKKKOO.",
+  "...OOOO...",
+];
 function drawBomb(ctx: CanvasRenderingContext2D, x: number, y: number, t: number, fuse: number) {
-  const pulse = Math.sin(t * (10 + (1 - fuse / FUSE) * 20)) > 0 ? 1 : 0;
-  const X = Math.round(x);
-  const Y = Math.round(y);
+  const left = fuse / FUSE; // 1 = just dropped, 0 = about to blow
+  const flash = Math.sin(t * (8 + (1 - left) * 30)) > 0.3 && left < 0.95;
+  const bounce = flash ? 1 : 0;
+  const X = Math.round(x) - 5;
+  const Y = Math.round(y) - 4 - bounce;
   ctx.fillStyle = "rgba(0,0,0,0.35)";
-  ctx.fillRect(X - 4, Y + 5, 9, 1);
-  // the round glass bottom
-  ctx.fillStyle = INK;
-  ctx.fillRect(X - 4 - pulse, Y - 1 - pulse, 9 + pulse * 2, 7 + pulse);
-  ctx.fillStyle = "#bfe9ff";
-  ctx.fillRect(X - 3 - pulse, Y - pulse, 7 + pulse * 2, 5 + pulse);
-  ctx.fillStyle = "#3fc24a";
-  ctx.fillRect(X - 3 - pulse, Y + 2, 7 + pulse * 2, 3);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(X - 2 - pulse, Y, 1, 1);
-  // the tube
-  ctx.fillStyle = INK;
-  ctx.fillRect(X - 2, Y - 7, 4, 7);
-  ctx.fillStyle = "#bfe9ff";
-  ctx.fillRect(X - 1, Y - 6, 2, 6);
-  // the fuse + spark
+  ctx.fillRect(X + 1, Math.round(y) + 6, 9, 1);
+  drawPixels(ctx, BOMB, X, Y, { O: INK, K: flash ? "#8a1f2a" : "#2a2a36", H: flash ? "#ff8a8a" : "#9a9ab0" });
+  // the cap + the fuse
+  ctx.fillStyle = "#8a8aa0";
+  ctx.fillRect(X + 4, Y - 1, 3, 1);
   ctx.fillStyle = "#c08a4a";
-  ctx.fillRect(X + 2, Y - 8, 1, 2);
+  ctx.fillRect(X + 6, Y - 2, 1, 1);
+  ctx.fillRect(X + 7, Y - 3, 1, 1);
+  // the spark
   ctx.fillStyle = Math.floor(t * 20) % 2 ? "#ffd84a" : "#ff7a00";
-  ctx.fillRect(X + 2 + (Math.floor(t * 14) % 2), Y - 10, 2, 2);
+  ctx.fillRect(X + 7 + (Math.floor(t * 14) % 2), Y - 5, 2, 2);
+  if (Math.floor(t * 10) % 3 === 0) {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(X + 9, Y - 6, 1, 1);
+  }
 }
 // a speaker box (the breakable blocks). x, y = top left of the tile.
 function drawBox(ctx: CanvasRenderingContext2D, x: number, y: number, w: World, crack = 0) {
@@ -423,7 +432,7 @@ export default function BomberGame({ actionSignal, fontFamily, muted, touch = fa
     };
     const pop = (x: number, y: number, text: string, color: string) => s.pops.push({ x, y, text, life: 1, color });
 
-    // drop a bong bomb where you stand
+    // drop a bomb where you stand
     const dropBomb = () => {
       const x = Math.round(s.p.x);
       const y = Math.round(s.p.y);
@@ -735,7 +744,7 @@ export default function BomberGame({ actionSignal, fontFamily, muted, touch = fa
         const py = tileY(q.y);
         if (q.id === "bomb") {
           s.bombsMax = Math.min(MAX_BOMBS, s.bombsMax + 1);
-          pop(px, py, "+BONG", "#bfe9ff");
+          pop(px, py, "+BOMB", "#bfe9ff");
         } else if (q.id === "fire") {
           s.fire = Math.min(MAX_FIRE, s.fire + 1);
           pop(px, py, "FIRE+", "#ff7a00");
@@ -998,7 +1007,7 @@ export default function BomberGame({ actionSignal, fontFamily, muted, touch = fa
           sub: "BLOW UP THE PIGLETS",
           lines: [
             [isTouch() ? "PAD = WALK" : "ARROWS = WALK", "#ffffff"],
-            [isTouch() ? "A / TAP = BONG BOMB" : "SPACE = BONG BOMB", KIT.lilac],
+            [isTouch() ? "A / TAP = BOMB" : "SPACE = BOMB", KIT.lilac],
             ["CLEAR THEM ALL, FIND THE STASH", KIT.lilac],
           ],
           start: isTouch() ? "TAP TO START" : "SPACE = START",
