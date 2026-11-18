@@ -1,0 +1,141 @@
+import { Redis } from "@upstash/redis";
+import { createHash, timingSafeEqual } from "crypto";
+
+// Shared helpers for the PINK RUN scoreboard
+
+// Pink Run's board (kept under its original name so old scores stay)
+export const KEY = "pinkrun:scores";
+
+// Every game with its own Top 10.
+// rate/base: the biggest score that's believable for how long a run lasted
+// timed = a Super Pinkmane level board: the score is LEVEL_TIME_BASE minus your time in milliseconds
+// (so faster = higher), and minMs is the fastest time that's physically possible for that level.
+export type GameCfg = { key: string; rate: number; base: number; max: number; timed?: { minMs: number } };
+export const LEVEL_TIME_BASE = 10000000;
+const LEVEL_COUNT = 30; // boards exist for super-l1 ... super-l30 (add more levels without touching this file)
+const LEVEL_MIN_MS: Record<number, number> = { 1: 25000, 3: 60000, 4: 45000 }; // anything else: 15 seconds (Levels 3 and 4 are long ones)
+
+export const GAMES: Record<string, GameCfg> = {
+  pinkrun: { key: KEY, rate: 60, base: 100, max: 100000 },
+  vortex: { key: "pinkvortex:scores", rate: 150, base: 1000, max: 1000000 },
+  snake: { key: "pinksnake:scores", rate: 40, base: 200, max: 100000 },
+  bird: { key: "pinkbird:scores", rate: 4, base: 30, max: 10000 },
+  // Pink Hexagon scores are survival time in hundredths of a second
+  hex: { key: "pinkhex:scores", rate: 101, base: 50, max: 2000000 },
+  maze: { key: "pinkmaze:scores", rate: 150, base: 5000, max: 1000000 },
+  // PINKMANE VOID, infinite run. rate = the most grams per second a run can average, max = the biggest score at all.
+  // It was 60 before the STASH SPIN prizes. With every prize plus the SWARM curse a perfect run tops out
+  // around 525 a second, and WAX MODE (after 20k) doubles every gram, so it's 1100.
+  // max went from 1 million to 5 million for the same reason: a long wax run can pass a million honestly.
+  super: { key: "pinksuper:scores", rate: 1100, base: 500, max: 5000000 },
+  // PINK HELL: kills + wave bonuses. Late waves can average ~350 a second, so there's plenty of room.
+  hell: { key: "pinkhell:scores", rate: 800, base: 5000, max: 3000000 },
+  // PINK JUNGLE: meters run + 5 per gem. Top speed with BOOST is ~29 m/s, plus gems (2X GEMS doubles them).
+  jungle: { key: "pinkjungle:scores", rate: 200, base: 1000, max: 2000000 },
+  // PINK JETPACK: meters flown + 5 per gem (a piglet hit with a leaf = 3 gems). Top speed is 23.5 m/s,
+  // and the thickest gem rows can add ~150 a second for a moment, so 250 a second leaves plenty of room.
+  jet: { key: "pinkjet:scores", rate: 250, base: 1000, max: 2000000 },
+  // PINK NINJA: 1 point per nug (a golden nug = 5), a combo adds 1 per nug in it. The fastest throws are 6 nugs every
+  // 1.2 seconds, all in one swipe = about 10 a second, so 25 a second leaves plenty of room.
+  ninja: { key: "pinkninja:scores", rate: 25, base: 100, max: 200000 },
+  // KONG BONG: 100 a speaker jumped, 300 burned / per nug, 500 a fire, the stash bonus (max 3000) every level.
+  // A quick level with the lighter can average ~400 a second, so 700 a second leaves plenty of room.
+  kong: { key: "pinkkong:scores", rate: 700, base: 5000, max: 3000000 },
+};
+
+for (let n = 1; n <= LEVEL_COUNT; n++) {
+  GAMES[`super-l${n}`] = {
+    key: `pinksuper:l${n}:times`,
+    rate: 0,
+    base: 0,
+    max: LEVEL_TIME_BASE,
+    timed: { minMs: LEVEL_MIN_MS[n] ?? 15000 },
+  };
+}
+
+// Which board a request is for. No game given at all = Pink Run (the oldest game asks without one).
+// A game name that isn't in GAMES above = null, so a new game can never land on Pink Run's board by mistake:
+// add every new game to GAMES first.
+export function gameConfig(game: unknown): GameCfg | null {
+  if (game === undefined || game === null || game === "") return GAMES.pinkrun;
+  return typeof game === "string" && GAMES[game] ? GAMES[game] : null;
+}
+export const BANNED_KEY = "pinkrun:banned";
+export const OWNER_PREFIX = "pinkrun:owner:";
+export const MAX_ENTRIES = 100;
+
+// Names nobody can use. Checked after turning numbers into letters
+// (N1GG3R -> nigger), removing spaces/symbols (N I G G A -> nigga)
+// and squashing repeated letters (NIIIGGA -> niga).
+// Add or remove words here if you want (lowercase, letters only).
+export const BLOCKED = [
+  // racist slurs
+  "nigger", "nigga", "nigg", "niger", "niga", "nigr", "negro",
+  "chink", "gook", "kike", "wetback", "beaner", "raghead", "towelhead",
+  // homophobic / transphobic
+  "faggot", "fagot", "fagg", "dyke", "tranny",
+  // hate
+  "hitler", "nazi", "heil", "kkk", "retard",
+  // sexual
+  "dick", "cock", "pussy", "pusy", "penis", "porn", "whore", "slut",
+];
+
+// Number codes used by hate groups
+const BLOCKED_NUMBERS = ["1488", "88 14"];
+
+export type Entry = { name: string; score: number };
+
+export function getRedis() {
+  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+  return new Redis({ url, token });
+}
+
+// Capitals, numbers and a few symbols, max 12 characters
+export function cleanName(name: string) {
+  return name.toUpperCase().replace(/[^A-Z0-9 _.\-]/g, "").trim().slice(0, 12);
+}
+
+const LOOKALIKES: Record<string, string> = {
+  "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "6": "g", "7": "t", "8": "b", "9": "g",
+};
+
+// Turns a name into plain letters for checking, e.g. "N1GG 3R" -> "nigger".
+// Returns the normal version and a squashed version (repeated letters removed).
+export function lettersOnly(name: string) {
+  const plain = name
+    .toLowerCase()
+    .replace(/[0-9]/g, (d) => LOOKALIKES[d] || "")
+    .replace(/[^a-z]/g, "");
+  const squashed = plain.replace(/(.)\1+/g, "$1");
+  const numbers = BLOCKED_NUMBERS.some((n) => name.replace(/\s+/g, " ").includes(n)) ? " kkk" : "";
+  return `${plain} ${squashed}${numbers}`;
+}
+
+// Only you can post as PINKMANE (or anything containing it)
+export function isReserved(name: string) {
+  return lettersOnly(name).includes("pinkmane");
+}
+
+export function hash(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+// Checks the secret owner code from your Vercel settings
+export function isOwner(code: unknown) {
+  const real = process.env.PINKRUN_OWNER_CODE;
+  if (!real || typeof code !== "string" || code.length === 0) return false;
+  const a = Buffer.from(hash(code));
+  const b = Buffer.from(hash(real));
+  return timingSafeEqual(a, b);
+}
+
+export async function topTen(redis: Redis, key: string = KEY): Promise<Entry[]> {
+  const raw = (await redis.zrange(key, 0, 9, { rev: true, withScores: true })) as (string | number)[];
+  const out: Entry[] = [];
+  for (let i = 0; i < raw.length; i += 2) {
+    out.push({ name: String(raw[i]), score: Number(raw[i + 1]) });
+  }
+  return out;
+}
