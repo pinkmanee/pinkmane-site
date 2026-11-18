@@ -17,6 +17,7 @@ const JungleGame = dynamic(() => import("./components/JungleGame"), { ssr: false
 const JetGame = dynamic(() => import("./components/JetGame"), { ssr: false });
 const NinjaGame = dynamic(() => import("./components/NinjaGame"), { ssr: false });
 const KongGame = dynamic(() => import("./components/KongGame"), { ssr: false });
+const BomberGame = dynamic(() => import("./components/BomberGame"), { ssr: false });
 const HellGame = dynamic(() => import("./components/HellGame"), { ssr: false });
 const HellPad = dynamic(() => import("./components/HellPad"), { ssr: false });
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
@@ -179,6 +180,7 @@ const ITEM_ICONS: Record<string, string> = {
   "Pink Jetpack": "/icons/pinkjet.gif",
   "Weed Ninja": "/icons/pinkninja.gif",
   "Kong Bong": "/icons/kongbong.gif",
+  "Pink Bomber": "/icons/pinkbomber.gif",
   "Pink Hell": "/icons/pinkhell.gif",
   Back: "/icons/arrow.gif",
 };
@@ -286,7 +288,7 @@ const STRUCTURED_DATA = {
 // Clicking "Games" on the iPod turns on the PSP with this list. The highlighted game shows a little moving preview
 // (public/previews/<file>.gif, a few seconds recorded from the real game) with what it is and how to play.
 // The order here = the order on the PSP. Rename / reorder freely; "name" must match ITEM_ICONS for the icon.
-type GameId = "pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle" | "hell" | "jet" | "ninja" | "kong";
+type GameId = "pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle" | "hell" | "jet" | "ninja" | "kong" | "bomber";
 const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; how: string; psp: boolean }[] = [
   {
     name: "Pinkmane Void",
@@ -334,6 +336,14 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     preview: "/previews/kong.gif",
     blurb: "BEARMANPIG throws speakers down the girders and hits his bong after every throw. Climb up, jump the speakers, grab THE STASH.",
     how: "left/right = walk · up/down = ladders · space = jump",
+    psp: true,
+  },
+  {
+    name: "Pink Bomber",
+    id: "bomber",
+    preview: "/previews/bomber.gif",
+    blurb: "Drop bong bombs, blow up the speakers and the piglets. Clear them all and THE STASH opens. Power-ups hide in the speakers. Don't stand in your own blast!",
+    how: "arrows = walk · space = drop a bong bomb",
     psp: true,
   },
   {
@@ -1517,7 +1527,7 @@ export default function Home() {
       // In Pink Snake the arrow keys steer (the game handles them itself)
       if (
         playing &&
-        (activeGame === "snake" || activeGame === "hex" || activeGame === "maze" || activeGame === "super" || activeGame === "jungle" || activeGame === "hell" || activeGame === "jet" || activeGame === "ninja" || activeGame === "kong" || activeGame === "vortex") &&
+        (activeGame === "snake" || activeGame === "hex" || activeGame === "maze" || activeGame === "super" || activeGame === "jungle" || activeGame === "hell" || activeGame === "jet" || activeGame === "ninja" || activeGame === "kong" || activeGame === "bomber" || activeGame === "vortex") &&
         e.key.startsWith("Arrow")
       )
         return;
@@ -1547,7 +1557,7 @@ export default function Home() {
       // In Pink Hell the game uses the mouse wheel itself (switch weapon)
       if (playing && activeGame === "hell") return;
       // (Pink Jetpack and Weed Ninja have nothing to spin)
-      if (playing && (activeGame === "jet" || activeGame === "ninja" || activeGame === "kong")) return;
+      if (playing && (activeGame === "jet" || activeGame === "ninja" || activeGame === "kong" || activeGame === "bomber")) return;
       // In Pink Vortex the mouse wheel spins the paddle, in Pink Snake it turns the snake
       if (playing && activeGame === "vortex") {
         spinRef.current += e.deltaY > 0 ? 14 : -14;
@@ -1954,7 +1964,14 @@ export default function Home() {
 
   // The game that's open right now (shown on the iPod, or on the handheld for Maze / Super)
   const gameElement = !playing ? null : (
-activeGame === "kong" ? (
+activeGame === "bomber" ? (
+                <BomberGame
+                  actionSignal={jumpSignal}
+                  fontFamily={pixelFont.style.fontFamily}
+                  muted={isMuted}
+                  touch={isTouch}
+                />
+              ) : activeGame === "kong" ? (
                 <KongGame
                   actionSignal={jumpSignal}
                   fontFamily={pixelFont.style.fontFamily}
@@ -2535,6 +2552,8 @@ activeGame === "kong" ? (
                   ? "WEED NINJA"
                   : activeGame === "kong"
                   ? "KONG BONG"
+                  : activeGame === "bomber"
+                  ? "PINK BOMBER"
                   : "PINK RUN"
                 : menu === "main"
                 ? "PINKMANE"
@@ -2877,6 +2896,8 @@ activeGame === "kong" ? (
                 ? "swipe through the nugs to chop them · don't cut the bombs · PAUSE top left"
                 : activeGame === "kong"
                 ? "pad = walk + climb · A = jump · PAUSE top left"
+                : activeGame === "bomber"
+                ? "pad = walk · A / tap = drop a bomb · PAUSE top left"
                 : "tap screen or OK to jump · ◀▶ songs"
               : "swipe wheel to scroll · ◀▶ songs"}
           </span>
@@ -2981,7 +3002,7 @@ activeGame === "kong" ? (
             <button className="tp-small" onClick={goBack} aria-label="Leave the game">
               EXIT
             </button>
-            {!gamePicker && (activeGame === "super" || activeGame === "jungle" || activeGame === "hell" || activeGame === "jet" || activeGame === "ninja" || activeGame === "kong") && (
+            {!gamePicker && (activeGame === "super" || activeGame === "jungle" || activeGame === "hell" || activeGame === "jet" || activeGame === "ninja" || activeGame === "kong" || activeGame === "bomber") && (
               <button className="tp-small" onClick={() => tapKey("Escape")} aria-label="Pause">
                 PAUSE
               </button>
@@ -3452,6 +3473,13 @@ activeGame === "kong" ? (
                   [["ESC", "P"], "pause"],
                   [["BACKSPACE"], "menu"],
                 ]
+              : activeGame === "bomber"
+              ? [
+                  [["←", "→", "↑", "↓"], "walk"],
+                  [["SPACE"], "bomb"],
+                  [["ESC", "P"], "pause"],
+                  [["BACKSPACE"], "menu"],
+                ]
               : activeGame === "ninja"
               ? [
                   [["MOUSE"], "hold + drag = slice"],
@@ -3525,6 +3553,8 @@ activeGame === "kong" ? (
               ? "swipe through the nugs on the screen to chop them · don't cut the bombs · right button = back"
               : activeGame === "kong"
               ? "d-pad = walk + climb ladders · bottom button = jump · right button = back"
+              : activeGame === "bomber"
+              ? "d-pad = walk · bottom button = drop a bong bomb · right button = back"
               : activeGame === "jet"
               ? "hold d-pad up or hold the screen = fly up · let go = fall · bottom button = start · right button = back"
               : activeGame === "vortex"

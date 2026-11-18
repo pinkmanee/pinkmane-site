@@ -41,6 +41,9 @@ export const GAMES: Record<string, GameCfg> = {
   // KONG BONG: 100 a speaker jumped, 300 burned / per nug, 500 a fire, the stash bonus (max 3000) every level.
   // A quick level with the lighter can average ~400 a second, so 700 a second leaves plenty of room.
   kong: { key: "pinkkong:scores", rate: 700, base: 5000, max: 3000000 },
+  // PINK BOMBER: 10 a speaker, 100-400 an enemy, 50 a power-up, the time left x10 (max 1600) for every cleared level.
+  // A fast level can average ~250 a second, so 500 a second leaves plenty of room.
+  bomber: { key: "pinkbomber:scores", rate: 500, base: 5000, max: 3000000 },
 };
 
 for (let n = 1; n <= LEVEL_COUNT; n++) {
