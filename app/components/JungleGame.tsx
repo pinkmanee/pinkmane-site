@@ -423,7 +423,7 @@ const DUDE_LEGS = 13; // row where the legs start (they move when running)
 //   rainbow: true = the hair keeps changing colour
 const SKINS: { id: string; name: string; price: number; colors: Record<string, string>; fire?: boolean; mission?: number; rainbow?: boolean }[] = [
   { id: "pink", name: "PINKMANE", price: 0, colors: DUDE_COLORS },
-  { id: "gold", name: "GOLD MANE", price: 250, colors: { A: "#111111", B: "#ffd24a", D: "#b8860b", F: "#ffc800", K: "#f2f2f2" } },
+  { id: "gold", name: "SILVER MANE", price: 250, colors: { A: "#111111", B: "#d4d8e4", D: "#6a6e80", F: "#ffc800", K: "#f2f2f2" } },
   { id: "ice", name: "ICE MANE", price: 400, colors: { A: "#111111", B: "#6ae0ff", D: "#2a9ad0", F: "#ffc800", K: "#e8f2ff" } },
   { id: "toxic", name: "TOXIC", price: 600, colors: { A: "#111111", B: "#7dff3a", D: "#2c8a33", F: "#ffc800", K: "#7a3cc8" } },
   { id: "fire", name: "FIRE MANE", price: 1000, fire: true, colors: { A: "#111111", B: "#ff7a1a", D: "#8a1f86", F: "#ffc800", K: "#787878" } },

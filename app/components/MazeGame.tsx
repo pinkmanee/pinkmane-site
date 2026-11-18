@@ -155,7 +155,7 @@ const SKINS: { id: string; name: string; price: number }[] = [
   { id: "ice", name: "ICE", price: 90 },
   { id: "fire", name: "FIRE", price: 140 },
   { id: "ghost", name: "GHOST", price: 200 },
-  { id: "gold", name: "GOLD", price: 350 },
+  { id: "gold", name: "SILVER", price: 350 },
 ];
 const SHOP_ROWS: ShopRow[] = [
   { kind: "head", label: "FACES" },
@@ -208,7 +208,7 @@ function drawPixels(ctx: CanvasRenderingContext2D, rows: string[], x: number, y:
 // your face's colours in a skin
 const faceColors = (skin: string): Record<string, string> => {
   const c = SKIN_COLORS[skin] ?? SKIN_COLORS.pink;
-  return { P: c[1], Y: skin === "gold" ? "#ffe680" : "#ffc800", W: "#ffffff", K: INK, R: "#d21e1e" };
+  return { P: c[1], Y: skin === "gold" ? "#eef1f8" : "#ffc800", W: "#ffffff", K: INK, R: "#d21e1e" };
 };
 // the money icon: a seed
 const seedIcon = (ctx: CanvasRenderingContext2D, x: number, y: number) => {

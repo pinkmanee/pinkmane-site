@@ -915,7 +915,8 @@ export const SKIN_COLORS: Record<string, [string, string, string]> = {
   fire: ["#b8320a", "#ff7a00", "#ffd84a"],
   ghost: ["#7a9a90", "#cfe9e0", "#ffffff"],
   shadow: ["#1e1230", "#4a2c6a", "#8a6ab8"],
-  gold: ["#a07000", "#ffd700", "#fff3a0"],
+  // (the id stays "gold" so everyone who bought it keeps it, but it is SHINY SILVER now)
+  gold: ["#6a6e80", "#d4d8e4", "#ffffff"],
 };
 // rainbow: a colour that keeps changing (i = which piece, so neighbours differ)
 export const rainbow = (t: number, i = 0) => `hsl(${Math.round((t * 160 + i * 40) % 360)}, 90%, 60%)`;

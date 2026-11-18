@@ -85,7 +85,7 @@ const SKINS: { id: string; name: string; price: number }[] = [
   { id: "ice", name: "ICE", price: 80 },
   { id: "fire", name: "FIRE", price: 120 },
   { id: "rainbow", name: "RAINBOW", price: 200 },
-  { id: "gold", name: "GOLD", price: 320 },
+  { id: "gold", name: "SILVER", price: 320 },
 ];
 const TRAILS: { id: string; name: string; price: number; info: string }[] = [
   { id: "none", name: "NO TRAIL", price: 0, info: "JUST THE TRIANGLE" },

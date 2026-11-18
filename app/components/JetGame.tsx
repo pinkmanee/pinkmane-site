@@ -93,7 +93,7 @@ const OUTFITS: { id: string; name: string; price: number; file?: string; recolor
   { id: "toxic", name: "TOXIC PINKMANE", price: 450, recolor: ["#2c8a33", "#6fdc5a", "#b8ff9a"] },
   { id: "bloody", name: "BLOODY PINKMANE", price: 550, recolor: ["#7a0c0c", "#d21e1e", "#ff6a6a"] },
   { id: "shadow", name: "SHADOW PINKMANE", price: 650, recolor: ["#1e1230", "#3b2456", "#7a5aa8"] },
-  { id: "gold", name: "GOLD PINKMANE", price: 900, recolor: ["#b8860b", "#ffd700", "#fff3a0"] },
+  { id: "gold", name: "SILVER PINKMANE", price: 900, recolor: ["#6a6e80", "#d4d8e4", "#ffffff"] },
 ];
 // JETPACK TRAILS: what comes out of the jetpack (they hit piglets just like the weed leaves)
 const TRAILS: { id: string; name: string; price: number; info: [string, string] }[] = [
@@ -101,7 +101,7 @@ const TRAILS: { id: string; name: string; price: number; info: [string, string] 
   { id: "fire", name: "FIRE", price: 120, info: ["YOUR JETPACK SPITS FLAMES", "THEY POP THE PIGLETS TOO"] },
   { id: "ice", name: "ICE", price: 180, info: ["ICE CRYSTALS AND FROSTY LEAVES", "THEY POP THE PIGLETS TOO"] },
   { id: "rainbow", name: "RAINBOW", price: 260, info: ["LEAVES IN EVERY COLOUR", "THEY POP THE PIGLETS TOO"] },
-  { id: "gold", name: "GOLD LEAVES", price: 400, info: ["SOLID GOLD WEED LEAVES", "THEY POP THE PIGLETS TOO"] },
+  { id: "gold", name: "SILVER LEAVES", price: 400, info: ["SHINY SILVER WEED LEAVES", "THEY POP THE PIGLETS TOO"] },
 ];
 // UPGRADES: one price per level
 const UPGRADES: { id: "magnet" | "shield" | "pigs"; name: string; prices: number[]; info: [string, string] }[] = [
@@ -276,7 +276,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       fire: [buildMap(FLAME_MAP, FLAME_COLORS), buildMap(FLAME_MAP, { ...FLAME_COLORS, Y: "#ffd24a", o: "#ffffff" })],
       ice: [buildMap(ICE_MAP, ICE_COLORS), recolorLeaf("#6ae0ff", "#e8f8ff", "#2a9ad0"), recolorLeaf("#8fd9ff", "#ffffff", "#2a9ad0")],
       rainbow: ["#ff3b3b", "#ffa23a", "#ffe34a", "#3ee05a", "#6ae0ff", "#b46aff"].map((c) => recolorLeaf(c, "#ffffff", "#111111")),
-      gold: [recolorLeaf("#ffd24a", "#fff3b0", "#b8860b"), recolorLeaf("#e0b020", "#ffd24a", "#8a6a0b")],
+      gold: [recolorLeaf("#d4d8e4", "#ffffff", "#6a6e80"), recolorLeaf("#aab0c0", "#eef1f8", "#4a4e60")],
     };
     const pigImg = buildMap(PIG_MAP, PIG_COLORS);
     const drawnDude = [buildDude(false), buildDude(true)];

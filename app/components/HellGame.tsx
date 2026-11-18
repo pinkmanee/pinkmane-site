@@ -220,7 +220,7 @@ const HELL_SKINS = [
   { id: "ice", name: "ICE", price: 250 },
   { id: "fire", name: "FIRE", price: 400 },
   { id: "shadow", name: "SHADOW", price: 600 },
-  { id: "gold", name: "GOLD", price: 800 },
+  { id: "gold", name: "SILVER", price: 800 },
 ];
 const HELL_SHOP_ROWS: ShopRow[] = [
   { kind: "head", label: "SKINS" },

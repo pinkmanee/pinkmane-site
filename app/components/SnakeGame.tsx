@@ -78,7 +78,7 @@ const SKINS: { id: string; name: string; price: number }[] = [
   { id: "fire", name: "FIRE", price: 120 },
   { id: "ghost", name: "GHOST", price: 160 },
   { id: "rainbow", name: "RAINBOW", price: 220 },
-  { id: "gold", name: "GOLD", price: 350 },
+  { id: "gold", name: "SILVER", price: 350 },
 ];
 const SHOP_ROWS: ShopRow[] = [
   { kind: "head", label: "SKINS" },

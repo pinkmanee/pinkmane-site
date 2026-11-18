@@ -22,7 +22,7 @@ import {
   pauseTapRow,
 } from "./PinkShop";
 
-// PINK NINJA: a weed slicing game. Weed nugs in all kinds of colours fly up from the bottom of the screen, you chop them in half
+// WEED NINJA: a weed slicing game. Weed nugs in all kinds of colours fly up from the bottom of the screen, you chop them in half
 // (and the kief falls out).
 //   DRAG the mouse (button held down) / SWIPE with your finger  = slice
 //   SPACE / OK / tap                                            = start / play again
@@ -50,7 +50,7 @@ type Props = {
 };
 
 // The name of the game on its start screen (the PSP game list has its own copy in page.tsx)
-const GAME_TITLE = "PINK NINJA";
+const GAME_TITLE = "WEED NINJA";
 // Where things are saved in the browser
 const BEST_KEY = "pinkmane-ninja-best";
 // ZEN MODE (pick it with ← → on the start screen): no bombs, dropping a nug costs nothing, you get ZEN_TIME seconds.
@@ -91,7 +91,7 @@ const BLADES: { id: BladeId; name: string; price: number; info: [string, string]
   { id: "lightning", name: "LIGHTNING", price: 200, info: ["A JAGGED BLUE ZAP", "IT FLICKERS AS YOU SWIPE"] },
   { id: "rainbow", name: "RAINBOW", price: 300, info: ["EVERY COLOUR AT ONCE", ""] },
   { id: "beat", name: "BEAT BLADE", price: 400, info: ["PUMPS TO YOUR MUSIC", "THICKER + BRIGHTER ON THE BEAT"] },
-  { id: "gold", name: "GOLD BLADE", price: 600, info: ["SOLID GOLD, WITH SPARKLES", ""] },
+  { id: "gold", name: "SILVER BLADE", price: 600, info: ["SHINY SILVER, WITH SPARKLES", ""] },
 ];
 // how long each blade's trail stays (seconds)
 const BLADE_LIFE: Partial<Record<BladeId, number>> = { smoke: 0.25, lightning: 0.09 };
@@ -900,7 +900,7 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
             vx: (Math.random() - 0.5) * 40,
             vy: -Math.random() * 40,
             life: 0.3 + Math.random() * 0.2,
-            color: blade === "fire" ? (Math.random() < 0.5 ? "#ffd24a" : "#ff7a1a") : Math.random() < 0.5 ? "#ffffff" : "#ffd700",
+            color: blade === "fire" ? (Math.random() < 0.5 ? "#ffd24a" : "#ff7a1a") : Math.random() < 0.5 ? "#ffffff" : "#c8ccd8",
           });
       },
       up: () => {
@@ -1195,8 +1195,8 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
           seg(i, `hsla(${(clock * 90) % 360},100%,60%,${0.6 * k})`, (1 + k * 4) * (1 + kick * 1.5));
           seg(i, `rgba(255,255,255,${0.9 * k})`, (0.5 + k * 1.5) * (1 + kick));
         } else if (style === "gold") {
-          seg(i, `rgba(184,134,11,${0.6 * k})`, 1 + k * 4);
-          seg(i, `rgba(255,215,0,${0.9 * k})`, 0.5 + k * 2);
+          seg(i, `rgba(106,110,128,${0.6 * k})`, 1 + k * 4);
+          seg(i, `rgba(225,230,240,${0.95 * k})`, 0.5 + k * 2);
         } else {
           seg(i, `rgba(255,95,210,${0.5 * k})`, 1 + k * 4);
           seg(i, `rgba(255,255,255,${0.9 * k})`, 0.5 + k * 1.5);
@@ -1590,7 +1590,7 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
           cursor: "crosshair",
         }}
       />
-      {SHOW_TOP10 && <ScorePanel game="ninja" title="PINK NINJA" apiRef={boardRef} fontFamily={fontFamily} accent={PINK} />}
+      {SHOW_TOP10 && <ScorePanel game="ninja" title="WEED NINJA" apiRef={boardRef} fontFamily={fontFamily} accent={PINK} />}
     </>
   );
 }
