@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
-import { KIT, SKIN_COLORS, drawOverScreen, drawStartScreen, drawText, makeArcade, type Arcade, type ShopRow } from "./PinkShop";
+import { KIT, SKIN_COLORS, silverGlow, drawOverScreen, drawStartScreen, drawText, makeArcade, type Arcade, type ShopRow } from "./PinkShop";
 
 // KONG BONG: Donkey Kong, PINKMANE style. BEARMANPIG sits at the top, throws speakers down the girders,
 // and after EVERY throw he hits his bong. Climb the ladders, jump over the speakers, reach THE STASH at the very top.
@@ -1164,6 +1164,12 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
       c.globalAlpha = skin === "ghost" ? 0.7 : 1;
       drawPixels(c, rows, x - 4, y - 12, dudeColors(skin), p.climb < 0 && p.face < 0);
       c.globalAlpha = 1;
+      // SILVER: a little star twinkles on the mohawk when it glints
+      if (skin === "gold" && silverGlow(s.clock) > 0.75) {
+        c.fillStyle = "#ffffff";
+        c.fillRect(Math.round(x) + 1, Math.round(y) - 15, 1, 3);
+        c.fillRect(Math.round(x), Math.round(y) - 14, 3, 1);
+      }
       // holding THE LIGHTER: a flame in front of him (blinks when it's about to run out)
       if (s.lit > 0 && (s.lit > 1.5 || Math.floor(s.clock * 8) % 2 === 0)) {
         const fx = x + p.face * 6;
@@ -1210,20 +1216,25 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
         sky.addColorStop(1, mixHex(w.bg, w.girder, 0.3));
         ctx.fillStyle = sky;
         ctx.fillRect(-4, -4, W + 8, H + 8);
-        // the moon
-        const mx = 236;
-        const my = 34;
-        const halo = ctx.createRadialGradient(mx, my, 4, mx, my, 40);
-        halo.addColorStop(0, `rgba(${rgbOf(w.girder)},0.25)`);
-        halo.addColorStop(1, `rgba(${rgbOf(w.girder)},0)`);
-        ctx.fillStyle = halo;
-        ctx.fillRect(mx - 40, my - 40, 80, 80);
-        ctx.fillStyle = mixHex(w.girder, "#ffffff", 0.55);
-        ctx.globalAlpha = 0.35;
-        ctx.beginPath();
-        ctx.arc(mx, my, 11, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        // fluffy clouds drifting by (like the PINK CLOUDS zone in PINKMANE VOID), in this level's colour
+        for (let i = 0; i < 6; i++) {
+          const cx = ((((hash(i + 60) * 400 - s.clock * (2 + (i % 3))) % (W + 80)) + W + 80) % (W + 80)) - 60;
+          const cy = 14 + Math.floor(hash(i + 70) * 46);
+          const sc = 0.7 + hash(i + 80) * 0.5;
+          const puff = (col: string, grow: number, dy: number) => {
+            ctx.fillStyle = col;
+            ctx.beginPath();
+            ctx.arc(cx + 14 * sc, cy + 10 * sc + dy, 10 * sc + grow, 0, Math.PI * 2);
+            ctx.arc(cx + 28 * sc, cy + 6 * sc + dy, 13 * sc + grow, 0, Math.PI * 2);
+            ctx.arc(cx + 42 * sc, cy + 10 * sc + dy, 10 * sc + grow, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillRect(cx + 12 * sc - grow, cy + 10 * sc + dy, 32 * sc + grow * 2, 10 * sc + grow);
+          };
+          puff(mixHex(w.bg, w.girder, 0.16), 0, 1); // soft shadow underneath
+          puff(mixHex(w.bg, w.girder, 0.24), 0, 0);
+          ctx.fillStyle = mixHex(w.bg, w.girder, 0.34); // a little shine on top
+          ctx.fillRect(Math.round(cx + 24 * sc), Math.round(cy + 1 * sc), 3, 1);
+        }
         // rolling hills + swaying weed leaves (like PINKMANE VOID), in this level's colours
         const leafCol = (i: number) => (lk.style === "stripe" && i % 2 ? lk.b : w).girder;
         const hill = (base: number, amp: number, len: number, speed: number, col: string) => {

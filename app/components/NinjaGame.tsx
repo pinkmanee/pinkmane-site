@@ -1195,8 +1195,9 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
           seg(i, `hsla(${(clock * 90) % 360},100%,60%,${0.6 * k})`, (1 + k * 4) * (1 + kick * 1.5));
           seg(i, `rgba(255,255,255,${0.9 * k})`, (0.5 + k * 1.5) * (1 + kick));
         } else if (style === "gold") {
-          seg(i, `rgba(106,110,128,${0.6 * k})`, 1 + k * 4);
-          seg(i, `rgba(225,230,240,${0.95 * k})`, 0.5 + k * 2);
+          const sh = 0.5 + 0.5 * Math.sin(clock * 7 - i * 0.5); // a shine running along the blade
+          seg(i, `rgba(70,78,108,${0.6 * k})`, 1 + k * 4);
+          seg(i, `rgba(${Math.round(170 + 85 * sh)},${Math.round(180 + 75 * sh)},${Math.round(210 + 45 * sh)},${0.95 * k})`, 0.5 + k * 2);
         } else {
           seg(i, `rgba(255,95,210,${0.5 * k})`, 1 + k * 4);
           seg(i, `rgba(255,255,255,${0.9 * k})`, 0.5 + k * 1.5);

@@ -332,7 +332,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     name: "Kong Bong",
     id: "kong",
     preview: "/previews/kong.gif",
-    blurb: "BEARMANPIG throws speakers down the girders and hits his bong after every throw. Climb up, jump the speakers, grab THE STASH. (DEMO)",
+    blurb: "BEARMANPIG throws speakers down the girders and hits his bong after every throw. Climb up, jump the speakers, grab THE STASH.",
     how: "left/right = walk · up/down = ladders · space = jump",
     psp: true,
   },

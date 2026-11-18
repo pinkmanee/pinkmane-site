@@ -21,6 +21,9 @@ import {
   shopTap,
   type ShopHooks,
   type ShopRow,
+  SILVER_STEPS,
+  silverShine,
+  silverStep,
 } from "./PinkShop";
 
 // PINK JUNGLE: an endless 3-lane jungle runner. Pinkmane runs down an old mossy temple path
@@ -838,7 +841,13 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     const fits = SKINS.map((sk) => makeFit(sk.colors, sk.fire));
     // RAINBOW skin: one set of pictures per hair colour, shown one after the other
     const rainbowFits = RAINBOW_HAIR.map((c) => makeFit({ ...DUDE_COLORS, B: c }));
-    const fitNow = (i: number) => (SKINS[i].rainbow ? rainbowFits[Math.floor(clock * 6) % rainbowFits.length] : fits[i]);
+    // SILVER MANE: one set of pictures per brightness, so it shimmers + glints
+    const silverFits = Array.from({ length: SILVER_STEPS }, (_, k) => {
+      const [d, m] = silverShine(k / (SILVER_STEPS - 1));
+      return makeFit({ ...SKINS.find((sk) => sk.id === "gold")!.colors, B: m, D: d });
+    });
+    const fitNow = (i: number) =>
+      SKINS[i].rainbow ? rainbowFits[Math.floor(clock * 6) % rainbowFits.length] : SKINS[i].id === "gold" ? silverFits[silverStep(clock)] : fits[i];
     // the beat of the song: 1 right on the beat, falling to 0. -1 = no music playing right now
     const beatKick = () => {
       const b = beatSrc.current?.current;

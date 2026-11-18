@@ -915,9 +915,36 @@ export const SKIN_COLORS: Record<string, [string, string, string]> = {
   fire: ["#b8320a", "#ff7a00", "#ffd84a"],
   ghost: ["#7a9a90", "#cfe9e0", "#ffffff"],
   shadow: ["#1e1230", "#4a2c6a", "#8a6ab8"],
-  // (the id stays "gold" so everyone who bought it keeps it, but it is SHINY SILVER now)
-  gold: ["#6a6e80", "#d4d8e4", "#ffffff"],
+  // (the id stays "gold" so everyone who bought it keeps it, but it is SHINY SILVER now: see silverShine below)
+  gold: ["#3a4058", "#c8d0e8", "#ffffff"],
 };
+
+// ---------- SHINY SILVER ----------
+// The silver skin shimmers: a slow shine that comes and goes, plus a quick bright glint every 1.6 seconds.
+const lerpHex = (a: string, b: string, t: number) =>
+  "#" +
+  [0, 1, 2]
+    .map((i) => {
+      const x = parseInt(a.slice(1 + i * 2, 3 + i * 2), 16);
+      const y = parseInt(b.slice(1 + i * 2, 3 + i * 2), 16);
+      return Math.round(x + (y - x) * t).toString(16).padStart(2, "0");
+    })
+    .join("");
+// how bright the silver is at time t (seconds): 0 = dull steel, 1 = flashing white
+export const silverGlow = (t: number) => {
+  const glint = Math.max(0, 1 - Math.abs(((t % 1.6) - 0.15) / 0.15));
+  return Math.min(1, Math.max(0, 0.3 + 0.2 * Math.sin(t * 3) + glint * 0.7));
+};
+// the 3 colours (dark, main, light) at a brightness g (0..1)
+export const silverShine = (g: number): [string, string, string] => [lerpHex("#3a4058", "#7a84a8", g), lerpHex("#9aa4c2", "#ffffff", g), "#ffffff"];
+// games that draw their pictures once (Jungle, Jetpack) make SILVER_STEPS pictures and show the one for right now
+export const SILVER_STEPS = 6;
+export const silverStep = (t: number) => Math.round(silverGlow(t) * (SILVER_STEPS - 1));
+// every game that looks up SKIN_COLORS.gold while drawing gets the shimmering colours automatically
+Object.defineProperty(SKIN_COLORS, "gold", {
+  get: () => silverShine(silverGlow((typeof performance !== "undefined" ? performance.now() : 0) / 1000)),
+  enumerable: true,
+});
 // rainbow: a colour that keeps changing (i = which piece, so neighbours differ)
 export const rainbow = (t: number, i = 0) => `hsl(${Math.round((t * 160 + i * 40) % 360)}, 90%, 60%)`;
 

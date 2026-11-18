@@ -17,6 +17,9 @@ import {
   PAUSE_ROWS,
   drawPauseMenu,
   pauseTapRow,
+  SILVER_STEPS,
+  silverShine,
+  silverStep,
 } from "./PinkShop";
 
 // PINK JETPACK (DEMO): an endless side-scrolling jetpack game.
@@ -276,13 +279,14 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       fire: [buildMap(FLAME_MAP, FLAME_COLORS), buildMap(FLAME_MAP, { ...FLAME_COLORS, Y: "#ffd24a", o: "#ffffff" })],
       ice: [buildMap(ICE_MAP, ICE_COLORS), recolorLeaf("#6ae0ff", "#e8f8ff", "#2a9ad0"), recolorLeaf("#8fd9ff", "#ffffff", "#2a9ad0")],
       rainbow: ["#ff3b3b", "#ffa23a", "#ffe34a", "#3ee05a", "#6ae0ff", "#b46aff"].map((c) => recolorLeaf(c, "#ffffff", "#111111")),
-      gold: [recolorLeaf("#d4d8e4", "#ffffff", "#6a6e80"), recolorLeaf("#aab0c0", "#eef1f8", "#4a4e60")],
+      gold: [recolorLeaf("#c8d0e8", "#ffffff", "#3a4058"), recolorLeaf("#9aa4c2", "#eef1f8", "#3a4058"), recolorLeaf("#ffffff", "#ffffff", "#9aa4c2")],
     };
     const pigImg = buildMap(PIG_MAP, PIG_COLORS);
     const drawnDude = [buildDude(false), buildDude(true)];
     let dudeImg: HTMLImageElement | null = null;
     // the outfits: their own picture if it loads, otherwise the classic picture repainted
     const outfitPics: Record<string, CanvasImageSource | null> = {};
+    let silverPics: CanvasImageSource[] = [];
     const repaint = (src: HTMLImageElement, cols: [string, string, string]) => {
       const c = document.createElement("canvas");
       c.width = src.width;
@@ -312,6 +316,8 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
       dudeImg = img;
       for (const o of OUTFITS) {
         if (o.recolor && !outfitPics[o.id]) outfitPics[o.id] = repaint(img, o.recolor);
+        // SILVER PINKMANE: one picture per brightness, so it shimmers + glints
+        if (o.id === "gold") silverPics = Array.from({ length: SILVER_STEPS }, (_, k) => repaint(img, silverShine(k / (SILVER_STEPS - 1))));
         if (o.file) {
           const own = new Image();
           own.onload = () => {
@@ -446,7 +452,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
     };
     const outfitDef = () => OUTFITS.find((o) => o.id === outfit) ?? OUTFITS[0];
     // the picture to draw for an outfit (a canvas / image with the 24 x 35 frames side by side, or the drawn one)
-    const outfitPic = (id: string) => outfitPics[id] ?? dudeImg;
+    const outfitPic = (id: string) => (id === "gold" && silverPics.length ? silverPics[silverStep(performance.now() / 1000)] : outfitPics[id] ?? dudeImg);
 
     // ---------- game state ----------
     const pause = { on: false, row: 0 };
