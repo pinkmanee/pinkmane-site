@@ -23,6 +23,7 @@ const HellPad = dynamic(() => import("./components/HellPad"), { ssr: false });
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
 import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
 import GunCursor from "./components/GunCursor";
+import TrackVideo from "./components/TrackVideo";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -3654,6 +3655,15 @@ activeGame === "bomber" ? (
         <FullscreenCornerButton onClick={fsc.toggle} isFullscreen={fsc.isFullscreen} className={pixelFont.className} />
       )}
       {fsc.helpOpen && <InstallHelp onClose={fsc.closeHelp} isIOS={fsc.isIOS} className={pixelFont.className} />}
+      {/* ENDER PEARLS music video in a little TV left of the iPod, locked to the song (computers only) */}
+      <TrackVideo
+        videoId="4bEcW1DbpPI"
+        link="https://youtu.be/4bEcW1DbpPI"
+        title="ENDER PEARLS"
+        songRef={songRef}
+        show={!playing && !handheld && !gameSong && tracks[trackIndex]?.title === "ender pearls"}
+        fontFamily={pixelFont.style.fontFamily}
+      />
       {/* THE GUN (computers only): the mouse is an aim, clicks are shots. Off inside the games and on phones. */}
       <GunCursor active={!playing && !isTouch} muted={isMuted} font={pixelFont.style.fontFamily} />
 
