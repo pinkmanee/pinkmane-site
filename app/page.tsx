@@ -22,6 +22,7 @@ const HellGame = dynamic(() => import("./components/HellGame"), { ssr: false });
 const HellPad = dynamic(() => import("./components/HellPad"), { ssr: false });
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
 import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
+import GunCursor from "./components/GunCursor";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -2631,7 +2632,9 @@ activeGame === "bomber" ? (
                 <div
                   key={`${menu}-${index}`}
                   className={isMane ? "mane-highlight" : undefined}
-                  onClick={isTouch ? () => tapRow(index) : undefined}
+                  data-shoot
+                  // a tap (phone) or a click / shot (computer) opens it
+                  onClick={() => tapRow(index)}
                   style={{
                     position: "relative",
                     // as tall as it used to be on a computer (44px); on a phone the rows shrink together to fit
@@ -3575,6 +3578,8 @@ activeGame === "bomber" ? (
       {/* FULL SCREEN: a small corner button on the menus (phones + tablets), and the "how to" popup where the browser can't do it itself */}
       {isTouch && !handheld && fsc.show && (
         <FullscreenCornerButton onClick={fsc.toggle} isFullscreen={fsc.isFullscreen} className={pixelFont.className} />
+        {/* computers: the mouse is a gun (shoot the menu). Off inside the games and on phones. */}
+        <GunCursor active={!playing && !isTouch} muted={isMuted} font={pixelFont.style.fontFamily} />
       )}
       {fsc.helpOpen && <InstallHelp onClose={fsc.closeHelp} isIOS={fsc.isIOS} className={pixelFont.className} />}
 
