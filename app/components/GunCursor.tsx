@@ -178,6 +178,7 @@ export default function GunCursor({ active, muted, font }: Props) {
   mutedRef.current = muted;
   const [boardOpen, setBoardOpen] = useState(false);
   const [boardH, setBoardH] = useState(150); // the Top 10's height, so it has the same shape as the screen it sits in
+  const [boardColor, setBoardColor] = useState("#d7efbc"); // the Top 10's colour = the screen's colour (MODE 1 light, 2 green, 3 red)
   const boardBoxRef = useRef<HTMLDivElement>(null);
   const fontName = font ?? "monospace";
 
@@ -790,16 +791,23 @@ export default function GunCursor({ active, muted, font }: Props) {
       if (isBusy) {
         // the Top 10 sits right inside the iPod's (or the handheld's) screen
         const box = boardBoxRef.current;
-        const scr = Array.from(document.querySelectorAll("[data-gun-screen]"))
-          .map((el) => el.getBoundingClientRect())
-          .find((r) => r.width > 40 && r.height > 20);
+        const scrEl = Array.from(document.querySelectorAll<HTMLElement>("[data-gun-screen]")).find((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 40 && r.height > 20;
+        });
+        const scr = scrEl?.getBoundingClientRect();
         if (box) {
           const r = scr ?? { left: vw / 2 - 320, top: vh / 2 - 150, width: 640, height: 300 };
           box.style.left = `${r.left}px`;
           box.style.top = `${r.top}px`;
           box.style.width = `${r.width}px`;
           box.style.height = `${r.height}px`;
-          if (!wasBusy) setBoardH(Math.max(150, Math.min(320, Math.round((320 * r.height) / r.width))));
+          if (!wasBusy) {
+            setBoardH(Math.max(150, Math.min(320, Math.round((320 * r.height) / r.width))));
+            // the same colour as the screen it sits in (the iPod's screen follows the MODE buttons)
+            const bg = scrEl ? getComputedStyle(scrEl).backgroundColor : "";
+            if (bg && bg !== "transparent" && !bg.startsWith("rgba(0, 0, 0, 0")) setBoardColor(bg);
+          }
         }
       }
       if (isBusy !== wasBusy) {
@@ -1041,7 +1049,7 @@ export default function GunCursor({ active, muted, font }: Props) {
       </div>
       {/* PINK HUNT's Top 10 (the same box as in the games), in the middle of the screen */}
       <div ref={boardBoxRef} className="gun-board" style={{ pointerEvents: boardOpen ? "auto" : "none" }}>
-        <ScorePanel game={BOARD_ID} title="PINK HUNT" apiRef={boardRef} fontFamily={fontName} width={320} height={boardH} />
+        <ScorePanel game={BOARD_ID} title="PINK HUNT" apiRef={boardRef} fontFamily={fontName} width={320} height={boardH} screen={boardColor} />
       </div>
       <style>{`
         body.gun-mode,

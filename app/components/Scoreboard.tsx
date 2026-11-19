@@ -103,6 +103,7 @@ export function ScorePanel({
   height = 150,
   format = pad5,
   minScore = 10,
+  screen = SCREEN,
 }: {
   game: string;
   title: string;
@@ -113,6 +114,7 @@ export function ScorePanel({
   height?: number;
   format?: (score: number) => string; // how a score is written (Pink Hexagon: a time)
   minScore?: number; // the lowest score that can get on the board
+  screen?: string; // the background colour (PINK HUNT matches the iPod screen of the picked MODE); games keep VOID's green
 }) {
   const [phase, setPhase] = useState<Phase>("hidden");
   const [name, setName] = useState("");
@@ -202,7 +204,7 @@ export function ScorePanel({
     const start = performance.now();
     const textBox = (text: string, y: number) => {
       const w = ctx.measureText(text).width + 8;
-      ctx.fillStyle = SCREEN;
+      ctx.fillStyle = screen;
       ctx.fillRect(Math.round(W / 2 - w / 2), y - 2, Math.round(w), 12);
       ctx.fillStyle = INK;
       ctx.fillText(text, W / 2, y);
@@ -210,7 +212,7 @@ export function ScorePanel({
     let raf = 0;
     const draw = () => {
       const t = (performance.now() - start) / 1000;
-      ctx.fillStyle = SCREEN;
+      ctx.fillStyle = screen;
       ctx.fillRect(0, 0, W, H);
       ctx.font = `8px ${fontFamily}`;
       ctx.textBaseline = "top";
@@ -292,7 +294,7 @@ export function ScorePanel({
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [phase, width, height, fontFamily, title, format]);
+  }, [phase, width, height, fontFamily, title, format, screen]);
 
   const save = async () => {
     const clean = name.trim();

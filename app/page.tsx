@@ -1642,6 +1642,8 @@ export default function Home() {
     let lastLevel = 0;
     let lastHitAt = -1000;
     let wave = new Float32Array(0);
+    let hitsSeen = 0;
+    let lastReport = 0;
     // Hits wait here until the moment you actually hear them (speakers lag behind a bit)
     const waiting: { at: number; strength: number }[] = [];
     const hookUpBass = async (audio: HTMLAudioElement) => {
@@ -1654,8 +1656,17 @@ export default function Home() {
           giveUp = true;
           return;
         }
+        // The browser only lets the sound engine start after the visitor clicked or pressed a key somewhere.
+        // Before that, don't even try (trying too early could leave it stuck waiting forever).
+        const ua = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation;
+        if (ua && !ua.hasBeenActive) {
+          trace("bass-hook", "waiting for a click");
+          return;
+        }
         if (!ctx) ctx = new AC();
-        if (ctx.state !== "running") await ctx.resume();
+        // (never wait more than a second for it: if it doesn't start, it tries again in 2 seconds)
+        if (ctx.state !== "running") await Promise.race([ctx.resume(), new Promise((r) => setTimeout(r, 1000))]);
+        if (ctx.state !== "running") trace("bass-hook", `sound engine ${ctx.state}`);
         // Browser isn't allowing sound yet: don't touch the song, try again in a bit
         if (ctx.state !== "running" || hookedTo) return;
         const source = ctx.createMediaElementSource(audio);
@@ -1765,6 +1776,10 @@ export default function Home() {
 
       // 808 hits: the low end jumps way up compared to the last ~70 milliseconds = an 808 just hit
       const level10 = calm.matches ? 0 : quakeRef.current;
+      if (calm.matches && now - lastReport > 8000) {
+        lastReport = now;
+        trace("bass", "OFF: this computer asks websites for less motion (animations are turned off in its settings)");
+      }
       let hit = 0;
       if (live && level10 > 0) {
         if (analyser && ctx && hookedTo === audio) {
@@ -1776,6 +1791,12 @@ export default function Home() {
           if (level > 0.012 && ratio > 1.3 && level > lastLevel * 1.08 && now - lastHitAt > 110) {
             strength = Math.min(1, Math.max(0.4, (ratio - 1.15) * 1.6));
             lastHitAt = now;
+            hitsSeen++;
+          }
+          if (now - lastReport > 8000) {
+            lastReport = now;
+            trace("bass", `low end ${bassAvg.toFixed(3)} · 808s caught ${hitsSeen} · quake ${level10}`);
+            hitsSeen = 0;
           }
           lastLevel = level;
           // Show it when it reaches your ears, not when the browser first sees it
