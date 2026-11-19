@@ -10,7 +10,7 @@ import { ScorePanel, type ScoreApi, type ScoreEntry } from "./Scoreboard";
 //   - every left click is a SHOT: the ammo flies from the gun to where you clicked, and the click happens when it lands
 //     (so whatever you shot still opens, blinks etc. like before, just a moment later)
 //   - AMMO from the games: WEED LEAF (you start with it), BULLET, FIREBALL, SPIKE SHOT (PINKMANE VOID), BOMB (Pink Bomber).
-//     Each one makes a sound from the games (the shot sound is only for the BULLET; WEED LEAF + FIREBALL share VOID's fireball sound)
+//     Each one makes a sound from the games (the shot sound is only for the BULLET; WEED LEAF + SPIKE SHOT share VOID's spike shot sound)
 //     RIGHT CLICK, the keys 1 - 5, or clicking a box in the ammo bar (under the iPod) = switch ammo
 //   - PINK HUNT: shoot the flying PINKMANEs in the background: far away (small) = 20, middle = 15, close (big) = 10.
 //     The BOMB gets everything near it, but only 5 points each.
@@ -256,8 +256,8 @@ export default function GunCursor({ active, muted, font }: Props) {
     const fireSound = (id: AmmoId) => {
       const v = SPELL_VOLUME;
       if (id === "bullet") bang(1);
-      else if (id === "leaf" || id === "fire") blip(900, 300, 0.07, 0.035 * v, 0, "sawtooth"); // PINKMANE VOID's fireball sound (the weed leaf uses it too)
-      else if (id === "spike") [1300, 1000, 760].forEach((f, i) => blip(f, f * 0.45, 0.06, 0.035 * v, i * 0.025, "sawtooth")); // VOID's spike shot
+      else if (id === "fire") blip(900, 300, 0.07, 0.035 * v, 0, "sawtooth"); // PINKMANE VOID's fireball
+      else if (id === "spike" || id === "leaf") [1300, 1000, 760].forEach((f, i) => blip(f, f * 0.45, 0.06, 0.035 * v, i * 0.025, "sawtooth")); // VOID's spike shot (the weed leaf uses it too)
       else blip(220, 330, 0.06, 0.05 * v); // Pink Bomber: dropping a bomb
     };
     // impact: a short burst of noise (deep + long for the bomb)
