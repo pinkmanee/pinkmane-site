@@ -21,6 +21,8 @@ type YTPlayer = {
   getCurrentTime: () => number;
   getPlayerState: () => number;
   destroy: () => void;
+  unloadModule?: (name: string) => void;
+  setOption?: (module: string, option: string, value: unknown) => void;
 };
 type YTNamespace = {
   Player: new (
@@ -31,7 +33,7 @@ type YTNamespace = {
       width?: string;
       height?: string;
       playerVars?: Record<string, number | string>;
-      events?: { onReady?: () => void };
+      events?: { onReady?: () => void; onStateChange?: (e: { data: number }) => void };
     },
   ) => YTPlayer;
 };
@@ -82,6 +84,17 @@ export default function TrackVideo({ videoId, link, title, songRef, show, fontFa
     if (show) setStarted(true);
   }, [show]);
 
+  // captions off (YouTube can turn them on by itself, e.g. auto-generated ones)
+  const noCaptions = () => {
+    const p = playerRef.current;
+    if (!p) return;
+    try {
+      p.setOption?.("captions", "track", {});
+      p.unloadModule?.("captions");
+      p.unloadModule?.("cc");
+    } catch {}
+  };
+
   // make the YouTube player (once)
   useEffect(() => {
     if (!started) return;
@@ -106,11 +119,17 @@ export default function TrackVideo({ videoId, link, title, songRef, show, fontFa
           playsinline: 1,
           modestbranding: 1,
           iv_load_policy: 3,
+          cc_load_policy: 0, // no captions
         },
         events: {
           onReady: () => {
             readyRef.current = true;
             playerRef.current?.mute();
+            noCaptions();
+          },
+          // YouTube switches captions on when the video starts playing, so switch them off again every time it starts
+          onStateChange: (e) => {
+            if (e.data === 1 || e.data === 3) noCaptions();
           },
         },
       });
