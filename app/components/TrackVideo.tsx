@@ -74,6 +74,8 @@ type Props = {
 
 export default function TrackVideo({ videoId, link, title, songRef, show, fontFamily }: Props) {
   const holderRef = useRef<HTMLDivElement>(null);
+  const tvRef = useRef<HTMLDivElement>(null);
+  const linkRef = useRef<HTMLAnchorElement>(null);
   const playerRef = useRef<YTPlayer | null>(null);
   const readyRef = useRef(false);
   const showRef = useRef(show);
@@ -181,8 +183,30 @@ export default function TrackVideo({ videoId, link, title, songRef, show, fontFa
     [],
   );
 
+  // The TV sits BEHIND the flying PINKMANEs (so you can shoot them over the video), but its button has to be in front
+  // to be clickable, so the button is its own piece that's kept right under the TV
+  useEffect(() => {
+    const place = () => {
+      const tv = tvRef.current;
+      const a = linkRef.current;
+      if (!tv || !a) return;
+      const r = tv.getBoundingClientRect();
+      a.style.left = `${r.left}px`;
+      a.style.top = `${r.bottom - 4}px`;
+      a.style.width = `${r.width}px`;
+    };
+    place();
+    const id = window.setInterval(place, 250);
+    window.addEventListener("resize", place);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("resize", place);
+    };
+  }, []);
+
   return (
-    <div className={`tv ${show ? "tv-on" : ""}`} data-solid aria-hidden={!show}>
+    <>
+    <div ref={tvRef} className={`tv ${show ? "tv-on" : ""}`} aria-hidden={!show}>
       <div className="tv-head" style={{ fontFamily }}>
         <span className="tv-dot" /> NOW PLAYING · {title}
       </div>
@@ -190,9 +214,18 @@ export default function TrackVideo({ videoId, link, title, songRef, show, fontFa
         <div ref={holderRef} className="tv-player" />
         <div className="tv-scan" />
       </div>
-      <a className="tv-link" href={link} target="_blank" rel="noopener noreferrer" style={{ fontFamily }}>
-        ▶ WATCH ON YOUTUBE
-      </a>
+    </div>
+    <a
+      ref={linkRef}
+      className={`tv-link ${show ? "tv-on-link" : ""}`}
+      href={link}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{ fontFamily }}
+      tabIndex={show ? 0 : -1}
+    >
+      ▶ WATCH ON YOUTUBE
+    </a>
       <style>{`
         .tv {
           /* centred in the space left of the iPod */
@@ -202,7 +235,8 @@ export default function TrackVideo({ videoId, link, title, songRef, show, fontFa
           top: 50%;
           width: var(--tvw);
           transform: translateY(-50%) scale(0.96);
-          z-index: 2;
+          /* behind the flying PINKMANEs (they're on layer 0), in front of the background picture (layer -1) */
+          z-index: -1;
           opacity: 0;
           pointer-events: none;
           transition: opacity 0.4s ease, transform 0.4s ease;
@@ -212,7 +246,6 @@ export default function TrackVideo({ videoId, link, title, songRef, show, fontFa
         }
         .tv-on {
           opacity: 1;
-          pointer-events: auto;
           transform: translateY(-50%) scale(1);
         }
         .tv-head {
@@ -265,6 +298,15 @@ export default function TrackVideo({ videoId, link, title, songRef, show, fontFa
           box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.6);
         }
         .tv-link {
+          position: fixed;
+          z-index: 2;
+          box-sizing: border-box;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.4s ease;
+          border: 4px solid #111;
+          border-top: 0;
+          box-shadow: 0 0 0 3px #fff;
           display: block;
           padding: 8px;
           text-align: center;
@@ -274,16 +316,21 @@ export default function TrackVideo({ videoId, link, title, songRef, show, fontFa
           text-decoration: none;
           letter-spacing: 1px;
         }
+        .tv-on-link {
+          opacity: 1;
+          pointer-events: auto;
+        }
         .tv-link:hover {
           background: #ff3bd0;
         }
         /* small windows (no room next to the iPod) and phones: no TV */
         @media (max-width: 1150px), (hover: none) {
-          .tv {
+          .tv,
+          .tv-link {
             display: none;
           }
         }
       `}</style>
-    </div>
+    </>
   );
 }
