@@ -1642,6 +1642,10 @@ export default function Home() {
     let spec = new Float32Array(0); // the low end right now (from the browser, in dB)
     let lastSpec = new Float32Array(0); // ... and a frame ago
     let fluxAvg = 0; // how much it usually changes (the last ~0.4 s)
+    // A second, finer listener that checks there's really an 808 there: the deep sub (25-60 Hz) has to be louder than
+    // the melody range (100-400 Hz). Parts with only melodies, piano, pads etc. have almost no deep sub, so no shake.
+    let subAnalyser: AnalyserNode | null = null;
+    let subSpec = new Float32Array(0);
     let lastFlux = 0;
     let lastHitAt = -1000;
     let hitsSeen = 0;
@@ -1682,8 +1686,15 @@ export default function Home() {
         silent.gain.value = 0; // (the listener has to be plugged in to work, but this copy is silent)
         source.connect(node);
         node.connect(silent);
+        const subNode = ctx.createAnalyser();
+        subNode.fftSize = 4096;
+        subNode.smoothingTimeConstant = 0;
+        source.connect(subNode);
+        subNode.connect(silent);
         silent.connect(ctx.destination);
         analyser = node;
+        subAnalyser = subNode;
+        subSpec = new Float32Array(subNode.frequencyBinCount);
         spec = new Float32Array(node.frequencyBinCount);
         lastSpec = new Float32Array(node.frequencyBinCount);
         hookedTo = audio;
@@ -1694,6 +1705,21 @@ export default function Home() {
       } finally {
         hooking = false;
       }
+    };
+
+    // Is there an 808 right now? (deep sub louder than the melody range)
+    const sub808 = () => {
+      if (!subAnalyser || !ctx || !subSpec.length) return false;
+      subAnalyser.getFloatFrequencyData(subSpec);
+      const hz = ctx.sampleRate / subAnalyser.fftSize;
+      const avg = (fromHz: number, toHz: number) => {
+        const a = Math.max(1, Math.floor(fromHz / hz));
+        const b = Math.min(subSpec.length - 1, Math.floor(toHz / hz));
+        let s = 0;
+        for (let i = a; i <= b; i++) s += Math.pow(10, subSpec[i] / 20);
+        return s / Math.max(1, b - a + 1);
+      };
+      return avg(25, 60) > avg(100, 400);
     };
 
     // How much the low end (25-400 Hz: the 808's note + its distortion) changed since the last frame
@@ -1793,7 +1819,7 @@ export default function Home() {
           fluxAvg += (change - fluxAvg) * Math.min(1, dt * 2.5);
           const ratio = change / Math.max(0.0001, fluxAvg);
           let strength = 0;
-          if (change > 0.02 && ratio > 2 && change >= lastFlux && now - lastHitAt > 100) {
+          if (change > 0.02 && ratio > 1.7 && change >= lastFlux && now - lastHitAt > 100 && sub808()) {
             strength = Math.min(1, Math.max(0.45, (ratio - 1.5) * 0.5));
             lastHitAt = now;
             hitsSeen++;
