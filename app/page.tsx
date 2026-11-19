@@ -1636,12 +1636,14 @@ export default function Home() {
     let giveUp = false;
     let lastTry = -10000;
     let bass = 0;
-    // The 808 detector: how loud the low end is on average (the last ~1/3 second), how loud it was a frame ago,
-    // and when the last hit was (so one 808 only counts once)
-    let bassAvg = 0;
-    let lastLevel = 0;
+    // The 808 detector. It watches the low end (25-400 Hz) and reacts when it CHANGES: a new note, a new attack,
+    // a different pitch - so it catches every 808 on the piano roll, even when they run straight into each other
+    // (the old way only reacted when the bass got louder, so it only caught the first 808 after a break).
+    let spec = new Float32Array(0); // the low end right now (from the browser, in dB)
+    let lastSpec = new Float32Array(0); // ... and a frame ago
+    let fluxAvg = 0; // how much it usually changes (the last ~0.4 s)
+    let lastFlux = 0;
     let lastHitAt = -1000;
-    let wave = new Float32Array(0);
     let hitsSeen = 0;
     let lastReport = 0;
     // Hits wait here until the moment you actually hear them (speakers lag behind a bit)
@@ -1672,22 +1674,18 @@ export default function Home() {
         const source = ctx.createMediaElementSource(audio);
         // what you hear goes straight out, untouched
         source.connect(ctx.destination);
-        // a side copy, with everything above ~110 Hz filtered off (only the 808s + kicks are left), goes to the listener
-        const lowpass = ctx.createBiquadFilter();
-        lowpass.type = "lowpass";
-        lowpass.frequency.value = 110;
-        lowpass.Q.value = 0.7;
+        // a side copy goes to the listener (it's never heard)
         const node = ctx.createAnalyser();
-        node.fftSize = 1024;
+        node.fftSize = 2048;
         node.smoothingTimeConstant = 0;
         const silent = ctx.createGain();
-        silent.gain.value = 0; // (the listener has to be plugged in to work, but this copy is never heard)
-        source.connect(lowpass);
-        lowpass.connect(node);
+        silent.gain.value = 0; // (the listener has to be plugged in to work, but this copy is silent)
+        source.connect(node);
         node.connect(silent);
         silent.connect(ctx.destination);
         analyser = node;
-        wave = new Float32Array(node.fftSize);
+        spec = new Float32Array(node.frequencyBinCount);
+        lastSpec = new Float32Array(node.frequencyBinCount);
         hookedTo = audio;
         trace("bass-hook", "ok");
       } catch {
@@ -1698,14 +1696,21 @@ export default function Home() {
       }
     };
 
-    // How loud the low end (the 808s, below ~110 Hz) is right now: the real loudness of the filtered sound,
-    // so it never maxes out on loud songs (the old way measured on a scale that was always full with mastered tracks)
-    const bassLevel = () => {
-      if (!analyser || !ctx || !wave.length) return 0;
-      analyser.getFloatTimeDomainData(wave);
-      let sum = 0;
-      for (let i = 0; i < wave.length; i++) sum += wave[i] * wave[i];
-      return Math.sqrt(sum / wave.length);
+    // How much the low end (25-400 Hz: the 808's note + its distortion) changed since the last frame
+    const bassChange = () => {
+      if (!analyser || !ctx || !spec.length) return 0;
+      analyser.getFloatFrequencyData(spec);
+      const hz = ctx.sampleRate / analyser.fftSize;
+      const lo = Math.max(1, Math.floor(25 / hz));
+      const hi = Math.min(spec.length - 1, Math.floor(400 / hz));
+      let change = 0;
+      for (let i = lo; i <= hi; i++) {
+        const v = Math.log1p(100 * Math.pow(10, spec[i] / 20)); // dB -> a squashed loudness
+        const d = v - lastSpec[i];
+        if (d > 0) change += d; // only what got louder counts (a note starting, not one fading out)
+        lastSpec[i] = v;
+      }
+      return change;
     };
     const put = (name: string, value: string) => {
       if (phoneGameRef.current) return; // (the phone game is covering the iPod: nothing to redraw behind it)
@@ -1783,22 +1788,22 @@ export default function Home() {
       let hit = 0;
       if (live && level10 > 0) {
         if (analyser && ctx && hookedTo === audio) {
-          // an 808 hit = the low end is suddenly much louder than it has been lately (and still going up)
-          const level = bassLevel();
-          bassAvg += (level - bassAvg) * Math.min(1, dt * 3);
-          const ratio = level / Math.max(0.004, bassAvg);
+          // an 808 hit = the low end suddenly changes a lot more than it usually does
+          const change = bassChange();
+          fluxAvg += (change - fluxAvg) * Math.min(1, dt * 2.5);
+          const ratio = change / Math.max(0.0001, fluxAvg);
           let strength = 0;
-          if (level > 0.012 && ratio > 1.3 && level > lastLevel * 1.08 && now - lastHitAt > 110) {
-            strength = Math.min(1, Math.max(0.4, (ratio - 1.15) * 1.6));
+          if (change > 0.02 && ratio > 2 && change >= lastFlux && now - lastHitAt > 100) {
+            strength = Math.min(1, Math.max(0.45, (ratio - 1.5) * 0.5));
             lastHitAt = now;
             hitsSeen++;
           }
+          lastFlux = change;
           if (now - lastReport > 8000) {
             lastReport = now;
-            trace("bass", `low end ${bassAvg.toFixed(3)} · 808s caught ${hitsSeen} · quake ${level10}`);
+            trace("bass", `808s caught ${hitsSeen} in 8s · quake ${level10}`);
             hitsSeen = 0;
           }
-          lastLevel = level;
           // Show it when it reaches your ears, not when the browser first sees it
           const lag = ((ctx.baseLatency || 0) + ((ctx as AudioContext & { outputLatency?: number }).outputLatency || 0) + SYNC_NUDGE) * 1000;
           if (strength > 0) waiting.push({ at: now + Math.min(400, Math.max(0, lag)), strength });
@@ -1806,8 +1811,8 @@ export default function Home() {
           hit = kick * 0.6; // no bass listener: shake on the beat instead
         }
       } else {
-        bassAvg = 0;
-        lastLevel = 0;
+        fluxAvg = 0;
+        lastFlux = 0;
         waiting.length = 0;
       }
       while (waiting.length && waiting[0].at <= now) hit = Math.max(hit, waiting.shift()!.strength);
