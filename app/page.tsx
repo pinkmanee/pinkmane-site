@@ -2399,6 +2399,7 @@ activeGame === "bomber" ? (
             src={g.src}
             alt=""
             data-target
+            data-points={g.size < 35 ? 20 : g.size < 45 ? 15 : 10}
             className="floating-glyph"
             style={
               {
@@ -3149,6 +3150,7 @@ activeGame === "bomber" ? (
               <div
                 key={`hh-${g.id}`}
                 data-target
+                data-points={g.size < 35 ? 20 : g.size < 45 ? 15 : 10}
                 className={`hh-jet ${g.id % 2 === 1 ? "hh-jet-left" : ""}`}
                 style={{
                   top: `${5 + g.left * 0.8}%`,

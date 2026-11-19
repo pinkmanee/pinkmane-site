@@ -11,7 +11,8 @@ import { ScorePanel, type ScoreApi, type ScoreEntry } from "./Scoreboard";
 //     (so whatever you shot still opens, blinks etc. like before, just a moment later)
 //   - AMMO from the games: BULLET, FIREBALL, SPIKE SHOT (PINKMANE VOID), WEED LEAF (Pink Jetpack), BOMB (Pink Bomber)
 //     RIGHT CLICK, the keys 1 - 5, or clicking a box in the ammo bar (under the iPod) = switch ammo
-//   - PINK HUNT: shoot the flying PINKMANEs in the background = 10 points (the BOMB gets everything near it).
+//   - PINK HUNT: shoot the flying PINKMANEs in the background: far away (small) = 20, middle = 15, close (big) = 10.
+//     The BOMB gets everything near it, but only 5 points each.
 //     The first kill starts a 60 second round; when it ends you can save your score (online Top 10, board "gun").
 //     Score + time + the TOP 3 are in the top right corner.
 //   - sliders (BASS QUAKE, VOL) and the handheld's D-pad still react instantly
@@ -34,7 +35,10 @@ const AMMO_KEY = "pinkmane-ammo"; // remembers the last ammo you picked
 const BEST_KEY = "pinkhunt-best";
 const BOARD_ID = "gun"; // the Top 10 board (also in app/api/scores/shared.ts)
 const HUNT_TIME = 60; // seconds per round
+// points for a flyer: the page gives each one data-points (far away / small = 20, middle = 15, close / big = 10).
+// Anything the BOMB gets is only worth BOMB_POINTS (it hits so many at once).
 const KILL_POINTS = 10;
+const BOMB_POINTS = 5;
 const BOMB_RADIUS = 60; // the bomb kills every flyer this close
 // clicking these counts as a HIT (buttons, links, the iPod menu rows, the game list)
 const HIT_TARGETS = "button, a, [role=button], [data-shoot], .gp-row";
@@ -432,9 +436,10 @@ export default function GunCursor({ active, muted, font }: Props) {
         hunt.score = 0;
         hunt.kills = 0;
       }
-      hunt.score += KILL_POINTS;
+      const pts = ammo === "bomb" ? BOMB_POINTS : Number(el.dataset.points) || KILL_POINTS;
+      hunt.score += pts;
       hunt.kills += 1;
-      pops.push({ x: cx, y: r.top - 6, text: `+${KILL_POINTS}`, life: 0.9, color: "#ffd84a", size: 14 });
+      pops.push({ x: cx, y: r.top - 6, text: `+${pts}`, life: 0.9, color: pts >= 20 ? "#ff3bd0" : pts >= 15 ? "#8affc8" : "#ffd84a", size: pts >= 20 ? 16 : 14 });
       blip(900, 120, 0.22, 0.05);
       blip(1400, 700, 0.08, 0.03, 0.05);
     };
@@ -753,7 +758,9 @@ export default function GunCursor({ active, muted, font }: Props) {
       } else {
         text("SHOOT THE FLYING PINKMANES", x, y, 9, "#ffffff", "right");
         y += 13;
-        text(`${KILL_POINTS} EACH · ${HUNT_TIME} SECONDS`, x, y, 9, "#ffd84a", "right");
+        text("FAR = 20 · MID = 15 · CLOSE = 10", x, y, 9, "#ffd84a", "right");
+        y += 13;
+        text(`BOMB = ${BOMB_POINTS} · ${HUNT_TIME} SECONDS`, x, y, 9, "#ffd84a", "right");
         y += 17;
       }
       text("TOP 3", x, y, 10, "#ff3bd0", "right");
