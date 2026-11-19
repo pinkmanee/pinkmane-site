@@ -26,8 +26,8 @@ const GUN_ON = true;
 const SHOT_SOUND = "/sounds/shot.mp3";
 const GUN_PIC = "/gun/gun.png";
 const LOGO_PIC = "/gun/gun-logo.png";
-const SHOT_VOLUME = 0.35; // the shot is loud, so it plays at 35%
-const HIT_VOLUME = 0.18; // the little impact sound
+const SHOT_VOLUME = 0.1; // the shot is loud, so it plays at 10%
+const HIT_VOLUME = 0.09; // the little impact sound
 const AIM_SIZE = 34; // how big the aim is (pixels)
 const AIM_COLOR = "#ff3bd0";
 const AMMO_KEY = "pinkmane-ammo"; // remembers the last ammo you picked
@@ -43,21 +43,23 @@ const INSTANT = "input, textarea, select, label, [data-instant], [data-noshoot]"
 // shots that land on these can't hit the flyers behind them
 const SOLID = "[data-solid], .ipod-shell, .hh-device";
 
-// ---------- the gun picture (public/gun/gun.png, 74 x 42 pixels, pointing left) ----------
-const PIVOT = { x: 56, y: 30 }; // the gun turns around this pixel (the hand)
-const MUZZLE = { x: -1, y: 8 }; // where the ammo comes out
-const LOGO_BOX = { x: 26, y: 4, w: 33, h: 13 }; // where the PINKMANE logo sits on the slide
-const ARM_FROM = { x: 66, y: 34 }; // where the arm leaves the hand
+// ---------- the gun picture (public/gun/gun.png, 82 x 46 pixels, a Desert Eagle pointing left) ----------
+const PIVOT = { x: 57, y: 30 }; // the gun turns around this pixel (the hand)
+const MUZZLE = { x: 0, y: 7 }; // where the ammo comes out
+const LOGO_BOX = { x: 15, y: 3.4, w: 28, h: 10.9 }; // where the PINKMANE logo sits on the slide
+const ARM_FROM = { x: 67, y: 35 }; // where the arm leaves the hand
 
 // ---------- the ammo ----------
 type AmmoId = "bullet" | "fire" | "spike" | "leaf" | "bomb";
 const AMMO: { id: AmmoId; name: string; speed: number; pitch: number; color: string[] }[] = [
-  { id: "bullet", name: "BULLET", speed: 2000, pitch: 1, color: ["#ffd84a", "#ffffff"] },
-  { id: "fire", name: "FIREBALL", speed: 1250, pitch: 0.78, color: ["#ffd84a", "#ff7a00", "#ff3b1a"] },
-  { id: "spike", name: "SPIKE SHOT", speed: 1500, pitch: 1.25, color: ["#ff3bd0", "#ff8ad8", "#ffffff"] },
-  { id: "leaf", name: "WEED LEAF", speed: 1100, pitch: 1.45, color: ["#3fc24a", "#8affc8", "#1b6b25"] },
+  { id: "bullet", name: "BULLET", speed: 2000, pitch: 1, color: ["#ffd84a", "#ffffff", "#ffb02a"] },
+  { id: "fire", name: "FIREBALL", speed: 1250, pitch: 0.78, color: ["#ffd84a", "#ff7a00", "#ff3b1a", "#ffffff"] },
+  { id: "spike", name: "SPIKE SHOT", speed: 1500, pitch: 1.25, color: ["#ff3bd0", "#ff8ad8", "#ffffff", "#b0209a"] },
+  { id: "leaf", name: "WEED LEAF", speed: 1100, pitch: 1.45, color: ["#3fc24a", "#8affc8", "#1b6b25", "#d8ff8a"] },
   { id: "bomb", name: "BOMB", speed: 850, pitch: 0.6, color: ["#ffd84a", "#ff7a00", "#ff3b1a", "#ffffff"] },
 ];
+// the glow of each explosion (red, green, blue)
+const GLOW: Record<AmmoId, string> = { bullet: "255,216,74", fire: "255,122,0", spike: "255,59,208", leaf: "63,194,74", bomb: "255,140,40" };
 
 const INK = "#1a0618";
 const MEDALS = ["#ffd700", "#c8ccd6", "#cd7f32"];
@@ -66,11 +68,15 @@ const SPIKE = ["....K....", "...KPK...", "...KPK...", ".KKPLPKK.", "KPPLWLPPK", 
 const BOMB = ["...OOOO...", ".OOKKKKOO.", ".OKHHKKKO.", "OKHHKKKKKO", "OKHKKKKKKO", "OKKKKKKKKO", "OKKKKKKKKO", ".OKKKKKKO.", ".OOKKKKOO.", "...OOOO..."];
 
 type Shot = { ammo: AmmoId; x0: number; y0: number; x1: number; y1: number; t: number; dur: number; spin: number; target: Element | null; hit: boolean; solid: boolean; lastX: number; lastY: number };
-type Part = { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number; grav: number };
+// leaf = a little spinning weed leaf instead of a square
+type Part = { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number; grav: number; leaf?: boolean; rot?: number };
 type Mark = { x: number; y: number; kind: AmmoId; life: number; rot: number };
 type Pop = { x: number; y: number; text: string; life: number; color: string; size: number };
 type Cross = { x: number; y: number; life: number };
-type Flash = { x: number; y: number; w: number; h: number; life: number };
+type Flash = { x: number; y: number; w: number; h: number; life: number; rgb: string };
+// an explosion's ring (star = pointy rays, for the spike shot) and its glow
+type Ring = { x: number; y: number; life: number; max: number; r: number; color: string; star: boolean };
+type Glow = { x: number; y: number; life: number; max: number; r: number; rgb: string };
 
 type Props = {
   // on = the mouse is a gun right now
@@ -289,6 +295,8 @@ export default function GunCursor({ active, muted, font }: Props) {
     const pops: Pop[] = [];
     const crosses: Cross[] = [];
     const flashes: Flash[] = [];
+    const rings: Ring[] = [];
+    const glows: Glow[] = [];
     let swallow = false; // eat the rest of this real click (the shot will click when it lands)
     // PINK HUNT
     // lock = the round just ended: no new round until its Top 10 box has been closed
@@ -308,7 +316,7 @@ export default function GunCursor({ active, muted, font }: Props) {
     loadTop();
     let wasBusy = false;
 
-    const scale = () => (vw < 900 ? 2.2 : vw < 1500 ? 2.6 : 3);
+    const scale = () => (vw < 900 ? 2 : vw < 1500 ? 2.4 : 2.8);
     // where a pixel of the gun picture ends up on the screen
     const gunPoint = (gx: number, gy: number) => {
       const S = scale();
@@ -327,6 +335,35 @@ export default function GunCursor({ active, muted, font }: Props) {
       }
     };
 
+    // an explosion in the colours of the ammo (green for the weed leaf, pink for the spike shot ...)
+    const explode = (x: number, y: number, id: AmmoId, big: boolean) => {
+      const c = AMMO.find((q) => q.id === id)!.color;
+      const k = big ? 1.5 : 1;
+      glows.push({ x, y, life: 0.18, max: 0.18, r: (id === "bomb" ? 70 : 38) * k, rgb: GLOW[id] });
+      rings.push({ x, y, life: 0.35, max: 0.35, r: (id === "bomb" ? 70 : 34) * k, color: c[0], star: id === "spike" });
+      if (id === "bomb") {
+        crosses.push({ x, y, life: 0.45 });
+        burst(x, y, 26, c, 260, 4);
+        burst(x, y, 10, ["#9a9aa8", "#c8c8d4"], 60, 6, -40);
+      } else if (id === "fire") {
+        burst(x, y, Math.round(18 * k), c, 190 * k, 4);
+        burst(x, y, 7, ["#5a5a68", "#9a9aa8", "#c8c8d4"], 45, 6, -60);
+      } else if (id === "leaf") {
+        burst(x, y, Math.round(12 * k), c, 150 * k, 3, 220);
+        // little leaves flying out
+        for (let i = 0; i < (big ? 7 : 4); i++) {
+          const a = Math.random() * Math.PI * 2;
+          const v = 80 + Math.random() * 120;
+          const life = 0.6 + Math.random() * 0.5;
+          parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 90, life, max: life, color: c[0], size: 1 + Math.random() * 0.5, grav: 260, leaf: true, rot: Math.random() * 6 });
+        }
+      } else if (id === "spike") {
+        burst(x, y, Math.round(16 * k), c, 230 * k, 3, 150);
+      } else {
+        burst(x, y, Math.round(10 * k), c, 170 * k, 2);
+      }
+    };
+
     // ---------- PINK HUNT: the flyers ----------
     const flyers = () => Array.from(document.querySelectorAll<HTMLElement>("[data-target]"));
     const alive = (el: HTMLElement) => {
@@ -337,7 +374,7 @@ export default function GunCursor({ active, muted, font }: Props) {
       return r;
     };
     // the flyer breaks into its own pixels
-    const kill = (el: HTMLElement, r: DOMRect) => {
+    const kill = (el: HTMLElement, r: DOMRect, ammo: AmmoId) => {
       const img = (el.tagName === "IMG" ? el : el.querySelector("img")) as HTMLImageElement | null;
       const N = 12;
       const cw = r.width / N;
@@ -379,7 +416,8 @@ export default function GunCursor({ active, muted, font }: Props) {
           const life = 0.7 + Math.random() * 0.6;
           parts.push({ x, y, vx: (dx / d) * v + (Math.random() - 0.5) * 40, vy: (dy / d) * v - 140 - Math.random() * 80, life, max: life, color, size: Math.max(2, Math.ceil(Math.max(cw, ch))), grav: 650 });
         }
-      flashes.push({ x: r.left, y: r.top, w: r.width, h: r.height, life: 0.09 });
+      flashes.push({ x: r.left, y: r.top, w: r.width, h: r.height, life: 0.09, rgb: GLOW[ammo] });
+      explode(cx, cy, ammo, true);
       // send it back to the start (it flies in again after a moment)
       el.style.animationName = "none";
       void el.offsetWidth;
@@ -417,18 +455,8 @@ export default function GunCursor({ active, muted, font }: Props) {
 
     // the shot lands
     const land = (s: Shot) => {
-      const a = AMMO.find((q) => q.id === s.ammo)!;
       thud(s.ammo === "bomb");
-      if (s.ammo === "bomb") {
-        crosses.push({ x: s.x1, y: s.y1, life: 0.45 });
-        burst(s.x1, s.y1, 26, a.color, 260, 4);
-        burst(s.x1, s.y1, 10, ["#9a9aa8", "#c8c8d4"], 60, 6, -40);
-      } else if (s.ammo === "fire") {
-        burst(s.x1, s.y1, 18, a.color, 180, 3);
-        burst(s.x1, s.y1, 6, ["#9a9aa8", "#c8c8d4"], 40, 5, -50);
-      } else if (s.ammo === "leaf") burst(s.x1, s.y1, 14, a.color, 140, 3, 200);
-      else if (s.ammo === "spike") burst(s.x1, s.y1, 16, a.color, 200, 3);
-      else burst(s.x1, s.y1, 10, a.color, 170, 2);
+      explode(s.x1, s.y1, s.ammo, false);
       // did it get a flyer? (not through the iPod / handheld, and not when you shot a button)
       let killed = 0;
       if (!s.hit && !s.solid) {
@@ -442,12 +470,12 @@ export default function GunCursor({ active, muted, font }: Props) {
           const d = Math.hypot(s.x1 - nx, s.y1 - ny);
           if (d > padPx) continue;
           if (s.ammo === "bomb") {
-            kill(el, r);
+            kill(el, r, s.ammo);
             killed++;
           } else if (!best || d < best.d) best = { el, r, d };
         }
         if (best) {
-          kill(best.el, best.r);
+          kill(best.el, best.r, s.ammo);
           killed++;
         }
       }
@@ -828,7 +856,7 @@ export default function GunCursor({ active, muted, font }: Props) {
       // a white flash where a flyer got hit
       for (const f of flashes) {
         f.life -= dt;
-        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        ctx.fillStyle = `rgba(${f.rgb},0.9)`;
         ctx.fillRect(f.x, f.y, f.w, f.h);
       }
       for (let i = flashes.length - 1; i >= 0; i--) if (flashes[i].life <= 0) flashes.splice(i, 1);
@@ -852,6 +880,40 @@ export default function GunCursor({ active, muted, font }: Props) {
       }
       ctx.globalAlpha = 1;
       for (let i = crosses.length - 1; i >= 0; i--) if (crosses[i].life <= 0) crosses.splice(i, 1);
+      // explosion glows + rings
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      for (const g of glows) {
+        g.life -= dt;
+        const a = Math.max(0, g.life / g.max);
+        const gr = ctx.createRadialGradient(g.x, g.y, 0, g.x, g.y, g.r);
+        gr.addColorStop(0, `rgba(${g.rgb},${0.85 * a})`);
+        gr.addColorStop(1, `rgba(${g.rgb},0)`);
+        ctx.fillStyle = gr;
+        ctx.fillRect(g.x - g.r, g.y - g.r, g.r * 2, g.r * 2);
+      }
+      ctx.restore();
+      for (let i = glows.length - 1; i >= 0; i--) if (glows[i].life <= 0) glows.splice(i, 1);
+      for (const rg of rings) {
+        rg.life -= dt;
+        const k = 1 - Math.max(0, rg.life / rg.max);
+        const r = rg.r * (1 - (1 - k) * (1 - k)); // fast at first, then slows down
+        ctx.globalAlpha = Math.max(0, rg.life / rg.max);
+        ctx.strokeStyle = rg.color;
+        ctx.lineWidth = Math.max(1, 4 * (1 - k));
+        ctx.beginPath();
+        if (rg.star) {
+          // the spike shot: 8 pointy rays
+          for (let i = 0; i < 8; i++) {
+            const a = (Math.PI / 4) * i + Math.PI / 8;
+            ctx.moveTo(rg.x + Math.cos(a) * r * 0.35, rg.y + Math.sin(a) * r * 0.35);
+            ctx.lineTo(rg.x + Math.cos(a) * r, rg.y + Math.sin(a) * r);
+          }
+        } else ctx.arc(rg.x, rg.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      for (let i = rings.length - 1; i >= 0; i--) if (rings[i].life <= 0) rings.splice(i, 1);
       // the flying ammo
       for (const s of shots) {
         s.t += dt;
@@ -880,6 +942,11 @@ export default function GunCursor({ active, muted, font }: Props) {
         q.vy += q.grav * dt;
         q.vx *= 1 - 2 * dt;
         ctx.globalAlpha = Math.max(0, Math.min(1, (q.life / q.max) * 1.5));
+        if (q.leaf) {
+          q.rot = (q.rot ?? 0) + dt * 8;
+          drawAmmo(ctx, "leaf", q.x, q.y, 0, q.rot, clock, q.size);
+          continue;
+        }
         ctx.fillStyle = q.color;
         ctx.fillRect(Math.round(q.x - q.size / 2), Math.round(q.y - q.size / 2), q.size, q.size);
       }
