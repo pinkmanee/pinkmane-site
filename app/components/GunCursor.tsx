@@ -9,7 +9,8 @@ import { ScorePanel, type ScoreApi, type ScoreEntry } from "./Scoreboard";
 //     overshoot), rolls over when you aim to the other side, and kicks back on every shot
 //   - every left click is a SHOT: the ammo flies from the gun to where you clicked, and the click happens when it lands
 //     (so whatever you shot still opens, blinks etc. like before, just a moment later)
-//   - AMMO from the games: BULLET, FIREBALL, SPIKE SHOT (PINKMANE VOID), WEED LEAF (Pink Jetpack), BOMB (Pink Bomber)
+//   - AMMO from the games: WEED LEAF (you start with it), BULLET, FIREBALL, SPIKE SHOT (PINKMANE VOID), BOMB (Pink Bomber).
+//     Each one makes its own sound from the games (the shot sound is only for the BULLET)
 //     RIGHT CLICK, the keys 1 - 5, or clicking a box in the ammo bar (under the iPod) = switch ammo
 //   - PINK HUNT: shoot the flying PINKMANEs in the background: far away (small) = 20, middle = 15, close (big) = 10.
 //     The BOMB gets everything near it, but only 5 points each.
@@ -31,7 +32,6 @@ const SHOT_VOLUME = 0.1; // the shot is loud, so it plays at 10%
 const HIT_VOLUME = 0.09; // the little impact sound
 const AIM_SIZE = 34; // how big the aim is (pixels)
 const AIM_COLOR = "#ff3bd0";
-const AMMO_KEY = "pinkmane-ammo"; // remembers the last ammo you picked
 const BEST_KEY = "pinkhunt-best";
 const BOARD_ID = "gun"; // the Top 10 board (also in app/api/scores/shared.ts)
 const HUNT_TIME = 60; // seconds per round
@@ -55,13 +55,14 @@ const ARM_FROM = { x: 67, y: 35 }; // where the arm leaves the hand
 
 // ---------- the ammo ----------
 type AmmoId = "bullet" | "fire" | "spike" | "leaf" | "bomb";
-const AMMO: { id: AmmoId; name: string; speed: number; pitch: number; color: string[] }[] = [
-  { id: "bullet", name: "BULLET", speed: 2000, pitch: 1, color: ["#ffd84a", "#ffffff", "#ffb02a"] },
-  { id: "fire", name: "FIREBALL", speed: 1250, pitch: 0.78, color: ["#ffd84a", "#ff7a00", "#ff3b1a", "#ffffff"] },
-  { id: "spike", name: "SPIKE SHOT", speed: 1500, pitch: 1.25, color: ["#ff3bd0", "#ff8ad8", "#ffffff", "#b0209a"] },
-  { id: "leaf", name: "WEED LEAF", speed: 1100, pitch: 1.45, color: ["#3fc24a", "#8affc8", "#1b6b25", "#d8ff8a"] },
-  { id: "bomb", name: "BOMB", speed: 850, pitch: 0.6, color: ["#ffd84a", "#ff7a00", "#ff3b1a", "#ffffff"] },
+const AMMO: { id: AmmoId; name: string; speed: number; color: string[] }[] = [
+  { id: "leaf", name: "WEED LEAF", speed: 1100, color: ["#3fc24a", "#8affc8", "#1b6b25", "#d8ff8a"] },
+  { id: "bullet", name: "BULLET", speed: 2000, color: ["#ffd84a", "#ffffff", "#ffb02a"] },
+  { id: "fire", name: "FIREBALL", speed: 1250, color: ["#ffd84a", "#ff7a00", "#ff3b1a", "#ffffff"] },
+  { id: "spike", name: "SPIKE SHOT", speed: 1500, color: ["#ff3bd0", "#ff8ad8", "#ffffff", "#b0209a"] },
+  { id: "bomb", name: "BOMB", speed: 850, color: ["#ffd84a", "#ff7a00", "#ff3b1a", "#ffffff"] },
 ];
+const SPELL_VOLUME = 1; // the game sounds (1 = as loud as in the games)
 // the glow of each explosion (red, green, blue)
 const GLOW: Record<AmmoId, string> = { bullet: "255,216,74", fire: "255,122,0", spike: "255,59,208", leaf: "63,194,74", bomb: "255,140,40" };
 
@@ -251,6 +252,18 @@ export default function GunCursor({ active, muted, font }: Props) {
         a.play().catch(() => {});
       }
     };
+    // each ammo's own sound when you fire it (the same recipes as in the games)
+    const fireSound = (id: AmmoId) => {
+      const v = SPELL_VOLUME;
+      if (id === "bullet") bang(1);
+      else if (id === "leaf") {
+        // the weed leaf (PINKMANE VOID)
+        blip(988, 988, 0.05, 0.045 * v);
+        blip(1319, 1319, 0.1, 0.045 * v, 0.05);
+      } else if (id === "fire") blip(900, 300, 0.07, 0.035 * v, 0, "sawtooth"); // PINKMANE VOID's fireball
+      else if (id === "spike") [1300, 1000, 760].forEach((f, i) => blip(f, f * 0.45, 0.06, 0.035 * v, i * 0.025, "sawtooth")); // VOID's spike shot
+      else blip(220, 330, 0.06, 0.05 * v); // Pink Bomber: dropping a bomb
+    };
     // impact: a short burst of noise (deep + long for the bomb)
     const thud = (big: boolean) => {
       if (mutedRef.current || !ac || !noise) return;
@@ -266,13 +279,13 @@ export default function GunCursor({ active, muted, font }: Props) {
       src.connect(f).connect(g).connect(ac.destination);
       src.start(now, 0, big ? 0.5 : 0.15);
     };
-    const blip = (from: number, to: number, len: number, vol = 0.05, delay = 0) => {
+    const blip = (from: number, to: number, len: number, vol = 0.05, delay = 0, type: OscillatorType = "square") => {
       if (mutedRef.current || !ac) return;
       wake();
       const o = ac.createOscillator();
       const g = ac.createGain();
       const t0 = ac.currentTime + delay;
-      o.type = "square";
+      o.type = type;
       o.frequency.setValueAtTime(from, t0);
       o.frequency.exponentialRampToValueAtTime(to, t0 + len);
       g.gain.setValueAtTime(vol, t0);
@@ -283,11 +296,7 @@ export default function GunCursor({ active, muted, font }: Props) {
     };
 
     // ---------- state ----------
-    let ammoIx = 0;
-    try {
-      const saved = AMMO.findIndex((a) => a.id === localStorage.getItem(AMMO_KEY));
-      if (saved >= 0) ammoIx = saved;
-    } catch {}
+    let ammoIx = 0; // you always start with the WEED LEAF
     let mx = vw * 0.5;
     let my = vh * 0.45;
     let shown = false;
@@ -463,7 +472,11 @@ export default function GunCursor({ active, muted, font }: Props) {
 
     // the shot lands
     const land = (s: Shot) => {
-      thud(s.ammo === "bomb");
+      if (s.ammo === "bomb") {
+        // Pink Bomber's explosion
+        blip(160, 40, 0.45, 0.12 * SPELL_VOLUME, 0, "sawtooth");
+        blip(90, 30, 0.5, 0.1 * SPELL_VOLUME, 0.02);
+      } else thud(false);
       explode(s.x1, s.y1, s.ammo, false);
       // did it get a flyer? (not through the iPod / handheld, and not when you shot a button)
       let killed = 0;
@@ -506,7 +519,7 @@ export default function GunCursor({ active, muted, font }: Props) {
 
     const fire = (x: number, y: number, target: Element | null, instant: boolean) => {
       const a = AMMO[ammoIx];
-      bang(a.pitch);
+      fireSound(a.id);
       gun.kick = 1;
       flash = 0.07;
       reticle.animate([{ transform: "scale(1.45) rotate(14deg)" }, { transform: "scale(1) rotate(0deg)" }], { duration: 160, easing: "ease-out" });
@@ -533,9 +546,6 @@ export default function GunCursor({ active, muted, font }: Props) {
     const switchAmmo = (to?: number) => {
       ammoIx = to ?? (ammoIx + 1) % AMMO.length;
       ammoFlash = 1.2;
-      try {
-        localStorage.setItem(AMMO_KEY, AMMO[ammoIx].id);
-      } catch {}
       blip(520 + ammoIx * 90, 520 + ammoIx * 90, 0.08, 0.04);
     };
 
