@@ -4421,9 +4421,21 @@ activeGame === "bomber" ? (
           position: relative;
           z-index: 1;
         }
-        /* The key legend under the iPod */
-        .ipod-keys {
-          max-width: min(560px, 96vw);
+        /* The key legend: a small list in the bottom left corner (computers only) */
+        .hh-keys.ipod-keys {
+          position: fixed;
+          left: 14px;
+          bottom: 14px;
+          z-index: 3;
+          flex-direction: column;
+          flex-wrap: nowrap;
+          align-items: flex-start;
+          justify-content: flex-end;
+          gap: 7px;
+          max-width: none;
+          transform: scale(0.8);
+          transform-origin: left bottom;
+          pointer-events: none;
         }
 
         /* CONTROL W THESE! arrows pointing at the keys (Pinkmane Void, first 5 seconds) */

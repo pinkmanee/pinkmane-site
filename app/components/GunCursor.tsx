@@ -537,14 +537,16 @@ export default function GunCursor({ active, muted, font }: Props) {
     };
 
     // ---------- the ammo bar: centered under the iPod (or the handheld) ----------
-    const BOX = 46;
-    const GAP = 8;
+    const BOX = 64;
+    const GAP = 10;
     const barRect = () => {
       const dev = document.querySelector(".ipod-shell") ?? document.querySelector(".hh-device");
       const r = dev?.getBoundingClientRect();
       const cx = r && r.width > 0 ? r.left + r.width / 2 : vw / 2;
       const w = AMMO.length * BOX + (AMMO.length - 1) * GAP;
-      return { x: Math.round(cx - w / 2), y: Math.round(vh - BOX - 14), w, h: BOX };
+      // right under the iPod (with room for the name above it), or at the bottom if there's no room
+      const under = r && r.width > 0 ? r.bottom + 36 : vh;
+      return { x: Math.round(cx - w / 2), y: Math.round(Math.min(under, vh - BOX - 14)), w, h: BOX };
     };
     let bar = barRect();
     const barHit = (x: number, y: number) => {
@@ -730,13 +732,15 @@ export default function GunCursor({ active, muted, font }: Props) {
         ctx.fillStyle = on ? "rgba(214,60,200,0.95)" : hover ? "rgba(90,30,90,0.85)" : "rgba(26,6,24,0.75)";
         ctx.fillRect(x, bar.y, BOX, BOX);
         ctx.strokeStyle = on ? "#ffffff" : "rgba(255,255,255,0.3)";
-        ctx.lineWidth = on ? 2 : 1;
-        ctx.strokeRect(x + 1, bar.y + 1, BOX - 2, BOX - 2);
-        drawAmmo(ctx, a.id, x + BOX / 2 + (a.id === "bullet" ? 14 : 0), bar.y + BOX / 2 + 2, 0, a.id === "leaf" ? 0.6 : 0, clock, 3);
-        text(String(i + 1), x + 4, bar.y + 4, 9, on ? "#ffffff" : "rgba(255,255,255,0.6)");
+        ctx.lineWidth = on ? 3 : 1.5;
+        ctx.strokeRect(x + 1.5, bar.y + 1.5, BOX - 3, BOX - 3);
+        // the one you're using bobs a little
+        const bob = on ? Math.round(Math.sin(clock * 5) * 2) : 0;
+        drawAmmo(ctx, a.id, x + BOX / 2 + (a.id === "bullet" ? 20 : 0), bar.y + BOX / 2 + 3 + bob, 0, a.id === "leaf" ? 0.6 : 0, clock, 4.5);
+        text(String(i + 1), x + 5, bar.y + 5, 12, on ? "#ffffff" : "rgba(255,255,255,0.65)");
       });
       const label = `${AMMO[ammoIx].name}  ·  RIGHT CLICK = SWITCH`;
-      text(label, bar.x + bar.w / 2, bar.y - 18, 11, ammoFlash > 0 && Math.floor(clock * 10) % 2 ? "#ffd84a" : "#ffffff", "center");
+      text(label, bar.x + bar.w / 2, bar.y - 24, 15, ammoFlash > 0 && Math.floor(clock * 10) % 2 ? "#ffd84a" : "#ffffff", "center");
     };
     // PINK HUNT, top right
     const drawHunt = () => {
