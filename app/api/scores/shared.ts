@@ -44,6 +44,9 @@ export const GAMES: Record<string, GameCfg> = {
   // PINK BOMBER: 10 a speaker, 100-400 an enemy, 50 a power-up, the time left x10 (max 1600) for every cleared level.
   // A fast level can average ~250 a second, so 500 a second leaves plenty of room.
   bomber: { key: "pinkbomber:scores", rate: 500, base: 5000, max: 3000000 },
+  // PINK HUNT (the gun on the main page): 10 a flying PINKMANE, rounds of 60 seconds.
+  // Even a bomb combo every half second is under 60 a second.
+  gun: { key: "pinkgun:scores", rate: 60, base: 100, max: 20000 },
 };
 
 for (let n = 1; n <= LEVEL_COUNT; n++) {

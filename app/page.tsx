@@ -2398,6 +2398,7 @@ activeGame === "bomber" ? (
             key={g.id}
             src={g.src}
             alt=""
+            data-target
             className="floating-glyph"
             style={
               {
@@ -3147,6 +3148,7 @@ activeGame === "bomber" ? (
             {glyphs.slice(0, 8).map((g) => (
               <div
                 key={`hh-${g.id}`}
+                data-target
                 className={`hh-jet ${g.id % 2 === 1 ? "hh-jet-left" : ""}`}
                 style={{
                   top: `${5 + g.left * 0.8}%`,
