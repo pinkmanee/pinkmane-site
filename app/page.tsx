@@ -2153,6 +2153,8 @@ activeGame === "bomber" ? (
     padKey(key, "keyup");
   };
   const padProps = (key: string) => ({
+    // (the gun on computers lets these react straight away, because they hold a key down)
+    "data-instant": "",
     onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -2633,7 +2635,6 @@ activeGame === "bomber" ? (
                   key={`${menu}-${index}`}
                   className={isMane ? "mane-highlight" : undefined}
                   data-shoot
-                  // a tap (phone) or a click / shot (computer) opens it
                   onClick={() => tapRow(index)}
                   style={{
                     position: "relative",
@@ -3578,10 +3579,10 @@ activeGame === "bomber" ? (
       {/* FULL SCREEN: a small corner button on the menus (phones + tablets), and the "how to" popup where the browser can't do it itself */}
       {isTouch && !handheld && fsc.show && (
         <FullscreenCornerButton onClick={fsc.toggle} isFullscreen={fsc.isFullscreen} className={pixelFont.className} />
-        {/* computers: the mouse is a gun (shoot the menu). Off inside the games and on phones. */}
-        <GunCursor active={!playing && !isTouch} muted={isMuted} font={pixelFont.style.fontFamily} />
       )}
       {fsc.helpOpen && <InstallHelp onClose={fsc.closeHelp} isIOS={fsc.isIOS} className={pixelFont.className} />}
+      {/* THE GUN (computers only): the mouse is an aim, clicks are shots. Off inside the games and on phones. */}
+      <GunCursor active={!playing && !isTouch} muted={isMuted} font={pixelFont.style.fontFamily} />
 
       <style jsx global>{`
         html,
