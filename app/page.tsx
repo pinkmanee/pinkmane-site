@@ -201,7 +201,7 @@ const QUAKE_DEFAULT = 3;
 // The shaking border around the screen: how thick it is (in screen pixels, ~57 = about 1.5 cm)
 const EDGE_BAND_PX = 57;
 // How far the border shakes on an 808 at level 10 (in screen pixels)
-const EDGE_MAX_SHAKE_PX = 10;
+const EDGE_MAX_SHAKE_PX = 24;
 
 // Your songs. Files go in public/music/ named 01.mp3, 02.mp3 ...
 // link: the SoundCloud page of that song. Clicking the "NOW PLAYING" text on the iPod opens it.
@@ -1631,14 +1631,17 @@ export default function Home() {
     // If anything about it fails, the background just trembles on the beat instead.
     let ctx: AudioContext | null = null;
     let analyser: AnalyserNode | null = null;
-    let bins = new Uint8Array(0);
     let hookedTo: HTMLAudioElement | null = null;
     let hooking = false;
     let giveUp = false;
     let lastTry = -10000;
     let bass = 0;
-    // Recent bass loudness, so a hit = "much louder than a split second ago"
-    const recent: { at: number; level: number }[] = [];
+    // The 808 detector: how loud the low end is on average (the last ~1/3 second), how loud it was a frame ago,
+    // and when the last hit was (so one 808 only counts once)
+    let bassAvg = 0;
+    let lastLevel = 0;
+    let lastHitAt = -1000;
+    let wave = new Float32Array(0);
     // Hits wait here until the moment you actually hear them (speakers lag behind a bit)
     const waiting: { at: number; strength: number }[] = [];
     const hookUpBass = async (audio: HTMLAudioElement) => {
@@ -1656,13 +1659,24 @@ export default function Home() {
         // Browser isn't allowing sound yet: don't touch the song, try again in a bit
         if (ctx.state !== "running" || hookedTo) return;
         const source = ctx.createMediaElementSource(audio);
+        // what you hear goes straight out, untouched
+        source.connect(ctx.destination);
+        // a side copy, with everything above ~110 Hz filtered off (only the 808s + kicks are left), goes to the listener
+        const lowpass = ctx.createBiquadFilter();
+        lowpass.type = "lowpass";
+        lowpass.frequency.value = 110;
+        lowpass.Q.value = 0.7;
         const node = ctx.createAnalyser();
         node.fftSize = 1024;
         node.smoothingTimeConstant = 0;
-        source.connect(node);
-        node.connect(ctx.destination);
+        const silent = ctx.createGain();
+        silent.gain.value = 0; // (the listener has to be plugged in to work, but this copy is never heard)
+        source.connect(lowpass);
+        lowpass.connect(node);
+        node.connect(silent);
+        silent.connect(ctx.destination);
         analyser = node;
-        bins = new Uint8Array(node.frequencyBinCount);
+        wave = new Float32Array(node.fftSize);
         hookedTo = audio;
         trace("bass-hook", "ok");
       } catch {
@@ -1673,16 +1687,14 @@ export default function Home() {
       }
     };
 
-    // How loud the 808 range (about 30-100 Hz) is right now, 0 to 1
+    // How loud the low end (the 808s, below ~110 Hz) is right now: the real loudness of the filtered sound,
+    // so it never maxes out on loud songs (the old way measured on a scale that was always full with mastered tracks)
     const bassLevel = () => {
-      if (!analyser || !ctx) return 0;
-      analyser.getByteFrequencyData(bins);
-      const hz = ctx.sampleRate / analyser.fftSize;
-      const lo = Math.max(1, Math.floor(30 / hz));
-      const hi = Math.max(lo, Math.floor(100 / hz));
+      if (!analyser || !ctx || !wave.length) return 0;
+      analyser.getFloatTimeDomainData(wave);
       let sum = 0;
-      for (let i = lo; i <= hi; i++) sum += bins[i];
-      return sum / ((hi - lo + 1) * 255);
+      for (let i = 0; i < wave.length; i++) sum += wave[i] * wave[i];
+      return Math.sqrt(sum / wave.length);
     };
     const put = (name: string, value: string) => {
       if (phoneGameRef.current) return; // (the phone game is covering the iPod: nothing to redraw behind it)
@@ -1756,13 +1768,16 @@ export default function Home() {
       let hit = 0;
       if (live && level10 > 0) {
         if (analyser && ctx && hookedTo === audio) {
+          // an 808 hit = the low end is suddenly much louder than it has been lately (and still going up)
           const level = bassLevel();
-          recent.push({ at: now, level });
-          while (recent.length && recent[0].at < now - 70) recent.shift();
-          let low = level;
-          for (const r of recent) low = Math.min(low, r.level);
-          const rise = level - low;
-          const strength = level > 0.2 ? Math.min(1, Math.max(0, (rise - 0.07) * 4.5)) : 0;
+          bassAvg += (level - bassAvg) * Math.min(1, dt * 3);
+          const ratio = level / Math.max(0.004, bassAvg);
+          let strength = 0;
+          if (level > 0.012 && ratio > 1.3 && level > lastLevel * 1.08 && now - lastHitAt > 110) {
+            strength = Math.min(1, Math.max(0.4, (ratio - 1.15) * 1.6));
+            lastHitAt = now;
+          }
+          lastLevel = level;
           // Show it when it reaches your ears, not when the browser first sees it
           const lag = ((ctx.baseLatency || 0) + ((ctx as AudioContext & { outputLatency?: number }).outputLatency || 0) + SYNC_NUDGE) * 1000;
           if (strength > 0) waiting.push({ at: now + Math.min(400, Math.max(0, lag)), strength });
@@ -1770,7 +1785,8 @@ export default function Home() {
           hit = kick * 0.6; // no bass listener: shake on the beat instead
         }
       } else {
-        recent.length = 0;
+        bassAvg = 0;
+        lastLevel = 0;
         waiting.length = 0;
       }
       while (waiting.length && waiting[0].at <= now) hit = Math.max(hit, waiting.shift()!.strength);
