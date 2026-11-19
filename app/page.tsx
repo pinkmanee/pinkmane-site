@@ -2481,6 +2481,7 @@ activeGame === "bomber" ? (
 
         <div
           className={pixelFont.className}
+          data-gun-screen
           style={{
             background: "var(--screen, #d7efbc)",
             transition: "background 0.4s ease",
@@ -3214,7 +3215,7 @@ activeGame === "bomber" ? (
             <img src="/game/handheld.png" alt="" className="hh-art" draggable={false} />
 
             {/* The game, inside the screen you drew */}
-            <div className="hh-screen" style={hhBox(15, 4, 78, 33)}>
+            <div className="hh-screen" data-gun-screen style={hhBox(15, 4, 78, 33)}>
               {screenElement}
               {handheldBoot && (
                 <div className="screen-overlay">
@@ -4421,20 +4422,20 @@ activeGame === "bomber" ? (
           position: relative;
           z-index: 1;
         }
-        /* The key legend: a small list in the bottom left corner (computers only) */
+        /* The key legend: a small list on the right side (computers only), above the gun in the corner */
         .hh-keys.ipod-keys {
           position: fixed;
-          left: 14px;
-          bottom: 14px;
+          right: 14px;
+          bottom: 210px;
           z-index: 3;
           flex-direction: column;
           flex-wrap: nowrap;
-          align-items: flex-start;
+          align-items: flex-end;
           justify-content: flex-end;
           gap: 7px;
           max-width: none;
           transform: scale(0.8);
-          transform-origin: left bottom;
+          transform-origin: right bottom;
           pointer-events: none;
         }
 

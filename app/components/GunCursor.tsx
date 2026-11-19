@@ -177,6 +177,8 @@ export default function GunCursor({ active, muted, font }: Props) {
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
   const [boardOpen, setBoardOpen] = useState(false);
+  const [boardH, setBoardH] = useState(150); // the Top 10's height, so it has the same shape as the screen it sits in
+  const boardBoxRef = useRef<HTMLDivElement>(null);
   const fontName = font ?? "monospace";
 
   useEffect(() => {
@@ -785,6 +787,21 @@ export default function GunCursor({ active, muted, font }: Props) {
       last = now;
       clock += dt;
       const isBusy = busy();
+      if (isBusy) {
+        // the Top 10 sits right inside the iPod's (or the handheld's) screen
+        const box = boardBoxRef.current;
+        const scr = Array.from(document.querySelectorAll("[data-gun-screen]"))
+          .map((el) => el.getBoundingClientRect())
+          .find((r) => r.width > 40 && r.height > 20);
+        if (box) {
+          const r = scr ?? { left: vw / 2 - 320, top: vh / 2 - 150, width: 640, height: 300 };
+          box.style.left = `${r.left}px`;
+          box.style.top = `${r.top}px`;
+          box.style.width = `${r.width}px`;
+          box.style.height = `${r.height}px`;
+          if (!wasBusy) setBoardH(Math.max(150, Math.min(320, Math.round((320 * r.height) / r.width))));
+        }
+      }
       if (isBusy !== wasBusy) {
         // the Top 10 box: a normal mouse while it's open
         wasBusy = isBusy;
@@ -1023,8 +1040,8 @@ export default function GunCursor({ active, muted, font }: Props) {
         </div>
       </div>
       {/* PINK HUNT's Top 10 (the same box as in the games), in the middle of the screen */}
-      <div className="gun-board" style={{ pointerEvents: boardOpen ? "auto" : "none" }}>
-        <ScorePanel game={BOARD_ID} title="PINK HUNT" apiRef={boardRef} fontFamily={fontName} width={320} height={150} />
+      <div ref={boardBoxRef} className="gun-board" style={{ pointerEvents: boardOpen ? "auto" : "none" }}>
+        <ScorePanel game={BOARD_ID} title="PINK HUNT" apiRef={boardRef} fontFamily={fontName} width={320} height={boardH} />
       </div>
       <style>{`
         body.gun-mode,
@@ -1061,11 +1078,12 @@ export default function GunCursor({ active, muted, font }: Props) {
         }
         .gun-board {
           position: fixed;
-          left: 50%;
-          top: 50%;
-          width: min(640px, 92vw);
-          aspect-ratio: 320 / 150;
-          transform: translate(-50%, -50%);
+          left: 0;
+          top: 0;
+          width: 0;
+          height: 0;
+          border-radius: 8px;
+          overflow: hidden;
           z-index: 2147483646;
           image-rendering: pixelated;
         }
