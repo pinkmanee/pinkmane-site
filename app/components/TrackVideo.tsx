@@ -81,7 +81,9 @@ export default function TrackVideo({ videoId, link, title, songRef, show, fontFa
   const [started, setStarted] = useState(false); // the YouTube player is only made the first time the TV shows
 
   useEffect(() => {
-    if (show) setStarted(true);
+    // phones, tablets and small windows never get the TV, so YouTube isn't even loaded there (saves their data)
+    const noRoom = window.matchMedia?.("(max-width: 1150px), (hover: none)").matches ?? false;
+    if (show && !noRoom) setStarted(true);
   }, [show]);
 
   // captions off (YouTube can turn them on by itself, e.g. auto-generated ones)
