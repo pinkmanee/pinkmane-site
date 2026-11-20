@@ -207,7 +207,8 @@ export default function GunCursor({ active, muted, font }: Props) {
   useEffect(() => {
     if (!active || !GUN_ON) return;
     // phones and tablets: no gun
-    if (window.matchMedia?.("(pointer: coarse)").matches) return;
+    // phones and tablets only (a laptop with a touch screen still has a mouse / touchpad, so it gets the gun)
+    if (window.matchMedia && !window.matchMedia("(any-pointer: fine)").matches) return;
     const aim = aimRef.current;
     const reticle = reticleRef.current;
     const canvas = canvasRef.current;

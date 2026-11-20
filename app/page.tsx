@@ -4277,7 +4277,7 @@ activeGame === "bomber" ? (
         .screen-art-touch {
           display: none;
         }
-        @media (hover: none) {
+        @media (any-hover: none) {
           .screen-art-touch {
             display: inline;
           }
@@ -4756,7 +4756,7 @@ activeGame === "bomber" ? (
           }
         }
         /* Touch screens have no key legend, so no arrows either */
-        @media (hover: none) {
+        @media (any-hover: none) {
           .key-tip {
             display: none;
           }
@@ -5440,7 +5440,7 @@ activeGame === "bomber" ? (
           display: none;
         }
         /* Touch screens: no keyboard, so show the text hint instead of keys */
-        @media (hover: none) {
+        @media (any-hover: none) {
           .hh-keys {
             display: none;
           }

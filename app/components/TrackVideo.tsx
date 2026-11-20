@@ -84,7 +84,7 @@ export default function TrackVideo({ videoId, link, title, songRef, show, fontFa
 
   useEffect(() => {
     // phones, tablets and small windows never get the TV, so YouTube isn't even loaded there (saves their data)
-    const noRoom = window.matchMedia?.("(max-width: 1150px), (hover: none)").matches ?? false;
+    const noRoom = window.matchMedia?.("(max-width: 1150px), (any-hover: none)").matches ?? false;
     if (show && !noRoom) setStarted(true);
   }, [show]);
 
@@ -324,7 +324,7 @@ export default function TrackVideo({ videoId, link, title, songRef, show, fontFa
           background: #ff3bd0;
         }
         /* small windows (no room next to the iPod) and phones: no TV */
-        @media (max-width: 1150px), (hover: none) {
+        @media (max-width: 1150px), (any-hover: none) {
           .tv,
           .tv-link {
             display: none;
