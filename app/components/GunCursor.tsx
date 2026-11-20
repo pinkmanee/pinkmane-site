@@ -738,6 +738,8 @@ export default function GunCursor({ active, muted, font }: Props) {
     };
     const onDown = (e: PointerEvent) => {
       if (!e.isTrusted || e.pointerType !== "mouse" || busy()) return;
+      // tell the page someone clicked (the real click gets eaten below, and the first one has to start the music)
+      window.dispatchEvent(new Event("pinkmane-fire"));
       const target = e.target as Element | null;
       if (e.button === 2) {
         switchAmmo();
@@ -940,51 +942,88 @@ export default function GunCursor({ active, muted, font }: Props) {
       }
       text(fxLevel === 0 ? "FX OFF" : "FX", m.x, fxAt.y - 13, 9, "#ffffff", "left");
     };
-    // PINK HUNT, top right
+    // PINK HUNT, top right, in a see-through pink box
     const drawHunt = () => {
-      const x = vw - 16;
-      let y = 14;
-      text("PINK HUNT", x, y, 12, "#ff3bd0", "right");
+      const x = vw - 26;
+      let y = 24;
+      // the lines are collected first, so the box can be drawn behind them at the right size
+      const lines: { t: string; y: number; size: number; color: string }[] = [];
+      const put = (t: string, _x: number, ly: number, size: number, color: string, _align?: CanvasTextAlign) => lines.push({ t, y: ly, size, color });
+      let timeBarY = -1;
+      put("PINK HUNT", x, y, 12, "#ff3bd0", "right");
       y += 20;
-      text(`SCORE ${pad5(hunt.score)}`, x, y, 14, "#ffffff", "right");
-      y += 22;
+      put(`SCORE ${pad5(hunt.score)}`, x, y, 14, "#ffffff", "right");
+      y += 20;
+      put(`KILLS ${hunt.kills}`, x, y, 12, "#8affc8", "right");
+      y += 20;
       if (hunt.on) {
         const t = Math.ceil(hunt.timeLeft);
-        text(`TIME ${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`, x, y, 11, t <= 10 && Math.floor(clock * 4) % 2 ? "#ff6a6a" : "#ffd84a", "right");
+        put(`TIME ${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`, x, y, 11, t <= 10 && Math.floor(clock * 4) % 2 ? "#ff6a6a" : "#ffd84a", "right");
         y += 16;
-        ctx.fillStyle = "rgba(26,6,24,0.7)";
-        ctx.fillRect(x - 150, y, 150, 6);
-        ctx.fillStyle = "#ff3bd0";
-        ctx.fillRect(x - 150, y, (150 * hunt.timeLeft) / HUNT_TIME, 6);
+        timeBarY = y;
         y += 14;
         if (hunt.trip > 0) {
-          text(`TRIP MODE x2  ${Math.ceil(hunt.trip)}`, x, y, 11, `hsl(${Math.floor(clock * 240) % 360}, 100%, 70%)`, "right");
+          put(`TRIP MODE x2  ${Math.ceil(hunt.trip)}`, x, y, 11, `hsl(${Math.floor(clock * 240) % 360}, 100%, 70%)`, "right");
           y += 16;
         }
         const toTrip = TRIP_KILLS - (hunt.streak % TRIP_KILLS);
-        text(`STREAK ${hunt.streak}`, x, y, 12, toTrip <= 3 ? "#ff3bd0" : "#ffffff", "right");
+        put(`STREAK ${hunt.streak}`, x, y, 12, toTrip <= 3 ? "#ff3bd0" : "#ffffff", "right");
         y += 15;
-        text(`${toTrip} MORE = TRIP MODE · BEST ${hunt.bestStreak}`, x, y, 9, "rgba(255,255,255,0.75)", "right");
+        put(`${toTrip} MORE = TRIP MODE · BEST ${hunt.bestStreak}`, x, y, 9, "rgba(255,255,255,0.75)", "right");
         y += 14;
       } else {
-        text("SHOOT THE FLYING PINKMANES", x, y, 9, "#ffffff", "right");
+        put("SHOOT THE FLYING PINKMANES", x, y, 9, "#ffffff", "right");
         y += 13;
-        text("FAR = 20 · MID = 15 · CLOSE = 10", x, y, 9, "#ffd84a", "right");
+        put("FAR = 20 · MID = 15 · CLOSE = 10", x, y, 9, "#ffd84a", "right");
         y += 13;
-        text(`BOMB = ${BOMB_POINTS} · ${HUNT_TIME} SECONDS`, x, y, 9, "#ffd84a", "right");
+        put(`BOMB = ${BOMB_POINTS} · ${HUNT_TIME} SECONDS`, x, y, 9, "#ffd84a", "right");
         y += 13;
-        text(`${TRIP_KILLS} IN A ROW = TRIP MODE x2`, x, y, 9, "#ff3bd0", "right");
+        put(`${TRIP_KILLS} IN A ROW = TRIP MODE x2`, x, y, 9, "#ff3bd0", "right");
         y += 17;
       }
-      text("TOP 3", x, y, 10, "#ff3bd0", "right");
+      put("TOP 3", x, y, 10, "#ff3bd0", "right");
       y += 15;
       if (top3 && top3.length) {
         top3.forEach((e, i) => {
-          text(`${i + 1}. ${e.name}  ${pad5(e.score)}`, x, y, 10, MEDALS[i], "right");
+          put(`${i + 1}. ${e.name}  ${pad5(e.score)}`, x, y, 10, MEDALS[i], "right");
           y += 14;
         });
-      } else if (top3) text("NO SCORES YET", x, y, 9, "rgba(255,255,255,0.7)", "right");
-      else text(hunt.best ? `YOUR BEST ${pad5(hunt.best)}` : "...", x, y, 9, "rgba(255,255,255,0.7)", "right");
+      } else if (top3) put("NO SCORES YET", x, y, 9, "rgba(255,255,255,0.7)", "right");
+      else put(hunt.best ? `YOUR BEST ${pad5(hunt.best)}` : "...", x, y, 9, "rgba(255,255,255,0.7)", "right");
+      // ---- the box ----
+      let w = 150;
+      for (const l of lines) {
+        ctx.font = `${l.size}px ${fontName}`;
+        w = Math.max(w, ctx.measureText(l.t).width + l.size / 8);
+      }
+      const PAD = 10;
+      const bx = Math.round(x - w - PAD);
+      const by = 14;
+      const bw = Math.round(w + PAD * 2);
+      const bottom = Math.max(...lines.map((l) => l.y + l.size), timeBarY + 6);
+      const bh = Math.round(bottom - by + PAD);
+      ctx.fillStyle = "rgba(214, 60, 200, 0.22)";
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.fillStyle = "rgba(20, 2, 18, 0.28)";
+      ctx.fillRect(bx, by, bw, bh);
+      // pixel border (with cut corners)
+      ctx.fillStyle = "rgba(255, 59, 208, 0.85)";
+      ctx.fillRect(bx + 3, by, bw - 6, 3);
+      ctx.fillRect(bx + 3, by + bh - 3, bw - 6, 3);
+      ctx.fillRect(bx, by + 3, 3, bh - 6);
+      ctx.fillRect(bx + bw - 3, by + 3, 3, bh - 6);
+      // a line under PINK HUNT
+      if (lines[0]) {
+        ctx.fillStyle = "rgba(255, 59, 208, 0.5)";
+        ctx.fillRect(bx + 8, lines[0].y + lines[0].size + 4, bw - 16, 2);
+      }
+      for (const l of lines) text(l.t, x, l.y, l.size, l.color, "right");
+      if (timeBarY >= 0) {
+        ctx.fillStyle = "rgba(26,6,24,0.7)";
+        ctx.fillRect(x - w, timeBarY, w, 6);
+        ctx.fillStyle = "#ff3bd0";
+        ctx.fillRect(x - w, timeBarY, (w * hunt.timeLeft) / HUNT_TIME, 6);
+      }
     };
 
     let raf = 0;

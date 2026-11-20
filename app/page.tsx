@@ -1077,20 +1077,22 @@ export default function Home() {
   const [handheldBoot, setHandheldBoot] = useState(false);
   // "CONTROL W THESE!" arrows pointing at the key legend, for 5 seconds after Pinkmane Void starts
   const [keyTip, setKeyTip] = useState(false);
-  // false until the visitor clicks (or taps / presses a key) for the first time.
-  // Until then the iPod screen shows the trippy PINKMANE picture with CLICK TO START, and the gun waits
-  // (so that first click always starts the music and never gets used up as a shot).
+  // false until the visitor clicks / shoots (or taps / presses a key) for the first time.
+  // The iPod screen shows LOADING..., then the trippy PINKMANE picture with CLICK TO START until then.
   const [entered, setEntered] = useState(false);
+  // true once LOADING... is done and the picture shows
+  const [bootArt, setBootArt] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setBootArt(true), 1600);
+    return () => clearTimeout(t);
+  }, []);
   useEffect(() => {
     if (entered) return;
     const go = () => setEntered(true);
-    window.addEventListener("click", go);
-    window.addEventListener("keydown", go);
-    window.addEventListener("touchend", go);
+    // ("pinkmane-fire" = a shot from the gun, which eats the real click)
+    for (const t of ["click", "keydown", "touchend", "pinkmane-fire"]) window.addEventListener(t, go);
     return () => {
-      window.removeEventListener("click", go);
-      window.removeEventListener("keydown", go);
-      window.removeEventListener("touchend", go);
+      for (const t of ["click", "keydown", "touchend", "pinkmane-fire"]) window.removeEventListener(t, go);
     };
   }, [entered]);
   // Which background mode is picked (0, 1 or 2), remembered for next visit
@@ -1525,16 +1527,16 @@ export default function Home() {
     });
   };
 
-  // The iPod screen starts on the trippy picture (CLICK TO START) and fades to the menu after the first click
+  // The iPod screen: LOADING..., then the trippy picture (CLICK TO START), then the menu after the first click
   useEffect(() => {
-    if (!entered) return;
+    if (!entered || !bootArt) return;
     const fadeTimer = setTimeout(() => setBootFadeOut(true), 60);
     const removeTimer = setTimeout(() => setShowBoot(false), 500);
     return () => {
       clearTimeout(fadeTimer);
       clearTimeout(removeTimer);
     };
-  }, [entered]);
+  }, [entered, bootArt]);
 
   // Show the volume tip once the boot screen is gone, then fade it out after VOLUME_TIP_SECONDS
   useEffect(() => {
@@ -1988,17 +1990,20 @@ export default function Home() {
         window.removeEventListener("click", handleFirstInteraction);
         window.removeEventListener("keydown", handleFirstInteraction);
         window.removeEventListener("touchstart", handleFirstInteraction);
+        window.removeEventListener("pinkmane-fire", handleFirstInteraction);
       }
     };
 
     window.addEventListener("click", handleFirstInteraction);
     window.addEventListener("keydown", handleFirstInteraction);
     window.addEventListener("touchstart", handleFirstInteraction);
+    window.addEventListener("pinkmane-fire", handleFirstInteraction); // a shot from the gun
 
     return () => {
       window.removeEventListener("click", handleFirstInteraction);
       window.removeEventListener("keydown", handleFirstInteraction);
       window.removeEventListener("touchstart", handleFirstInteraction);
+      window.removeEventListener("pinkmane-fire", handleFirstInteraction);
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
@@ -2068,6 +2073,23 @@ export default function Home() {
   // otherwise pressing Enter later would press that button again
   const noFocus = (e: React.MouseEvent) => {
     e.preventDefault();
+  };
+
+  // FULL SCREEN for the PSP on computers: the PSP's screen (the game) fills your whole monitor. ESC or the button leaves it.
+  const hhScreenRef = useRef<HTMLDivElement>(null);
+  const toggleHhFull = async () => {
+    const d = document as Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => Promise<void> | void };
+    const el = hhScreenRef.current as (HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> | void }) | null;
+    try {
+      if (d.fullscreenElement || d.webkitFullscreenElement) {
+        if (d.exitFullscreen) await d.exitFullscreen();
+        else await d.webkitExitFullscreen?.();
+        return;
+      }
+      if (!el) return;
+      if (el.requestFullscreen) await el.requestFullscreen({ navigationUI: "hide" });
+      else await el.webkitRequestFullscreen?.();
+    } catch {}
   };
 
   const changeQuake = (value: number) => {
@@ -2636,15 +2658,15 @@ activeGame === "bomber" ? (
 
           {(showBoot || exiting) && (
             <div
-              className={`screen-overlay ${!exiting ? "screen-overlay-art" : ""} ${
+              className={`screen-overlay ${!exiting && bootArt ? "screen-overlay-art" : ""} ${
                 bootFadeOut && !exiting ? "screen-overlay-fade" : ""
               }`}
             >
-              {exiting ? (
+              {exiting || !bootArt ? (
                 <>
-                  <div className="screen-overlay-label">POWERING OFF</div>
+                  <div className="screen-overlay-label">{exiting ? "POWERING OFF" : "PINKMANE"}</div>
                   <div className="screen-overlay-loading">LOADING...</div>
-                  <SegmentedBar duration={3} active />
+                  <SegmentedBar duration={exiting ? 3 : 1.4} active />
                 </>
               ) : (
                 // START SCREEN: your trippy PINKMANE picture (/public/bg/mode4.jpg)
@@ -3357,8 +3379,14 @@ activeGame === "bomber" ? (
             <img src="/game/handheld.png" alt="" className="hh-art" draggable={false} />
 
             {/* The game, inside the screen you drew */}
-            <div className="hh-screen" data-gun-screen style={hhBox(15, 4, 78, 33)}>
-              {screenElement}
+            <div className="hh-screen" data-gun-screen style={hhBox(15, 4, 78, 33)} ref={hhScreenRef}>
+              {/* (the game sits in its own box so it keeps its shape in FULL SCREEN) */}
+              <div className="hh-game">{screenElement}</div>
+              {fsc.isFullscreen && (
+                <button className="hh-fs-exit" onClick={toggleHhFull} onMouseDown={noFocus} data-instant="">
+                  EXIT FULL SCREEN (ESC)
+                </button>
+              )}
               {handheldBoot && (
                 <div className="screen-overlay">
                   <div className="hh-boot-dude" />
@@ -3577,6 +3605,9 @@ activeGame === "bomber" ? (
               onPointerUp={(e) => e.currentTarget.blur()}
               onTouchEnd={(e) => e.currentTarget.blur()}
             />
+            <button className="hh-fs-btn" onClick={toggleHhFull} onMouseDown={noFocus} data-instant="" aria-label="Full screen">
+              FULL SCREEN
+            </button>
           </div>
 
           {/* Keys you use, drawn as white key outlines (only on computers) */}
@@ -3738,7 +3769,7 @@ activeGame === "bomber" ? (
         fontFamily={pixelFont.style.fontFamily}
       />
       {/* THE GUN (computers only): the mouse is an aim, clicks are shots. Off inside the games and on phones. */}
-      <GunCursor active={entered && !playing && !isTouch} muted={isMuted} font={pixelFont.style.fontFamily} />
+      <GunCursor active={!playing && !isTouch} muted={isMuted} font={pixelFont.style.fontFamily} />
 
       <style jsx global>{`
         html,
@@ -4192,13 +4223,27 @@ activeGame === "bomber" ? (
           pointer-events: none;
         }
 
-        /* the start screen: your trippy picture filling the iPod screen */
+        /* the start screen: your trippy picture filling the iPod screen (fades in after LOADING...) */
         .screen-overlay-art {
-          background: #000 url("/bg/mode4.jpg") center 28% / cover no-repeat;
           justify-content: flex-end;
           gap: 6px;
           padding-bottom: 9%;
           cursor: pointer;
+        }
+        .screen-overlay-art::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: url("/bg/mode4.jpg") center 28% / cover no-repeat;
+          animation: screenArtIn 0.45s ease-out;
+        }
+        .screen-overlay-art > * {
+          position: relative;
+        }
+        @keyframes screenArtIn {
+          from {
+            opacity: 0;
+          }
         }
         .screen-art-click {
           color: #ffffff;
@@ -4976,6 +5021,60 @@ activeGame === "bomber" ? (
           color: #fff;
           font-size: 8px;
           text-shadow: 1px 1px 0 #000;
+        }
+
+        /* PSP FULL SCREEN */
+        .hh-fs-btn {
+          margin-left: 14px;
+          padding: 6px 9px;
+          font: inherit;
+          font-size: 8px;
+          color: #fff;
+          background: rgba(0, 0, 0, 0.55);
+          border: 2px solid #fff;
+          box-shadow: 3px 3px 0 #d63cc8;
+          cursor: pointer;
+          text-shadow: none;
+        }
+        .hh-fs-btn:hover {
+          background: #d63cc8;
+          box-shadow: 3px 3px 0 #000;
+        }
+        .hh-game {
+          position: absolute;
+          inset: 0;
+        }
+        .hh-screen:fullscreen {
+          background: #000 !important;
+        }
+        .hh-screen:fullscreen > .hh-game {
+          inset: auto;
+          left: 50%;
+          top: 50%;
+          transform: translate(-50%, -50%);
+          /* as big as fits, keeping the game's shape (64 x 30) */
+          width: min(100vw, calc(100vh * 64 / 30));
+          height: min(100vh, calc(100vw * 30 / 64));
+        }
+        .hh-fs-exit {
+          position: absolute;
+          top: 10px;
+          right: 10px;
+          z-index: 30;
+          padding: 6px 9px;
+          font: inherit;
+          font-size: 9px;
+          color: #fff;
+          background: rgba(0, 0, 0, 0.6);
+          border: 2px solid rgba(255, 255, 255, 0.8);
+          cursor: pointer;
+          opacity: 0.55;
+        }
+        .hh-fs-exit:hover {
+          opacity: 1;
+        }
+        .hh-screen:not(:fullscreen) .hh-fs-exit {
+          display: none;
         }
 
         /* Shoulder buttons on top */
