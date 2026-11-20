@@ -211,7 +211,8 @@ const EDGE_MAX_SHAKE_PX = 24;
 //   If a link is left empty (""), clicking searches SoundCloud for that song instead.
 const TRACKS: { title: string; file: string; bpm?: number; offset?: number; link?: string }[] = [
   // NEW RELEASE: plays first when someone opens the website
-  { title: "ender pearls", file: "/music/ender-pearls.mp3", bpm: 142, offset: 0, link: "https://youtu.be/4bEcW1DbpPI?si=IeLJc2SR1EGG5woh" },
+  // (its NOW PLAYING link goes to SoundCloud: the music video next to the iPod already has the YouTube link)
+  { title: "ender pearls", file: "/music/ender-pearls.mp3", bpm: 142, offset: 0, link: "https://soundcloud.com/pinkmanee" },
   { title: "pinkmane's random ass beat", file: "/sounds/song.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
   { title: "wet socks (w/ o1m4de)", file: "/music/06.mp3", bpm: 82, offset: 0, link: "https://soundcloud.com/pinkmanee/wet-socks" },
   { title: "hurricane of blades", file: "/music/07.mp3", bpm: 77, offset: 0, link: "https://soundcloud.com/pinkmanee/hurricane-of-blades" },
