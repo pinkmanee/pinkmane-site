@@ -4954,6 +4954,10 @@ activeGame === "bomber" ? (
           pointer-events: none;
           filter: drop-shadow(0.5px 0 0 #fff) drop-shadow(-0.5px 0 0 #fff) drop-shadow(0 0.5px 0 #fff) drop-shadow(0 -0.5px 0 #fff);
         }
+        /* the music icons on the right of the PSP's bottom bar (previous, play, next, mute): small, like the cubes */
+        .hh-bar .hh-icon {
+          height: 30%;
+        }
         /* the little cube buttons on the PSP's bottom bar (they grow and shrink with the PSP) */
         .hh-device {
           container-type: inline-size;
