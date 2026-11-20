@@ -5,18 +5,18 @@
 import type { CSSProperties, Ref } from "react";
 
 // PINKMANE's picture for the hype man / entrance / 404 (the eyes on it are painted white, the spirals go on top)
-// The numbers are pixels on that picture (520 x 984). If you redraw it, move the eyes here.
+// The numbers are pixels on that picture (608 x 984). If you redraw it, move the eyes here.
 export const DUDE = {
-  src: "/hype/pinkmane-dude.png",
-  w: 520,
+  src: "/hype/pinkmane-dude2.png",
+  w: 608,
   h: 984,
   // x, y = the middle of each eye, rx / ry = how wide / tall the spiral is
   eyes: [
-    { x: 233, y: 236.5, rx: 18.5, ry: 30 },
-    { x: 276, y: 230, rx: 17.5, ry: 28.5 },
+    { x: 304, y: 238.5, rx: 18.5, ry: 29 },
+    { x: 346, y: 230, rx: 18.5, ry: 29.5 },
   ],
-  tip: { x: 398, y: 288 }, // the end of the joint (where the smoke comes out)
-  mouth: { x: 300, y: 266 }, // where the cough smoke comes out
+  tip: { x: 470, y: 295 }, // the end of the joint (where the smoke comes out)
+  mouth: { x: 380, y: 300 }, // where the cough smoke comes out
 };
 
 const TURNS = 3.2; // how many times the line goes round
