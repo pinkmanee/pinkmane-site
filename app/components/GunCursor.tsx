@@ -16,6 +16,7 @@ import { ScorePanel, type ScoreApi, type ScoreEntry } from "./Scoreboard";
 //     The BOMB gets everything near it, but only 5 points each.
 //     The first kill starts a 60 second round; when it ends you can save your score (online Top 10, board "gun").
 //     Score + time + the TOP 3 are in the top right corner.
+//   - FX VOLUME: the - and + buttons next to the ammo bar (like the PSP's). SHOOT them to turn the gun sounds down / up.
 //   - sliders (BASS QUAKE, VOL) and the handheld's D-pad still react instantly
 // It switches off inside the games (they use the mouse themselves) and on phones.
 //
@@ -33,6 +34,8 @@ const HIT_VOLUME = 0.09; // the little impact sound
 const AIM_SIZE = 34; // how big the aim is (pixels)
 const AIM_COLOR = "#ff3bd0";
 const BEST_KEY = "pinkhunt-best";
+const FX_KEY = "pinkmane-gun-fx"; // remembers the FX volume
+const FX_DEFAULT = 6; // 0 = silent ... 10 = loudest (6 = how loud it was before the buttons)
 const BOARD_ID = "gun"; // the Top 10 board (also in app/api/scores/shared.ts)
 const HUNT_TIME = 60; // seconds per round
 // points for a flyer: the page gives each one data-points (far away / small = 20, middle = 15, close / big = 10).
@@ -72,7 +75,8 @@ const FIREBALL = ["..OOO..", ".OYYYO.", "OYWWWYO", "OYWWWYO", "OYWWWYO", ".OYYYO
 const SPIKE = ["....K....", "...KPK...", "...KPK...", ".KKPLPKK.", "KPPLWLPPK", ".KKPLPKK.", "...KPK...", "...KPK...", "....K...."];
 const BOMB = ["...OOOO...", ".OOKKKKOO.", ".OKHHKKKO.", "OKHHKKKKKO", "OKHKKKKKKO", "OKKKKKKKKO", "OKKKKKKKKO", ".OKKKKKKO.", ".OOKKKKOO.", "...OOOO..."];
 
-type Shot = { ammo: AmmoId; x0: number; y0: number; x1: number; y1: number; t: number; dur: number; spin: number; target: Element | null; hit: boolean; solid: boolean; lastX: number; lastY: number };
+// fx = this shot was aimed at the FX - (-1) or + (1) button
+type Shot = { ammo: AmmoId; x0: number; y0: number; x1: number; y1: number; t: number; dur: number; spin: number; target: Element | null; hit: boolean; solid: boolean; lastX: number; lastY: number; fx?: number };
 // leaf = a little spinning weed leaf instead of a square
 type Part = { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number; grav: number; leaf?: boolean; rot?: number };
 type Mark = { x: number; y: number; kind: AmmoId; life: number; rot: number };
@@ -214,6 +218,14 @@ export default function GunCursor({ active, muted, font }: Props) {
     fit();
     window.addEventListener("resize", fit);
 
+    // ---------- FX volume (0 - 10) ----------
+    let fxLevel = FX_DEFAULT;
+    try {
+      const saved = localStorage.getItem(FX_KEY);
+      if (saved !== null && !Number.isNaN(Number(saved))) fxLevel = Math.max(0, Math.min(10, Math.round(Number(saved))));
+    } catch {}
+    const fx = () => fxLevel / FX_DEFAULT; // multiplies every gun sound
+
     // ---------- sounds (Web Audio, so fast clicks overlap with no delay) ----------
     let ac: AudioContext | null = null;
     let shotBuf: AudioBuffer | null = null;
@@ -236,19 +248,19 @@ export default function GunCursor({ active, muted, font }: Props) {
       if (ac && ac.state === "suspended") ac.resume().catch(() => {});
     };
     const bang = (pitch: number) => {
-      if (mutedRef.current) return;
+      if (mutedRef.current || fx() <= 0) return;
       wake();
       if (ac && shotBuf) {
         const src = ac.createBufferSource();
         src.buffer = shotBuf;
         src.playbackRate.value = pitch * (0.94 + Math.random() * 0.12);
         const g = ac.createGain();
-        g.gain.value = SHOT_VOLUME;
+        g.gain.value = SHOT_VOLUME * fx();
         src.connect(g).connect(ac.destination);
         src.start();
       } else {
         const a = new Audio(SHOT_SOUND);
-        a.volume = SHOT_VOLUME;
+        a.volume = Math.min(1, SHOT_VOLUME * fx());
         a.play().catch(() => {});
       }
     };
@@ -262,7 +274,7 @@ export default function GunCursor({ active, muted, font }: Props) {
     };
     // impact: a short burst of noise (deep + long for the bomb)
     const thud = (big: boolean) => {
-      if (mutedRef.current || !ac || !noise) return;
+      if (mutedRef.current || !ac || !noise || fx() <= 0) return;
       const src = ac.createBufferSource();
       src.buffer = noise;
       const f = ac.createBiquadFilter();
@@ -270,13 +282,14 @@ export default function GunCursor({ active, muted, font }: Props) {
       f.frequency.value = big ? 500 : 1800;
       const g = ac.createGain();
       const now = ac.currentTime;
-      g.gain.setValueAtTime(big ? HIT_VOLUME * 2.2 : HIT_VOLUME, now);
+      g.gain.setValueAtTime((big ? HIT_VOLUME * 2.2 : HIT_VOLUME) * fx(), now);
       g.gain.exponentialRampToValueAtTime(0.001, now + (big ? 0.45 : 0.12));
       src.connect(f).connect(g).connect(ac.destination);
       src.start(now, 0, big ? 0.5 : 0.15);
     };
     const blip = (from: number, to: number, len: number, vol = 0.05, delay = 0, type: OscillatorType = "square") => {
-      if (mutedRef.current || !ac) return;
+      vol *= fx();
+      if (mutedRef.current || !ac || vol <= 0) return;
       wake();
       const o = ac.createOscillator();
       const g = ac.createGain();
@@ -474,6 +487,17 @@ export default function GunCursor({ active, muted, font }: Props) {
         blip(90, 30, 0.5, 0.1 * SPELL_VOLUME, 0.02);
       } else thud(false);
       explode(s.x1, s.y1, s.ammo, false);
+      // it hit the FX - / + button: volume down / up
+      if (s.fx) {
+        fxLevel = Math.max(0, Math.min(10, fxLevel + s.fx));
+        try {
+          localStorage.setItem(FX_KEY, String(fxLevel));
+        } catch {}
+        fxFlash = { d: s.fx, t: 0.25 };
+        pops.push({ x: s.x1, y: s.y1 - 30, text: fxLevel === 0 ? "FX OFF" : `FX ${fxLevel}`, life: 0.8, color: "#ffffff", size: 13 });
+        blip(500 + fxLevel * 60, 500 + fxLevel * 60, 0.09, 0.05); // a test beep at the new volume
+        return;
+      }
       // did it get a flyer? (not through the iPod / handheld, and not when you shot a button)
       let killed = 0;
       if (!s.hit && !s.solid) {
@@ -548,20 +572,37 @@ export default function GunCursor({ active, muted, font }: Props) {
     // ---------- the ammo bar: centered under the iPod (or the handheld) ----------
     const BOX = 64;
     const GAP = 10;
+    const AMMO_W = AMMO.length * BOX + (AMMO.length - 1) * GAP;
+    const FX_GAP = 34; // space between the ammo and the FX buttons
+    const METER_W = 78; // the volume bars between - and +
+    const FX_W = BOX + 8 + METER_W + 8 + BOX;
     const barRect = () => {
       const dev = document.querySelector(".ipod-shell") ?? document.querySelector(".hh-device");
       const r = dev?.getBoundingClientRect();
       const cx = r && r.width > 0 ? r.left + r.width / 2 : vw / 2;
-      const w = AMMO.length * BOX + (AMMO.length - 1) * GAP;
+      const w = AMMO_W + FX_GAP + FX_W; // (the whole row: ammo + FX)
       // right under the iPod (with room for the name above it), or at the bottom if there's no room
       const under = r && r.width > 0 ? r.bottom + 36 : vh;
       return { x: Math.round(cx - w / 2), y: Math.round(Math.min(under, vh - BOX - 14)), w, h: BOX };
     };
+    // the FX - and + buttons (x, y, size)
+    const fxMinus = () => ({ x: bar.x + AMMO_W + FX_GAP, y: bar.y, s: BOX });
+    const fxPlus = () => ({ x: bar.x + AMMO_W + FX_GAP + BOX + 8 + METER_W + 8, y: bar.y, s: BOX });
+    const fxHit = (x: number, y: number) => {
+      for (const [b, d] of [
+        [fxMinus(), -1],
+        [fxPlus(), 1],
+      ] as [{ x: number; y: number; s: number }, number][]) {
+        if (x >= b.x && x <= b.x + b.s && y >= b.y && y <= b.y + b.s) return d;
+      }
+      return 0;
+    };
+    let fxFlash = { d: 0, t: 0 }; // which FX button just got hit (blinks)
     let bar = barRect();
     const barHit = (x: number, y: number) => {
       if (y < bar.y || y > bar.y + BOX) return -1;
       const i = Math.floor((x - bar.x) / (BOX + GAP));
-      if (i < 0 || i >= AMMO.length || x > bar.x + i * (BOX + GAP) + BOX) return -1;
+      if (x > bar.x + AMMO_W || i < 0 || i >= AMMO.length || x > bar.x + i * (BOX + GAP) + BOX) return -1;
       return i;
     };
 
@@ -597,6 +638,16 @@ export default function GunCursor({ active, muted, font }: Props) {
         return;
       }
       if (e.button !== 0) return;
+      // the FX - / + buttons: shoot them (the volume changes when the shot lands)
+      const fd = fxHit(e.clientX, e.clientY);
+      if (fd) {
+        fire(e.clientX, e.clientY, null, false);
+        const last = shots[shots.length - 1];
+        if (last) last.fx = fd;
+        eat(e);
+        swallow = true;
+        return;
+      }
       // a box in the ammo bar
       const b = barHit(e.clientX, e.clientY);
       if (b >= 0) {
@@ -749,7 +800,46 @@ export default function GunCursor({ active, muted, font }: Props) {
         text(String(i + 1), x + 5, bar.y + 5, 12, on ? "#ffffff" : "rgba(255,255,255,0.65)");
       });
       const label = `${AMMO[ammoIx].name}  ·  RIGHT CLICK = SWITCH`;
-      text(label, bar.x + bar.w / 2, bar.y - 24, 15, ammoFlash > 0 && Math.floor(clock * 10) % 2 ? "#ffd84a" : "#ffffff", "center");
+      text(label, bar.x + AMMO_W / 2, bar.y - 24, 15, ammoFlash > 0 && Math.floor(clock * 10) % 2 ? "#ffd84a" : "#ffffff", "center");
+      // FX VOLUME: [ - ] |||||||||| [ + ]   (PSP style buttons you shoot)
+      fxFlash.t -= 1 / 60;
+      for (const [b, d] of [
+        [fxMinus(), -1],
+        [fxPlus(), 1],
+      ] as [{ x: number; y: number; s: number }, number][]) {
+        const lit = fxFlash.t > 0 && fxFlash.d === d;
+        const hover = fxHit(mx, my) === d;
+        ctx.fillStyle = lit ? "rgba(255,255,255,0.95)" : hover ? "rgba(90,30,90,0.85)" : "rgba(26,6,24,0.75)";
+        ctx.fillRect(b.x, b.y, b.s, b.s);
+        ctx.strokeStyle = "rgba(255,255,255,0.3)";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(b.x + 1.5, b.y + 1.5, b.s - 3, b.s - 3);
+        // a chunky pink - or + with a dark edge, like the PSP's buttons
+        const cx = b.x + b.s / 2;
+        const cy = b.y + b.s / 2;
+        const arm = 16;
+        const th = 8;
+        ctx.fillStyle = INK;
+        ctx.fillRect(cx - arm - 2, cy - th / 2 - 2, arm * 2 + 4, th + 4);
+        if (d > 0) ctx.fillRect(cx - th / 2 - 2, cy - arm - 2, th + 4, arm * 2 + 4);
+        ctx.fillStyle = "#d63cc8";
+        ctx.fillRect(cx - arm, cy - th / 2, arm * 2, th);
+        if (d > 0) ctx.fillRect(cx - th / 2, cy - arm, th, arm * 2);
+        ctx.fillStyle = "#ff8ad8";
+        ctx.fillRect(cx - arm, cy - th / 2, arm * 2, 2);
+      }
+      // the volume bars
+      const m = fxMinus();
+      const mx0 = m.x + BOX + 8;
+      ctx.fillStyle = "rgba(26,6,24,0.75)";
+      ctx.fillRect(mx0, bar.y, METER_W, BOX);
+      for (let i = 0; i < 10; i++) {
+        const h = 10 + i * 4;
+        const x = mx0 + 5 + i * 7;
+        ctx.fillStyle = i < fxLevel ? (i >= 8 ? "#ff3bd0" : "#d63cc8") : "rgba(255,255,255,0.15)";
+        ctx.fillRect(x, bar.y + BOX - 8 - h, 5, h);
+      }
+      text(fxLevel === 0 ? "FX OFF" : "FX VOLUME", mx0 + METER_W / 2, bar.y - 24, 15, "#ffffff", "center");
     };
     // PINK HUNT, top right
     const drawHunt = () => {
