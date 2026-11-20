@@ -1083,24 +1083,28 @@ export default function Home() {
   const [handheldBoot, setHandheldBoot] = useState(false);
   // "CONTROL W THESE!" arrows pointing at the key legend, for 5 seconds after Pinkmane Void starts
   const [keyTip, setKeyTip] = useState(false);
-  // false until the visitor clicks / shoots (or taps / presses a key) for the first time.
-  // The iPod screen shows LOADING..., then the trippy PINKMANE picture with CLICK TO START until then.
+  // START SCREEN: the iPod shows LOADING..., then the trippy PINKMANE picture with CLICK TO START.
+  // "entered" turns true when you click (or shoot) that picture, or press ENTER / SPACE / OK / play.
+  // Only then does the music start and the music video show up.
   const [entered, setEntered] = useState(false);
+  const enteredRef = useRef(false);
   // true once LOADING... is done and the picture shows
   const [bootArt, setBootArt] = useState(false);
+  const bootArtRef = useRef(false);
   useEffect(() => {
-    const t = setTimeout(() => setBootArt(true), 1600);
+    const t = setTimeout(() => {
+      bootArtRef.current = true;
+      setBootArt(true);
+    }, 1600);
     return () => clearTimeout(t);
   }, []);
-  useEffect(() => {
-    if (entered) return;
-    const go = () => setEntered(true);
-    // ("pinkmane-fire" = a shot from the gun, which eats the real click)
-    for (const t of ["click", "keydown", "touchend", "pinkmane-fire"]) window.addEventListener(t, go);
-    return () => {
-      for (const t of ["click", "keydown", "touchend", "pinkmane-fire"]) window.removeEventListener(t, go);
-    };
-  }, [entered]);
+  const startSongRef = useRef<() => void>(() => {}); // starts your music (set up further down, where the music player is made)
+  const enter = () => {
+    if (enteredRef.current || !bootArtRef.current) return; // (still LOADING...: wait for the picture)
+    enteredRef.current = true;
+    setEntered(true);
+    startSongRef.current();
+  };
   // Which background mode is picked (0, 1 or 2), remembered for next visit
   const [bgMode, setBgMode] = useState(0);
   // The background that's actually SHOWING. When you pick a new MODE, the old background stays until the new picture has
@@ -1221,6 +1225,7 @@ export default function Home() {
     trackRef.current = idx;
     setTrackIndex(idx);
     audio.src = list[idx].file;
+    if (!enteredRef.current) return; // (start screen still showing: load it, don't play yet)
     audio
       .play()
       .then(() => {
@@ -1253,11 +1258,13 @@ export default function Home() {
   };
 
   const nextTrack = () => {
+    if (!enteredRef.current) return enter(); // start screen: skipping a song = go in
     if (gameMusic("next")) return;
     loadAndPlay(trackRef.current + 1);
   };
 
   const prevTrack = () => {
+    if (!enteredRef.current) return enter(); // start screen: skipping a song = go in
     if (gameMusic("prev")) return;
     const audio = songRef.current;
     // Like a real iPod: restart the song if it's been playing a few seconds
@@ -1269,6 +1276,7 @@ export default function Home() {
   };
 
   const togglePlay = () => {
+    if (!enteredRef.current) return enter(); // start screen: play = go in (that starts the music)
     if (gameMusic("toggle")) return;
     const audio = songRef.current;
     if (!audio) return;
@@ -1402,6 +1410,7 @@ export default function Home() {
   // pick = which row to open (when a row is tapped on a phone). Without it: the highlighted row.
   const selectItem = (pick?: unknown) => {
     if (exiting) return; // powering off: ignore presses
+    if (!enteredRef.current) return enter(); // start screen: OK / ENTER = go in
     // Inside the game, OK means jump
     if (playing) {
       setJumpSignal((n) => n + 1);
@@ -1586,6 +1595,11 @@ export default function Home() {
         if (target && target !== document.body) target.blur();
       }
 
+      // start screen: SPACE goes in too (ENTER does it through selectItem)
+      if (!enteredRef.current && e.key === " ") {
+        enter();
+        return;
+      }
       // In the game, Space and Arrow Up also jump
       if (playing && (e.key === " " || (e.key === "ArrowUp" && (activeGame === "pinkrun" || activeGame === "bird")))) {
         e.preventDefault();
@@ -1988,28 +2002,27 @@ export default function Home() {
         .catch(() => {});
     };
 
-    tryStartSong();
+    startSongRef.current = tryStartSong; // the start screen calls this (see "enter")
 
+    // (just in case the browser said no when you clicked the start screen: the next click / key starts it)
     const handleFirstInteraction = () => {
+      if (!enteredRef.current) return;
       tryStartSong();
       if (hasStartedSong.current) {
         window.removeEventListener("click", handleFirstInteraction);
         window.removeEventListener("keydown", handleFirstInteraction);
         window.removeEventListener("touchstart", handleFirstInteraction);
-        window.removeEventListener("pinkmane-fire", handleFirstInteraction);
       }
     };
 
     window.addEventListener("click", handleFirstInteraction);
     window.addEventListener("keydown", handleFirstInteraction);
     window.addEventListener("touchstart", handleFirstInteraction);
-    window.addEventListener("pinkmane-fire", handleFirstInteraction); // a shot from the gun
 
     return () => {
       window.removeEventListener("click", handleFirstInteraction);
       window.removeEventListener("keydown", handleFirstInteraction);
       window.removeEventListener("touchstart", handleFirstInteraction);
-      window.removeEventListener("pinkmane-fire", handleFirstInteraction);
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
@@ -2667,6 +2680,16 @@ activeGame === "bomber" ? (
               className={`screen-overlay ${!exiting && bootArt ? "screen-overlay-art" : ""} ${
                 bootFadeOut && !exiting ? "screen-overlay-fade" : ""
               }`}
+              {...(!exiting && bootArt && !entered
+                ? {
+                    role: "button",
+                    "aria-label": "Click to start",
+                    onClick: (e: React.MouseEvent) => {
+                      e.stopPropagation(); // (only go in, don't also press what's under it)
+                      enter();
+                    },
+                  }
+                : {})}
             >
               {exiting || !bootArt ? (
                 <>
@@ -3469,8 +3492,9 @@ activeGame === "bomber" ? (
             <button className="hh-hit" style={hhBox(4, 0, 13, 3)} onClick={() => hhSong(-1)} onMouseDown={noFocus} aria-label="Previous song" />
             <button className="hh-hit" style={hhBox(80, 0, 89, 3)} onClick={() => hhSong(1)} onMouseDown={noFocus} aria-label="Next song" />
 
-            {/* bottom bar, left: little cube buttons HOME, FULLSCREEN, then the music volume - / + */}
-            <div className="hh-cubes" style={hhBox(13, 34, 40, 38)}>
+            {/* bottom bar, left: little cube buttons HOME, FULLSCREEN, then the music volume - / +
+                (they start just right of where the screen starts) */}
+            <div className="hh-cubes" style={hhBox(15.6, 34, 41, 38)}>
               <button className="hh-cube" onClick={goHome} onMouseDown={noFocus} aria-label="Home">
                 HOME
               </button>
@@ -3762,7 +3786,7 @@ activeGame === "bomber" ? (
         link="https://youtu.be/4bEcW1DbpPI"
         title="ENDER PEARLS"
         songRef={songRef}
-        show={!playing && !handheld && !gameSong && tracks[trackIndex]?.title === "ender pearls"}
+        show={entered && !playing && !handheld && !gameSong && tracks[trackIndex]?.title === "ender pearls"}
         fontFamily={pixelFont.style.fontFamily}
       />
       {/* THE GUN (computers only): the mouse is an aim, clicks are shots. Off inside the games and on phones. */}

@@ -1018,12 +1018,14 @@ export default function GunCursor({ active, muted, font }: Props) {
         ctx.fillStyle = "rgba(255, 59, 208, 0.5)";
         ctx.fillRect(bx + 8, lines[0].y + lines[0].size + 4, bw - 16, 2);
       }
-      for (const l of lines) text(l.t, x, l.y, l.size, l.color, "right");
+      // everything centred in the box
+      const cx = Math.round(bx + bw / 2);
+      for (const l of lines) text(l.t, cx, l.y, l.size, l.color, "center");
       if (timeBarY >= 0) {
         ctx.fillStyle = "rgba(26,6,24,0.7)";
-        ctx.fillRect(x - w, timeBarY, w, 6);
+        ctx.fillRect(cx - w / 2, timeBarY, w, 6);
         ctx.fillStyle = "#ff3bd0";
-        ctx.fillRect(x - w, timeBarY, (w * hunt.timeLeft) / HUNT_TIME, 6);
+        ctx.fillRect(cx - w / 2, timeBarY, (w * hunt.timeLeft) / HUNT_TIME, 6);
       }
     };
 
