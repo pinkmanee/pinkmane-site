@@ -973,11 +973,11 @@ export default function GunCursor({ active, muted, font }: Props) {
         put(`${toTrip} MORE = TRIP MODE · BEST ${hunt.bestStreak}`, x, y, 9, "rgba(255,255,255,0.75)", "right");
         y += 14;
       } else {
-        put("SHOOT THE FLYING PINKMANES", x, y, 9, "#ffffff", "right");
+        put("SHOOT THE FLYING RATCHETS", x, y, 9, "#ffffff", "right");
         y += 13;
-        put("FAR = 20 · MID = 15 · CLOSE = 10", x, y, 9, "#ffd84a", "right");
+        put("FAR = 20 · MID = 15 · CLOSE = 10", x, y, 9, "#7fd0ff", "right");
         y += 13;
-        put(`BOMB = ${BOMB_POINTS} · ${HUNT_TIME} SECONDS`, x, y, 9, "#ffd84a", "right");
+        put(`BOMB = ${BOMB_POINTS} · ${HUNT_TIME} SECONDS`, x, y, 9, "#7fd0ff", "right");
         y += 13;
         put(`${TRIP_KILLS} IN A ROW = TRIP MODE x2`, x, y, 9, "#ff3bd0", "right");
         y += 17;
