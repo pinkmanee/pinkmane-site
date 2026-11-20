@@ -2,14 +2,16 @@
 
 // CLICK TO ENTER: the first thing you see. PINKMANE with spinning spiral eyes on the hypno background.
 // Clicking (or tapping, or Enter / Space) goes in, and that same click starts the music.
-// It shows once per visit: reloading the page in the same tab skips it.
+// It shows every time the page opens (so the music always starts with that first click).
 
 import { useEffect, useRef, useState } from "react";
 import { DUDE, DudeEyes } from "./Spiral";
 
 const SEEN_KEY = "pinkmane-entered"; // remembered for this tab only (sessionStorage)
 const BG = "/bg/mode5.jpg"; // the glitch art behind him
-const SHOW_EVERY_TIME = false; // true = show it on every page load (handy for testing)
+// false = it shows every time the page opens.
+// true = only the first time in each tab (when you reload, it just fades away quickly)
+const ONCE_PER_TAB = false;
 
 type Props = {
   onEnter: () => void;
@@ -23,13 +25,15 @@ export default function EntranceScreen({ onEnter, font }: Props) {
   enterRef.current = onEnter;
 
   useEffect(() => {
+    if (!ONCE_PER_TAB) return;
     let seen = false;
     try {
-      seen = !SHOW_EVERY_TIME && sessionStorage.getItem(SEEN_KEY) === "1";
+      seen = sessionStorage.getItem(SEEN_KEY) === "1";
     } catch {}
     if (seen) {
-      setState("gone");
+      setState("leaving");
       enterRef.current();
+      setTimeout(() => setState("gone"), 750);
     }
   }, []);
 
@@ -64,14 +68,6 @@ export default function EntranceScreen({ onEnter, font }: Props) {
       aria-label="Click to enter"
       style={{ fontFamily: font }}
     >
-      {/* when you already went in this visit, hide it before it can flash up (runs before React starts) */}
-      <script
-        dangerouslySetInnerHTML={{
-          __html: SHOW_EVERY_TIME
-            ? ""
-            : `try{if(sessionStorage.getItem("${SEEN_KEY}")==="1")document.documentElement.classList.add("pm-entered")}catch(e){}`,
-        }}
-      />
       <div className="pm-enter-bg" />
       <div className="pm-enter-shade" />
       <div className="pm-enter-mid">
@@ -92,9 +88,6 @@ export default function EntranceScreen({ onEnter, font }: Props) {
       </div>
 
       <style>{`
-        html.pm-entered .pm-enter {
-          display: none;
-        }
         .pm-enter {
           position: fixed;
           inset: 0;

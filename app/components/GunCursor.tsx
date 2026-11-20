@@ -184,17 +184,7 @@ function drawAmmo(ctx: CanvasRenderingContext2D, id: AmmoId, x: number, y: numbe
 
 // angle difference, always the short way round
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
-// the spiral eye in the middle of the aim
-const AIM_SPIRAL = (() => {
-  let d = "";
-  for (let i = 0; i <= 90; i++) {
-    const t = i / 90;
-    const a = t * 2.6 * Math.PI * 2;
-    const r = 0.6 + t * 6.6;
-    d += `${i ? "L" : "M"}${(17 + Math.cos(a) * r).toFixed(2)} ${(17 + Math.sin(a) * r).toFixed(2)}`;
-  }
-  return d;
-})();
+
 const pad5 = (n: number) => String(Math.floor(n)).padStart(5, "0");
 
 export default function GunCursor({ active, muted, font }: Props) {
@@ -1057,11 +1047,10 @@ export default function GunCursor({ active, muted, font }: Props) {
           endTrip();
         }
       }
-      // the trip picture over the screen + a faster spiral in the aim
+      // the trip picture over the screen
       if ((hunt.trip > 0) !== tripShown) {
         tripShown = hunt.trip > 0;
         if (tripEl) tripEl.style.opacity = tripShown ? String(TRIP_LOOK) : "0";
-        aim.classList.toggle("gun-trip-on", tripShown);
       }
       if (hunt.on) {
         hunt.timeLeft -= dt;
@@ -1227,7 +1216,6 @@ export default function GunCursor({ active, muted, font }: Props) {
       window.removeEventListener("keydown", onKey, true);
       document.removeEventListener("pointerout", onOut);
       aim.style.opacity = "0";
-      aim.classList.remove("gun-trip-on");
       if (tripEl) tripEl.style.opacity = "0";
       if (hunt.trip > 0) tripSay(false);
       canvas.style.opacity = "0";
@@ -1254,11 +1242,8 @@ export default function GunCursor({ active, muted, font }: Props) {
               <circle cx="17" cy="17" r="10" />
               <path d="M17 1v8M17 25v8M1 17h8M25 17h8" />
             </g>
-            {/* PINKMANE's spiral eye in the middle (spins faster in TRIP MODE) */}
-            <circle cx="17" cy="17" r="8" fill="#ffffff" />
-            <g className="gun-spiral">
-              <path d={AIM_SPIRAL} fill="none" stroke="#000000" strokeWidth="1.4" strokeLinecap="round" shapeRendering="geometricPrecision" />
-            </g>
+            <rect x="15" y="15" width="4" height="4" fill={INK} />
+            <rect x="16" y="16" width="2" height="2" fill="#ffffff" />
           </svg>
         </div>
       </div>
@@ -1298,19 +1283,6 @@ export default function GunCursor({ active, muted, font }: Props) {
         }
         .gun-reticle svg {
           display: block;
-        }
-        .gun-spiral {
-          transform-origin: 17px 17px;
-          transform-box: view-box;
-          animation: gun-spiral 1.1s linear infinite;
-        }
-        .gun-aim.gun-trip-on .gun-spiral {
-          animation-duration: 0.3s;
-        }
-        @keyframes gun-spiral {
-          to {
-            transform: rotate(360deg);
-          }
         }
         .gun-trip {
           position: fixed;
