@@ -1079,8 +1079,49 @@ export default function Home() {
   const [keyTip, setKeyTip] = useState(false);
   // Which background mode is picked (0, 1 or 2), remembered for next visit
   const [bgMode, setBgMode] = useState(0);
+  // The background that's actually SHOWING. When you pick a new MODE, the old background stays until the new picture has
+  // finished loading, so the backup picture (the TOPSHELF cover) never flashes up in between.
+  const [shownBg, setShownBg] = useState(0);
   // Same thing for the handheld (PSP) view (0-3), remembered separately
   const [hhBgMode, setHhBgMode] = useState(0);
+  const [shownHhBg, setShownHhBg] = useState(0); // (the same, for the handheld's MODE buttons)
+
+  // Load every MODE picture right when the page opens, so switching modes is instant even the first time
+  useEffect(() => {
+    for (const m of [...BG_MODES, ...HH_BG_MODES]) {
+      const im = new window.Image();
+      im.src = m.sources[0];
+    }
+  }, []);
+  // A new MODE was picked: show it once its picture is ready (or straight away if it doesn't exist, then the backup is right)
+  useEffect(() => {
+    let gone = false;
+    const im = new window.Image();
+    const done = () => {
+      if (!gone) setShownBg(bgMode);
+    };
+    im.onload = done;
+    im.onerror = done;
+    im.src = BG_MODES[bgMode].sources[0];
+    if (im.complete) done();
+    return () => {
+      gone = true;
+    };
+  }, [bgMode]);
+  useEffect(() => {
+    let gone = false;
+    const im = new window.Image();
+    const done = () => {
+      if (!gone) setShownHhBg(hhBgMode);
+    };
+    im.onload = done;
+    im.onerror = done;
+    im.src = HH_BG_MODES[hhBgMode].sources[0];
+    if (im.complete) done();
+    return () => {
+      gone = true;
+    };
+  }, [hhBgMode]);
 
   // TWITCH MODE: only shows on your own computer (localhost), never on the real site.
   // Rate the songs people send you while you play: MIX and OVERALL VIBE from 0 to 100, and a replay-able tick.
@@ -2177,9 +2218,16 @@ activeGame === "bomber" ? (
   useEffect(() => {
     try {
       const saved = Number(localStorage.getItem("pinkmane-bgmode"));
-      if (saved >= 0 && saved < BG_MODES.length) setBgMode(saved);
+      // (straight to the saved one when the page opens, so it doesn't show MODE 1 first)
+      if (saved >= 0 && saved < BG_MODES.length) {
+        setBgMode(saved);
+        setShownBg(saved);
+      }
       const savedHh = Number(localStorage.getItem("pinkmane-hh-bgmode"));
-      if (savedHh >= 0 && savedHh < HH_BG_MODES.length) setHhBgMode(savedHh);
+      if (savedHh >= 0 && savedHh < HH_BG_MODES.length) {
+        setHhBgMode(savedHh);
+        setShownHhBg(savedHh);
+      }
     } catch {}
   }, []);
 
@@ -2383,11 +2431,11 @@ activeGame === "bomber" ? (
         className="bg-shake"
         aria-hidden="true"
         style={{
-          backgroundImage: BG_MODES[bgMode].sources.map((src) => `url('${src}')`).join(", "),
-          backgroundPosition: `center ${BG_MODES[bgMode].focus * 100}%`,
+          backgroundImage: BG_MODES[shownBg].sources.map((src) => `url('${src}')`).join(", "),
+          backgroundPosition: `center ${BG_MODES[shownBg].focus * 100}%`,
         }}
       >
-        <LiquidBg sources={BG_MODES[bgMode].sources} beat={beatRef} active={!handheld} focus={BG_MODES[bgMode].focus} />
+        <LiquidBg sources={BG_MODES[shownBg].sources} beat={beatRef} active={!handheld} focus={BG_MODES[shownBg].focus} />
       </div>
 
       {/* BASS QUAKE slider on the iPod view too (bottom left) */}
@@ -3207,11 +3255,11 @@ activeGame === "bomber" ? (
             className="hh-bg"
             aria-hidden="true"
             style={{
-              backgroundImage: HH_BG_MODES[hhBgMode].sources.map((src) => `url('${src}')`).join(", "),
-              backgroundPosition: `center ${HH_BG_MODES[hhBgMode].focus * 100}%`,
+              backgroundImage: HH_BG_MODES[shownHhBg].sources.map((src) => `url('${src}')`).join(", "),
+              backgroundPosition: `center ${HH_BG_MODES[shownHhBg].focus * 100}%`,
             }}
           >
-            <LiquidBg sources={HH_BG_MODES[hhBgMode].sources} beat={beatRef} active focus={HH_BG_MODES[hhBgMode].focus} />
+            <LiquidBg sources={HH_BG_MODES[shownHhBg].sources} beat={beatRef} active focus={HH_BG_MODES[shownHhBg].focus} />
           </div>
 
           {/* Flying PINKMANEs with jetpacks in the background, some going right, some going left */}
