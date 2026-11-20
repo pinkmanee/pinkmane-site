@@ -1,14 +1,14 @@
 "use client";
 
-// CLICK TO ENTER: the first thing you see. PINKMANE with spinning spiral eyes on the hypno background.
+// CLICK TO ENTER: the first thing you see. Your trippy PINKMANE picture in the middle of the screen
+// (the whole picture, nothing cut off, nothing moving on it).
 // Clicking (or tapping, or Enter / Space) goes in, and that same click starts the music.
 // It shows every time the page opens (so the music always starts with that first click).
 
 import { useEffect, useRef, useState } from "react";
-import { DUDE, DudeEyes } from "./Spiral";
 
 const SEEN_KEY = "pinkmane-entered"; // remembered for this tab only (sessionStorage)
-const BG = "/bg/mode5.jpg"; // the glitch art behind him
+const ART = "/bg/mode4.jpg"; // your trippy PINKMANE picture
 // false = it shows every time the page opens.
 // true = only the first time in each tab (when you reload, it just fades away quickly)
 const ONCE_PER_TAB = false;
@@ -68,23 +68,17 @@ export default function EntranceScreen({ onEnter, font }: Props) {
       aria-label="Click to enter"
       style={{ fontFamily: font }}
     >
+      {/* the same picture, blurred, filling the rest of the screen */}
       <div className="pm-enter-bg" />
-      <div className="pm-enter-shade" />
-      <div className="pm-enter-mid">
-        <div className="pm-enter-dude">
-          <img src={DUDE.src} alt="PINKMANE" draggable={false} />
-          <DudeEyes speed={state === "leaving" ? 0.25 : 1.3} />
-          {/* smoke from the joint */}
-          <span className="pm-puff p1" />
-          <span className="pm-puff p2" />
-          <span className="pm-puff p3" />
+      <div className="pm-enter-art">
+        <img src={ART} alt="PINKMANE" draggable={false} />
+        <div className="pm-enter-words">
+          <div className="pm-enter-click">
+            <span className="pm-mouse">CLICK TO ENTER</span>
+            <span className="pm-touch">TAP TO ENTER</span>
+          </div>
+          <div className="pm-enter-sound">SOUND ON</div>
         </div>
-        <div className="pm-enter-title">PINKMANE</div>
-        <div className="pm-enter-click">
-          <span className="pm-mouse">CLICK TO ENTER</span>
-          <span className="pm-touch">TAP TO ENTER</span>
-        </div>
-        <div className="pm-enter-sound">SOUND ON</div>
       </div>
 
       <style>{`
@@ -108,69 +102,42 @@ export default function EntranceScreen({ onEnter, font }: Props) {
         }
         .pm-enter-out {
           opacity: 0;
-          transform: scale(1.12);
+          transform: scale(1.08);
           pointer-events: none;
         }
         .pm-enter-bg {
           position: absolute;
-          inset: -6%;
-          background: url("${BG}") center 40% / cover no-repeat;
-          image-rendering: pixelated;
-          animation: pm-enter-breathe 9s ease-in-out infinite, pm-enter-hue 14s linear infinite;
+          inset: -8%;
+          background: url("${ART}") center / cover no-repeat;
+          filter: blur(22px) brightness(0.55);
         }
-        .pm-enter-shade {
-          position: absolute;
-          inset: 0;
-          background: radial-gradient(ellipse at center, rgba(10, 0, 16, 0.15) 0%, rgba(10, 0, 16, 0.55) 55%, rgba(10, 0, 16, 0.9) 100%);
-        }
-        .pm-enter-mid {
+        .pm-enter-art {
           position: relative;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: clamp(10px, 2vh, 18px);
+          width: min(94vh, 96vw);
+          aspect-ratio: 1;
+          box-shadow: 0 0 60px rgba(0, 0, 0, 0.6);
         }
-        .pm-enter-dude {
-          position: relative;
-          height: min(52vh, 520px);
-          aspect-ratio: ${DUDE.w} / ${DUDE.h};
-          animation: pm-enter-bob 2.4s ease-in-out infinite;
-          filter: drop-shadow(0 0 18px rgba(255, 59, 208, 0.55));
-        }
-        .pm-enter-dude img {
+        .pm-enter-art img {
           display: block;
           width: 100%;
           height: 100%;
           pointer-events: none;
         }
-        .pm-puff {
+        .pm-enter-words {
           position: absolute;
-          left: ${(DUDE.tip.x / DUDE.w) * 100}%;
-          top: ${(DUDE.tip.y / DUDE.h) * 100}%;
-          width: 14%;
-          aspect-ratio: 1;
-          margin: -7% 0 0 -7%;
-          border-radius: 50%;
-          background: radial-gradient(circle, rgba(235, 230, 245, 0.75) 0%, rgba(235, 230, 245, 0) 70%);
-          opacity: 0;
-          animation: pm-puff 3s ease-out infinite;
-        }
-        .pm-puff.p2 {
-          animation-delay: 1s;
-        }
-        .pm-puff.p3 {
-          animation-delay: 2s;
-        }
-        .pm-enter-title {
-          font-size: clamp(22px, 4.2vw, 46px);
-          color: #ff3bd0;
-          text-shadow: 3px 3px 0 #000, -1px -1px 0 #000, 0 0 18px rgba(255, 59, 208, 0.7);
-          letter-spacing: 2px;
+          left: 0;
+          right: 0;
+          bottom: 6%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 12px;
+          text-align: center;
         }
         .pm-enter-click {
-          font-size: clamp(13px, 2vw, 22px);
+          font-size: clamp(13px, 2.2vw, 24px);
           color: #ffffff;
-          text-shadow: 3px 3px 0 #d63cc8, 5px 5px 0 #000;
+          text-shadow: 3px 3px 0 #d63cc8, 5px 5px 0 #000, 0 0 12px rgba(0, 0, 0, 0.9);
           animation: pm-enter-blink 1.1s steps(1) infinite;
         }
         .pm-touch {
@@ -186,31 +153,8 @@ export default function EntranceScreen({ onEnter, font }: Props) {
         }
         .pm-enter-sound {
           font-size: 9px;
-          color: rgba(255, 255, 255, 0.75);
-          text-shadow: 2px 2px 0 #000;
-        }
-        @keyframes pm-enter-breathe {
-          0%,
-          100% {
-            transform: scale(1);
-          }
-          50% {
-            transform: scale(1.05);
-          }
-        }
-        @keyframes pm-enter-hue {
-          to {
-            filter: hue-rotate(360deg);
-          }
-        }
-        @keyframes pm-enter-bob {
-          0%,
-          100% {
-            transform: translateY(0) rotate(-1.5deg);
-          }
-          50% {
-            transform: translateY(-10px) rotate(1.5deg);
-          }
+          color: rgba(255, 255, 255, 0.85);
+          text-shadow: 2px 2px 0 #000, 0 0 8px #000;
         }
         @keyframes pm-enter-blink {
           0%,
@@ -222,23 +166,8 @@ export default function EntranceScreen({ onEnter, font }: Props) {
             opacity: 0.25;
           }
         }
-        @keyframes pm-puff {
-          0% {
-            opacity: 0;
-            transform: translate(0, 0) scale(0.4);
-          }
-          15% {
-            opacity: 0.9;
-          }
-          100% {
-            opacity: 0;
-            transform: translate(-18%, -260%) scale(2.2);
-          }
-        }
         @media (prefers-reduced-motion: reduce) {
-          .pm-enter-bg,
-          .pm-enter-dude,
-          .pm-puff {
+          .pm-enter-click {
             animation: none;
           }
         }
