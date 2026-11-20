@@ -677,18 +677,6 @@ const PixelIcon = ({ name }: { name: string }) => {
   );
 };
 
-// A word on the handheld's bottom bar (HOME, FULLSCREEN), in the same pink as the little icons
-const PixelWord = ({ text }: { text: string }) => (
-  <svg viewBox={`0 0 ${text.length * 5 + 1} 6`} className="hh-icon hh-word" aria-hidden="true">
-    <text x={0.6} y={5.6} fontSize={5} fill="#4a1447" style={{ fontFamily: "inherit" }}>
-      {text}
-    </text>
-    <text x={0} y={5} fontSize={5} fill="#d63cc8" style={{ fontFamily: "inherit" }}>
-      {text}
-    </text>
-  </svg>
-);
-
 // Equal-size triangles for the handheld's D-pad
 const DpadArrow = ({ dir }: { dir: "up" | "down" | "left" | "right" }) => {
   const rot = { up: 0, right: 90, down: 180, left: 270 }[dir];
@@ -3475,19 +3463,21 @@ activeGame === "bomber" ? (
             <button className="hh-hit" style={hhBox(4, 0, 13, 3)} onClick={() => hhSong(-1)} onMouseDown={noFocus} aria-label="Previous song" />
             <button className="hh-hit" style={hhBox(80, 0, 89, 3)} onClick={() => hhSong(1)} onMouseDown={noFocus} aria-label="Next song" />
 
-            {/* bottom bar, left: HOME, FULLSCREEN, then the music volume - / + */}
-            <button className="hh-hit hh-bar" style={hhBox(13, 34, 18, 38)} onClick={goHome} onMouseDown={noFocus} aria-label="Home">
-              <PixelWord text="HOME" />
-            </button>
-            <button className="hh-hit hh-bar" style={hhBox(19.5, 34, 32.5, 38)} onClick={toggleHhFull} onMouseDown={noFocus} data-instant="" aria-label="Full screen">
-              <PixelWord text="FULLSCREEN" />
-            </button>
-            <button className="hh-hit hh-bar" style={hhBox(34, 34, 36, 38)} onClick={() => hhVolume(-0.1)} onMouseDown={noFocus} aria-label="Volume down">
-              <PixelIcon name="minus" />
-            </button>
-            <button className="hh-hit hh-bar" style={hhBox(37, 34, 39.5, 38)} onClick={() => hhVolume(0.1)} onMouseDown={noFocus} aria-label="Volume up">
-              <PixelIcon name="plus" />
-            </button>
+            {/* bottom bar, left: little cube buttons HOME, FULLSCREEN, then the music volume - / + */}
+            <div className="hh-cubes" style={hhBox(13, 34, 40, 38)}>
+              <button className="hh-cube" onClick={goHome} onMouseDown={noFocus} aria-label="Home">
+                HOME
+              </button>
+              <button className="hh-cube" onClick={toggleHhFull} onMouseDown={noFocus} data-instant="" aria-label="Full screen">
+                FULLSCREEN
+              </button>
+              <button className="hh-cube hh-cube-sq" onClick={() => hhVolume(-0.1)} onMouseDown={noFocus} aria-label="Volume down">
+                -
+              </button>
+              <button className="hh-cube hh-cube-sq" onClick={() => hhVolume(0.1)} onMouseDown={noFocus} aria-label="Volume up">
+                +
+              </button>
+            </div>
             <button className="hh-hit hh-bar" style={hhBox(60, 34, 63, 38)} onClick={() => hhSong(-1)} onMouseDown={noFocus} aria-label="Previous song">
               <PixelIcon name="prev" />
             </button>
@@ -4934,9 +4924,41 @@ activeGame === "bomber" ? (
           pointer-events: none;
           filter: drop-shadow(0.5px 0 0 #fff) drop-shadow(-0.5px 0 0 #fff) drop-shadow(0 0.5px 0 #fff) drop-shadow(0 -0.5px 0 #fff);
         }
-        .hh-icon.hh-word {
-          height: 30%;
-          overflow: visible;
+        /* the little cube buttons on the PSP's bottom bar (they grow and shrink with the PSP) */
+        .hh-device {
+          container-type: inline-size;
+        }
+        .hh-cubes {
+          position: absolute;
+          z-index: 2;
+          display: flex;
+          align-items: center;
+          gap: 0.55cqw;
+        }
+        .hh-cube {
+          font: inherit;
+          font-size: 0.58cqw;
+          line-height: 1;
+          padding: 0.42cqw 0.55cqw;
+          color: #ffffff;
+          background: rgba(0, 0, 0, 0.55);
+          border: max(1px, 0.14cqw) solid #ffffff;
+          box-shadow: max(2px, 0.22cqw) max(2px, 0.22cqw) 0 #d63cc8;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+        .hh-cube-sq {
+          min-width: 2.2cqw;
+          font-size: 0.75cqw;
+          padding: 0.32cqw 0.4cqw;
+        }
+        .hh-cube:hover {
+          background: #d63cc8;
+          box-shadow: max(2px, 0.22cqw) max(2px, 0.22cqw) 0 #000000;
+        }
+        .hh-cube:active {
+          transform: translate(max(1px, 0.12cqw), max(1px, 0.12cqw));
+          box-shadow: max(1px, 0.1cqw) max(1px, 0.1cqw) 0 #000000;
         }
         /* Popup on the screen for volume / mute / songs */
         .hh-osd {
