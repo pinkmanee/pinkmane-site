@@ -3138,7 +3138,10 @@ activeGame === "bomber" ? (
 
       {/* PHONES + TABLETS: the game fills the screen, with big see-through thumb buttons on top */}
       {handheld && isTouch && (
-        <div className={`tp-overlay ${pixelFont.className}`} onContextMenu={(e) => e.preventDefault()}>
+        <div
+          className={`tp-overlay ${pixelFont.className} ${fsc.isFullscreen || fsc.isStandalone ? "tp-full" : ""}`}
+          onContextMenu={(e) => e.preventDefault()}
+        >
           {/* Background picture (still, to save battery) */}
           <div
             className="hh-bg"
@@ -3947,6 +3950,25 @@ activeGame === "bomber" ? (
           width: min(calc(100dvh * 64 / 30), calc(100vw - 116px));
           background: #242842;
           overflow: hidden;
+        }
+        /* FULL SCREEN on a sideways phone (or when it's opened from the Home Screen): the game fills the whole screen
+           and the small buttons sit on top of its corners. */
+        @media (orientation: landscape) {
+          .tp-full .tp-screen {
+            width: min(100vw, calc(100vh * 64 / 30));
+            width: min(100vw, calc(100dvh * 64 / 30));
+            height: min(100vh, calc(100vw * 30 / 64));
+            height: min(100dvh, calc(100vw * 30 / 64));
+          }
+        }
+        /* phones that are almost the game's shape (most of them): edge to edge, no gaps at all
+           (it gets stretched a tiny bit, you can't really see it) */
+        @media (orientation: landscape) and (min-aspect-ratio: 49/25) and (max-aspect-ratio: 59/25) {
+          .tp-full .tp-screen {
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+          }
         }
         .tp-corner {
           position: absolute;
