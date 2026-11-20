@@ -25,7 +25,6 @@ import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "
 import GunCursor from "./components/GunCursor";
 import TrackVideo from "./components/TrackVideo";
 import EntranceScreen from "./components/EntranceScreen";
-import HypeMan from "./components/HypeMan";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -702,18 +701,15 @@ const WIGGLE_PX = 5;
 // focus: which part of the picture stays on screen when it doesn't fit
 //   0 = keep the top, 0.5 = keep the middle, 1 = keep the bottom
 // screen: the iPod screen colour that goes with that background
-//   (mode 1 light pink, mode 2 light green, mode 3 light red, mode 4 lavender, mode 5 mint)
-// MODE 4 = PINKMANE hypnotized (/public/bg/mode4.jpg), MODE 5 = the glitch art (/public/bg/mode5.jpg)
+//   (mode 1 light pink, mode 2 light green, mode 3 light red)
 const BG_MODES = [
   { label: "MODE 1", sources: ["/bg/mode1.png", "/topshelf.png"], focus: 0.15, screen: "#f6d3ee", screenRgb: "246, 211, 238" },
   { label: "MODE 2", sources: ["/bg/mode2.png", "/topshelf.png"], focus: 0.15, screen: "#d7efbc", screenRgb: "215, 239, 188" },
   { label: "MODE 3", sources: ["/bg/mode3.png", "/topshelf.png"], focus: 0.15, screen: "#f8d0ca", screenRgb: "248, 208, 202" },
-  { label: "MODE 4", sources: ["/bg/mode4.jpg", "/topshelf.png"], focus: 0.2, screen: "#e3d6ff", screenRgb: "227, 214, 255" },
-  { label: "MODE 5", sources: ["/bg/mode5.jpg", "/topshelf.png"], focus: 0.55, screen: "#d4f5e6", screenRgb: "212, 245, 230" },
 ];
 // HANDHELD (PSP) BACKGROUND MODES: 4 pixel buttons above the handheld.
 // MODE 1 is the one you had before (handheld-bg.png, or .jpg, or the normal one, whichever exists first).
-// MODE 2-6 are the same 5 pictures as the iPod modes (/public/bg/mode1.png ... mode5.jpg).
+// MODE 2-4 are the same 3 pictures as the iPod modes (/public/bg/mode1.png, mode2.png, mode3.png).
 // focus works the same as the iPod ones: 0 = keep the top, 0.5 = keep the middle.
 // glow: the colour of the glow around the handheld (and its beat light) in that mode, as "red, green, blue".
 //   MODE 1 keeps the pink it always had. MODE 2-4 use the same colours as the iPod screen in that
@@ -723,8 +719,6 @@ const HH_BG_MODES = [
   { label: "MODE 2", sources: ["/bg/mode1.png", "/topshelf.png"], focus: 0.15, glow: "246, 211, 238" },
   { label: "MODE 3", sources: ["/bg/mode2.png", "/topshelf.png"], focus: 0.15, glow: "215, 239, 188" },
   { label: "MODE 4", sources: ["/bg/mode3.png", "/topshelf.png"], focus: 0.15, glow: "248, 208, 202" },
-  { label: "MODE 5", sources: ["/bg/mode4.jpg", "/topshelf.png"], focus: 0.2, glow: "227, 214, 255" },
-  { label: "MODE 6", sources: ["/bg/mode5.jpg", "/topshelf.png"], focus: 0.55, glow: "212, 245, 230" },
 ];
 
 // live = the music is really playing right now (not paused or muted): the game's painted background only wiggles then
@@ -1084,14 +1078,14 @@ export default function Home() {
   const [handheldBoot, setHandheldBoot] = useState(false);
   // "CONTROL W THESE!" arrows pointing at the key legend, for 5 seconds after Pinkmane Void starts
   const [keyTip, setKeyTip] = useState(false);
-  // CLICK TO ENTER: false until you've clicked in (the gun + the hype man wait for it)
+  // CLICK TO ENTER: false until you've clicked in (the gun waits for it)
   const [entered, setEntered] = useState(false);
-  // Which background mode is picked (0 - 4), remembered for next visit
+  // Which background mode is picked (0, 1 or 2), remembered for next visit
   const [bgMode, setBgMode] = useState(0);
   // The background that's actually SHOWING. When you pick a new MODE, the old background stays until the new picture has
   // finished loading, so the backup picture (the TOPSHELF cover) never flashes up in between.
   const [shownBg, setShownBg] = useState(0);
-  // Same thing for the handheld (PSP) view (0-5), remembered separately
+  // Same thing for the handheld (PSP) view (0-3), remembered separately
   const [hhBgMode, setHhBgMode] = useState(0);
   const [shownHhBg, setShownHhBg] = useState(0); // (the same, for the handheld's MODE buttons)
 
@@ -3722,8 +3716,6 @@ activeGame === "bomber" ? (
         show={!playing && !handheld && !gameSong && tracks[trackIndex]?.title === "ender pearls"}
         fontFamily={pixelFont.style.fontFamily}
       />
-      {/* THE HYPE MAN (computers only): PINKMANE dancing next to the iPod. Shoot him and he coughs. */}
-      <HypeMan show={entered && !playing && !handheld && !isTouch} beatRef={beatRef} font={pixelFont.style.fontFamily} />
       {/* THE GUN (computers only): the mouse is an aim, clicks are shots. Off inside the games and on phones. */}
       <GunCursor active={entered && !playing && !isTouch} muted={isMuted} font={pixelFont.style.fontFamily} />
       {/* CLICK TO ENTER (once per visit): the click that goes in also starts the music */}
