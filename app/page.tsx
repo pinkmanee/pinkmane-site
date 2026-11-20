@@ -24,7 +24,6 @@ import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components
 import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
 import GunCursor from "./components/GunCursor";
 import TrackVideo from "./components/TrackVideo";
-import EntranceScreen from "./components/EntranceScreen";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -1078,8 +1077,22 @@ export default function Home() {
   const [handheldBoot, setHandheldBoot] = useState(false);
   // "CONTROL W THESE!" arrows pointing at the key legend, for 5 seconds after Pinkmane Void starts
   const [keyTip, setKeyTip] = useState(false);
-  // CLICK TO ENTER: false until you've clicked in (the gun waits for it)
+  // false until the visitor clicks (or taps / presses a key) for the first time.
+  // Until then the iPod screen shows the trippy PINKMANE picture with CLICK TO START, and the gun waits
+  // (so that first click always starts the music and never gets used up as a shot).
   const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    if (entered) return;
+    const go = () => setEntered(true);
+    window.addEventListener("click", go);
+    window.addEventListener("keydown", go);
+    window.addEventListener("touchend", go);
+    return () => {
+      window.removeEventListener("click", go);
+      window.removeEventListener("keydown", go);
+      window.removeEventListener("touchend", go);
+    };
+  }, [entered]);
   // Which background mode is picked (0, 1 or 2), remembered for next visit
   const [bgMode, setBgMode] = useState(0);
   // The background that's actually SHOWING. When you pick a new MODE, the old background stays until the new picture has
@@ -1512,11 +1525,11 @@ export default function Home() {
     });
   };
 
-  // Boot animation timing (it waits for CLICK TO ENTER, so you get to see the iPod boot up)
+  // The iPod screen starts on the trippy picture (CLICK TO START) and fades to the menu after the first click
   useEffect(() => {
     if (!entered) return;
-    const fadeTimer = setTimeout(() => setBootFadeOut(true), 1500);
-    const removeTimer = setTimeout(() => setShowBoot(false), 1900);
+    const fadeTimer = setTimeout(() => setBootFadeOut(true), 60);
+    const removeTimer = setTimeout(() => setShowBoot(false), 500);
     return () => {
       clearTimeout(fadeTimer);
       clearTimeout(removeTimer);
@@ -2623,18 +2636,26 @@ activeGame === "bomber" ? (
 
           {(showBoot || exiting) && (
             <div
-              className={`screen-overlay ${
+              className={`screen-overlay ${!exiting ? "screen-overlay-art" : ""} ${
                 bootFadeOut && !exiting ? "screen-overlay-fade" : ""
               }`}
             >
-              <div className="screen-overlay-label">
-                {exiting ? "POWERING OFF" : "PINKMANE"}
-              </div>
-              <div className="screen-overlay-loading">LOADING...</div>
-              <SegmentedBar
-                duration={exiting ? 3 : 1.4}
-                active={exiting || showBoot}
-              />
+              {exiting ? (
+                <>
+                  <div className="screen-overlay-label">POWERING OFF</div>
+                  <div className="screen-overlay-loading">LOADING...</div>
+                  <SegmentedBar duration={3} active />
+                </>
+              ) : (
+                // START SCREEN: your trippy PINKMANE picture (/public/bg/mode4.jpg)
+                <>
+                  <div className="screen-art-click">
+                    <span className="screen-art-mouse">CLICK TO START</span>
+                    <span className="screen-art-touch">TAP TO START</span>
+                  </div>
+                  <div className="screen-art-sound">SOUND ON</div>
+                </>
+              )}
             </div>
           )}
 
@@ -3718,8 +3739,6 @@ activeGame === "bomber" ? (
       />
       {/* THE GUN (computers only): the mouse is an aim, clicks are shots. Off inside the games and on phones. */}
       <GunCursor active={entered && !playing && !isTouch} muted={isMuted} font={pixelFont.style.fontFamily} />
-      {/* CLICK TO ENTER (once per visit): the click that goes in also starts the music */}
-      <EntranceScreen onEnter={() => setEntered(true)} font={pixelFont.style.fontFamily} />
 
       <style jsx global>{`
         html,
@@ -4171,6 +4190,50 @@ activeGame === "bomber" ? (
         .screen-overlay-fade {
           opacity: 0;
           pointer-events: none;
+        }
+
+        /* the start screen: your trippy picture filling the iPod screen */
+        .screen-overlay-art {
+          background: #000 url("/bg/mode4.jpg") center 28% / cover no-repeat;
+          justify-content: flex-end;
+          gap: 6px;
+          padding-bottom: 9%;
+          cursor: pointer;
+        }
+        .screen-art-click {
+          color: #ffffff;
+          font-size: clamp(9px, 2.6vw, 13px);
+          letter-spacing: 1px;
+          text-align: center;
+          text-shadow: 2px 2px 0 #d63cc8, 3px 3px 0 #000, 0 0 8px #000;
+          animation: screenArtBlink 1.1s steps(1) infinite;
+        }
+        .screen-art-sound {
+          color: rgba(255, 255, 255, 0.85);
+          font-size: 7px;
+          letter-spacing: 1px;
+          text-shadow: 1px 1px 0 #000, 0 0 6px #000;
+        }
+        .screen-art-touch {
+          display: none;
+        }
+        @media (hover: none) {
+          .screen-art-touch {
+            display: inline;
+          }
+          .screen-art-mouse {
+            display: none;
+          }
+        }
+        @keyframes screenArtBlink {
+          0%,
+          70% {
+            opacity: 1;
+          }
+          71%,
+          100% {
+            opacity: 0.3;
+          }
         }
 
         .screen-overlay-label {

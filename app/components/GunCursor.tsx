@@ -49,8 +49,11 @@ const HIT_TARGETS = "button, a, [role=button], [data-shoot], .gp-row";
 const INSTANT = "input, textarea, select, label, [data-instant], [data-noshoot]";
 // shots that land on these can't hit the flyers behind them
 const SOLID = "[data-solid], .ipod-shell, .hh-device";
-// TRIP MODE: kill this many flyers in a row without missing and the screen trips out for a while, with double points
+// STREAK: every kill in a row (without a miss) counts up and pops up next to the kill.
+// TRIP MODE: every TRIP_KILLS in a row (10, 20, 30...) the screen trips out for a while, with double points
 const TRIP_KILLS = 10;
+// what pops up at some streaks
+const STREAK_SHOUTS: Record<number, string> = { 5: "NICE!", 15: "ON FIRE!", 20: "INSANE!", 25: "UNREAL!", 30: "TOO HIGH!", 40: "GOD MODE", 50: "PINKMANE MODE" };
 const TRIP_TIME = 10; // seconds
 const TRIP_PIC = "/bg/mode5.jpg"; // the glitch art that goes over the screen
 const TRIP_LOOK = 0.5; // how strong the trip picture is (0 - 1)
@@ -360,19 +363,19 @@ export default function GunCursor({ active, muted, font }: Props) {
     let swallow = false; // eat the rest of this real click (the shot will click when it lands)
     // PINK HUNT
     // lock = the round just ended: no new round until its Top 10 box has been closed
-    // streak = kills in a row without a miss, trip = TRIP MODE seconds left
-    const hunt = { score: 0, kills: 0, timeLeft: 0, on: false, best: 0, lock: 0, streak: 0, trip: 0 };
+    // streak = kills in a row without a miss, bestStreak = the longest one this round, trip = TRIP MODE seconds left
+    const hunt = { score: 0, kills: 0, timeLeft: 0, on: false, best: 0, lock: 0, streak: 0, bestStreak: 0, trip: 0 };
     let hypeWait = 0; // seconds until shooting the hype man gives points again
     let tripShown = false;
     const tripSay = (on: boolean) => window.dispatchEvent(new CustomEvent("pinkmane-trip", { detail: { on } }));
     const startTrip = () => {
-      hunt.trip = TRIP_TIME;
-      hunt.streak = 0;
-      pops.push({ x: vw / 2, y: vh * 0.28, text: "TRIP MODE!", life: 1.8, color: "#ff3bd0", size: 26 });
-      pops.push({ x: vw / 2, y: vh * 0.28 + 34, text: "DOUBLE POINTS", life: 1.8, color: "#8affc8", size: 14 });
+      const already = hunt.trip > 0;
+      hunt.trip = TRIP_TIME; // (already tripping: the timer starts over)
+      pops.push({ x: vw / 2, y: vh * 0.28, text: already ? "TRIP MODE AGAIN!" : "TRIP MODE!", life: 1.8, color: "#ff3bd0", size: 26 });
+      pops.push({ x: vw / 2, y: vh * 0.28 + 34, text: `${hunt.streak} IN A ROW · DOUBLE POINTS`, life: 1.8, color: "#8affc8", size: 14 });
       [392, 523, 659, 784, 1047].forEach((f, i) => blip(f, f * 1.5, 0.14, 0.04, i * 0.06, "triangle"));
       blip(110, 55, 0.9, 0.05, 0.05, "sawtooth");
-      tripSay(true);
+      if (!already) tripSay(true);
     };
     const endTrip = () => {
       if (hunt.trip <= 0) return;
@@ -511,17 +514,35 @@ export default function GunCursor({ active, muted, font }: Props) {
         hunt.timeLeft = HUNT_TIME;
         hunt.score = 0;
         hunt.kills = 0;
+        hunt.streak = 0;
+        hunt.bestStreak = 0;
       }
       const pts = (ammo === "bomb" ? BOMB_POINTS : Number(el.dataset.points) || KILL_POINTS) * (hunt.trip > 0 ? 2 : 1);
       hunt.score += pts;
       hunt.kills += 1;
-      if (hunt.trip <= 0) {
-        hunt.streak += 1;
-        if (hunt.streak >= TRIP_KILLS) startTrip();
-      }
+      // every kill counts toward the streak (also during TRIP MODE)
+      hunt.streak += 1;
+      if (hunt.streak > hunt.bestStreak) hunt.bestStreak = hunt.streak;
+      if (hunt.streak % TRIP_KILLS === 0) startTrip();
       pops.push({ x: cx, y: r.top - 6, text: `+${pts}`, life: 0.9, color: hunt.trip > 0 ? "#ffffff" : pts >= 20 ? "#ff3bd0" : pts >= 15 ? "#8affc8" : "#ffd84a", size: pts >= 20 ? 16 : 14 });
+      // the streak number, bigger the longer it gets
+      if (hunt.streak >= 2) {
+        const n = hunt.streak;
+        pops.push({
+          x: cx,
+          y: r.top - 30,
+          text: `${n} STREAK`,
+          life: 1.1,
+          color: n >= 20 ? `hsl(${(n * 37) % 360}, 100%, 70%)` : n >= TRIP_KILLS ? "#ff3bd0" : n >= 5 ? "#8affc8" : "#ffffff",
+          size: Math.min(26, 11 + n),
+        });
+        const shout = STREAK_SHOUTS[n];
+        if (shout) pops.push({ x: cx, y: r.top - 56, text: shout, life: 1.3, color: "#ffd84a", size: 18 });
+      }
       blip(900, 120, 0.22, 0.05);
       blip(1400, 700, 0.08, 0.03, 0.05);
+      // a ding that goes up with the streak
+      if (hunt.streak >= 2) blip(520 + Math.min(hunt.streak, 24) * 45, 520 + Math.min(hunt.streak, 24) * 45, 0.07, 0.03, 0.08, "triangle");
     };
     const huntOver = () => {
       hunt.on = false;
@@ -535,6 +556,7 @@ export default function GunCursor({ active, muted, font }: Props) {
         } catch {}
       }
       pops.push({ x: vw / 2, y: vh * 0.3, text: `TIME! ${hunt.kills} KILLS`, life: 1.6, color: "#ffffff", size: 20 });
+      if (hunt.bestStreak >= 2) pops.push({ x: vw / 2, y: vh * 0.3 + 30, text: `BEST STREAK ${hunt.bestStreak}`, life: 1.6, color: "#ff3bd0", size: 14 });
       for (const [i, f] of [523, 659, 784, 1047].entries()) blip(f, f, 0.1, 0.05, i * 0.09);
       const score = hunt.score;
       setTimeout(() => boardRef.current?.gameOver(score, HUNT_TIME + 0.5), 900);
@@ -938,10 +960,12 @@ export default function GunCursor({ active, muted, font }: Props) {
         if (hunt.trip > 0) {
           text(`TRIP MODE x2  ${Math.ceil(hunt.trip)}`, x, y, 11, `hsl(${Math.floor(clock * 240) % 360}, 100%, 70%)`, "right");
           y += 16;
-        } else {
-          text(`STREAK ${hunt.streak}/${TRIP_KILLS}`, x, y, 10, hunt.streak >= TRIP_KILLS - 3 ? "#ff3bd0" : "#ffffff", "right");
-          y += 15;
         }
+        const toTrip = TRIP_KILLS - (hunt.streak % TRIP_KILLS);
+        text(`STREAK ${hunt.streak}`, x, y, 12, toTrip <= 3 ? "#ff3bd0" : "#ffffff", "right");
+        y += 15;
+        text(`${toTrip} MORE = TRIP MODE · BEST ${hunt.bestStreak}`, x, y, 9, "rgba(255,255,255,0.75)", "right");
+        y += 14;
       } else {
         text("SHOOT THE FLYING PINKMANES", x, y, 9, "#ffffff", "right");
         y += 13;
@@ -1004,6 +1028,7 @@ export default function GunCursor({ active, muted, font }: Props) {
           hunt.score = 0;
           hunt.kills = 0;
           hunt.streak = 0;
+          hunt.bestStreak = 0;
         }
       }
 
