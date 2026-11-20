@@ -2681,8 +2681,9 @@ activeGame === "bomber" ? (
                   <SegmentedBar duration={exiting ? 3 : 1.4} active />
                 </>
               ) : (
-                // START SCREEN: your trippy PINKMANE picture (/public/bg/mode4.jpg)
+                // START SCREEN: your trippy PINKMANE picture (/public/bg/mode4.jpg), wiggling like the background
                 <>
+                  <LiquidBg sources={["/bg/mode4.jpg"]} beat={beatRef} active={!handheld} focus={0.28} />
                   <div className="screen-art-click">
                     <span className="screen-art-mouse">CLICK TO START</span>
                     <span className="screen-art-touch">TAP TO START</span>
@@ -4256,7 +4257,8 @@ activeGame === "bomber" ? (
           background: url("/bg/mode4.jpg") center 28% / cover no-repeat;
           animation: screenArtIn 0.45s ease-out;
         }
-        .screen-overlay-art > * {
+        .screen-art-click,
+        .screen-art-sound {
           position: relative;
         }
         @keyframes screenArtIn {
