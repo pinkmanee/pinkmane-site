@@ -297,7 +297,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pinkmane Void",
     id: "super",
-    preview: "/previews/void.gif",
+    preview: "/previews/void-zones.gif", // a trip through every zone + your best plays
     blurb: "The main game. Run, jump and shoot through the Void, beat the bosses, stack your gold.",
     how: "left/right = walk · up = jump · down = shoot",
     psp: true,
