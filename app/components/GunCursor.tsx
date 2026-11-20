@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ScorePanel, type ScoreApi, type ScoreEntry } from "./Scoreboard";
 
 // THE GUN (computers only, not phones). A shooter-game view on the main page:
-//   - the mouse is a pink aim, and PINKMANE's hand holds the PINKMANE pistol (public/gun/gun.png + gun-logo.png).
+//   - the mouse is a pink aim, and PINKMANE's hand holds the PINKMANE pistol (PINKMANE's own drawing: public/gun/gun-drawn.png).
 //     It slides along the bottom after the mouse, turns smoothly to point right at the aim (with a bit of weight and
 //     overshoot), rolls over when you aim to the other side, and kicks back on every shot
 //   - every left click is a SHOT: the ammo flies from the gun to where you clicked, and the click happens when it lands
@@ -21,15 +21,14 @@ import { ScorePanel, type ScoreApi, type ScoreEntry } from "./Scoreboard";
 //   - sliders (BASS QUAKE, VOL) and the handheld's D-pad still react instantly
 // It switches off inside the games (they use the mouse themselves) and on phones.
 //
-// Files: public/sounds/shot.mp3, public/gun/gun.png, public/gun/gun-logo.png
+// Files: public/sounds/shot.mp3, public/gun/gun-drawn.png
 // The flyers it can hit are marked with data-target in page.tsx. The iPod / handheld (data-solid) block shots.
 
 // OFF SWITCH: set this to false and the mouse is a normal mouse again
 const GUN_ON = true;
 
 const SHOT_SOUND = "/sounds/shot.mp3";
-const GUN_PIC = "/gun/gun.png";
-const LOGO_PIC = "/gun/gun-logo.png";
+const GUN_PIC = "/gun/gun-drawn.png"; // PINKMANE's own drawing of the gun + hand
 const SHOT_VOLUME = 0.1; // the shot is loud, so it plays at 10%
 const HIT_VOLUME = 0.09; // the little impact sound
 const AIM_SIZE = 34; // how big the aim is (pixels)
@@ -51,11 +50,13 @@ const INSTANT = "input, textarea, select, label, [data-instant], [data-noshoot]"
 // shots that land on these can't hit the flyers behind them
 const SOLID = "[data-solid], .ipod-shell, .hh-device";
 
-// ---------- the gun picture (public/gun/gun.png, 82 x 46 pixels, a Desert Eagle pointing left) ----------
-const PIVOT = { x: 57, y: 30 }; // the gun turns around this pixel (the hand)
-const MUZZLE = { x: 0, y: 7 }; // where the ammo comes out
-const LOGO_BOX = { x: 15, y: 3.4, w: 28, h: 10.9 }; // where the PINKMANE logo sits on the slide
-const ARM_FROM = { x: 67, y: 35 }; // where the arm leaves the hand
+// ---------- the gun picture (public/gun/gun-drawn.png, 480 x 291 pixels, pointing left, logo drawn on it) ----------
+// If the drawing changes, these are the spots to measure again (in pixels of the picture, from its top left corner):
+const GUN_ART_W = 480; // how wide the picture is
+const GUN_SIZE = 90; // how big it shows (bigger number = bigger gun)
+const PIVOT = { x: 400, y: 195 }; // the gun turns around this pixel (the middle of the hand)
+const MUZZLE = { x: 2, y: 40 }; // where the ammo comes out (the front of the barrel)
+const ARM_FROM = { x: 452, y: 238 }; // where the arm leaves the hand
 
 // ---------- the ammo ----------
 type AmmoId = "bullet" | "fire" | "spike" | "leaf" | "bomb";
@@ -202,8 +203,6 @@ export default function GunCursor({ active, muted, font }: Props) {
 
     const gunImg = new Image();
     gunImg.src = GUN_PIC;
-    const logoImg = new Image();
-    logoImg.src = LOGO_PIC;
 
     // ---------- the screen-sized drawing layer ----------
     let vw = 0;
@@ -342,7 +341,9 @@ export default function GunCursor({ active, muted, font }: Props) {
     loadTop();
     let wasBusy = false;
 
-    const scale = () => (vw < 900 ? 2 : vw < 1500 ? 2.4 : 2.8);
+    // how big the gun is on the screen: base = the old pixel size, so the new drawing ends up the same size as before
+    const base = () => (vw < 900 ? 2 : vw < 1500 ? 2.4 : 2.8);
+    const scale = () => (base() * GUN_SIZE) / GUN_ART_W;
     // where a pixel of the gun picture ends up on the screen
     const gunPoint = (gx: number, gy: number) => {
       const S = scale();
@@ -708,7 +709,7 @@ export default function GunCursor({ active, muted, font }: Props) {
 
     // ---------- drawing ----------
     const drawArm = () => {
-      const S = scale();
+      const S = base();
       const from = gunPoint(ARM_FROM.x, ARM_FROM.y);
       // the shoulder is off the bottom right of the screen
       const sx = gun.x + 120 + Math.min(160, vw * 0.1);
@@ -752,19 +753,9 @@ export default function GunCursor({ active, muted, font }: Props) {
       ctx.scale(1, gun.roll);
       ctx.scale(-S, S);
       ctx.translate(-PIVOT.x, -PIVOT.y);
-      ctx.imageSmoothingEnabled = false;
+      ctx.imageSmoothingEnabled = true; // (the drawing is bigger than it shows, so smooth shrinking looks best)
+      ctx.imageSmoothingQuality = "high";
       ctx.drawImage(gunImg, 0, 0);
-      // the PINKMANE logo on the slide (turned so it always reads the right way)
-      if (logoImg.complete && logoImg.naturalWidth) {
-        ctx.imageSmoothingEnabled = true;
-        ctx.save();
-        if (gun.roll > 0) {
-          ctx.translate(LOGO_BOX.x * 2 + LOGO_BOX.w, 0);
-          ctx.scale(-1, 1);
-        }
-        ctx.drawImage(logoImg, LOGO_BOX.x, LOGO_BOX.y, LOGO_BOX.w, LOGO_BOX.h);
-        ctx.restore();
-      }
       ctx.restore();
       // muzzle flash
       if (flash > 0) {
@@ -934,7 +925,7 @@ export default function GunCursor({ active, muted, font }: Props) {
       // (but it stays right of the ammo bar)
       const minX = Math.min(vw - 60, Math.max(vw * 0.55, bar.x + bar.w + 100));
       const tx = Math.max(minX, Math.min(vw - 50, vw * 0.74 + (mx - vw * 0.5) * 0.34));
-      const ty = vh - 30 * S * 0.55 + (my / vh - 0.5) * 30;
+      const ty = vh - 30 * base() * 0.55 + (my / vh - 0.5) * 30;
       gun.vx += ((tx - gun.x) * 60 - gun.vx * 13) * dt;
       gun.vy += ((ty - gun.y) * 60 - gun.vy * 13) * dt;
       gun.x += gun.vx * dt + Math.sin(clock * 1.7) * 0.05;
