@@ -777,14 +777,18 @@ function LiquidBg({
   beat,
   active,
   focus = 0.5,
+  shake = true,
 }: {
   sources: string[];
   beat: { current: BeatState };
   active: boolean;
   focus?: number;
+  shake?: boolean; // false = it only wiggles, no BASS QUAKE shake on the 808s
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef(active);
+  const shakeRef = useRef(shake);
+  shakeRef.current = shake;
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -880,7 +884,7 @@ function LiquidBg({
         gl.uniform1f(uWiggle, WIGGLE_PX);
         gl.uniform1f(uBand, EDGE_BAND_PX);
         // 808 shake: a new random nudge every frame while the hit lasts
-        const amount = b.bass * b.quake * EDGE_MAX_SHAKE_PX;
+        const amount = shakeRef.current ? b.bass * b.quake * EDGE_MAX_SHAKE_PX : 0;
         gl.uniform2f(uShake, (Math.random() * 2 - 1) * amount, (Math.random() * 2 - 1) * amount);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         if (!shown) {
@@ -2588,7 +2592,7 @@ activeGame === "bomber" ? (
       </div>
 
       <div
-        className={`ipod-shell ${!playing && !musicPaused && !isMuted ? "beat-thump" : ""}`}
+        className={`ipod-shell ${!playing && !musicPaused && !isMuted && !showBoot ? "beat-thump" : ""}`}
         style={{
           background: "#cfcfcf",
           width: "min(540px, 100%)",
@@ -2671,7 +2675,7 @@ activeGame === "bomber" ? (
               ) : (
                 // START SCREEN: your trippy PINKMANE picture (/public/bg/mode4.jpg), wiggling like the background
                 <>
-                  <LiquidBg sources={["/bg/mode4.jpg"]} beat={beatRef} active={!handheld} focus={0.28} />
+                  <LiquidBg sources={["/bg/mode4.jpg"]} beat={beatRef} active={!handheld} focus={0.28} shake={false} />
                   <div className="screen-art-click">
                     <span className="screen-art-mouse">CLICK TO START</span>
                     <span className="screen-art-touch">TAP TO START</span>
@@ -3760,7 +3764,7 @@ activeGame === "bomber" ? (
         fontFamily={pixelFont.style.fontFamily}
       />
       {/* THE GUN (computers only): the mouse is an aim, clicks are shots. Off inside the games and on phones. */}
-      <GunCursor active={!playing && !isTouch} muted={isMuted} font={pixelFont.style.fontFamily} />
+      <GunCursor active={!playing && !isTouch && !fsc.isFullscreen} muted={isMuted} font={pixelFont.style.fontFamily} />
 
       <style jsx global>{`
         html,
