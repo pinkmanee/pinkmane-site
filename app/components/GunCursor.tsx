@@ -49,6 +49,16 @@ const HIT_TARGETS = "button, a, [role=button], [data-shoot], .gp-row";
 const INSTANT = "input, textarea, select, label, [data-instant], [data-noshoot]";
 // shots that land on these can't hit the flyers behind them
 const SOLID = "[data-solid], .ipod-shell, .hh-device";
+// TRIP MODE: kill this many flyers in a row without missing and the screen trips out for a while, with double points
+const TRIP_KILLS = 10;
+const TRIP_TIME = 10; // seconds
+const TRIP_PIC = "/bg/mode5.jpg"; // the glitch art that goes over the screen
+const TRIP_LOOK = 0.5; // how strong the trip picture is (0 - 1)
+// THE HYPE MAN (HypeMan.tsx): shoot him during a round for bonus points (he coughs every time, the points only
+// come once every HYPE_WAIT seconds so you can't just farm him)
+const HYPE_POINTS = 25;
+const HYPE_WAIT = 3;
+const COUGH_VOLUME = 1;
 
 // ---------- the gun picture (public/gun/gun-drawn.png, 480 x 291 pixels, pointing left, logo drawn on it) ----------
 // If the drawing changes, these are the spots to measure again (in pixels of the picture, from its top left corner):
@@ -174,12 +184,24 @@ function drawAmmo(ctx: CanvasRenderingContext2D, id: AmmoId, x: number, y: numbe
 
 // angle difference, always the short way round
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+// the spiral eye in the middle of the aim
+const AIM_SPIRAL = (() => {
+  let d = "";
+  for (let i = 0; i <= 90; i++) {
+    const t = i / 90;
+    const a = t * 2.6 * Math.PI * 2;
+    const r = 0.6 + t * 6.6;
+    d += `${i ? "L" : "M"}${(17 + Math.cos(a) * r).toFixed(2)} ${(17 + Math.sin(a) * r).toFixed(2)}`;
+  }
+  return d;
+})();
 const pad5 = (n: number) => String(Math.floor(n)).padStart(5, "0");
 
 export default function GunCursor({ active, muted, font }: Props) {
   const aimRef = useRef<HTMLDivElement>(null);
   const reticleRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const tripRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<ScoreApi | null>(null);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
@@ -196,6 +218,7 @@ export default function GunCursor({ active, muted, font }: Props) {
     const aim = aimRef.current;
     const reticle = reticleRef.current;
     const canvas = canvasRef.current;
+    const tripEl = tripRef.current;
     if (!aim || !reticle || !canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -303,6 +326,28 @@ export default function GunCursor({ active, muted, font }: Props) {
       o.start(t0);
       o.stop(t0 + len + 0.02);
     };
+    // the hype man coughing: 3 short rough bursts
+    const coughSound = () => {
+      if (mutedRef.current || !ac || !noise || fx() <= 0) return;
+      wake();
+      [0, 0.19, 0.34].forEach((delay, i) => {
+        const src = ac!.createBufferSource();
+        src.buffer = noise;
+        const f = ac!.createBiquadFilter();
+        f.type = "bandpass";
+        f.frequency.value = 650 + i * 140;
+        f.Q.value = 1.1;
+        const g = ac!.createGain();
+        const t0 = ac!.currentTime + delay;
+        const v = (i === 0 ? 0.34 : 0.26) * fx() * COUGH_VOLUME;
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(v, t0 + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.15);
+        src.connect(f).connect(g).connect(ac!.destination);
+        src.start(t0, Math.random() * 0.15, 0.18);
+        blip(170 - i * 15, 110, 0.08, 0.025 * COUGH_VOLUME, delay, "sawtooth");
+      });
+    };
 
     // ---------- state ----------
     let ammoIx = 0; // you always start with the WEED LEAF
@@ -325,7 +370,25 @@ export default function GunCursor({ active, muted, font }: Props) {
     let swallow = false; // eat the rest of this real click (the shot will click when it lands)
     // PINK HUNT
     // lock = the round just ended: no new round until its Top 10 box has been closed
-    const hunt = { score: 0, kills: 0, timeLeft: 0, on: false, best: 0, lock: 0 };
+    // streak = kills in a row without a miss, trip = TRIP MODE seconds left
+    const hunt = { score: 0, kills: 0, timeLeft: 0, on: false, best: 0, lock: 0, streak: 0, trip: 0 };
+    let hypeWait = 0; // seconds until shooting the hype man gives points again
+    let tripShown = false;
+    const tripSay = (on: boolean) => window.dispatchEvent(new CustomEvent("pinkmane-trip", { detail: { on } }));
+    const startTrip = () => {
+      hunt.trip = TRIP_TIME;
+      hunt.streak = 0;
+      pops.push({ x: vw / 2, y: vh * 0.28, text: "TRIP MODE!", life: 1.8, color: "#ff3bd0", size: 26 });
+      pops.push({ x: vw / 2, y: vh * 0.28 + 34, text: "DOUBLE POINTS", life: 1.8, color: "#8affc8", size: 14 });
+      [392, 523, 659, 784, 1047].forEach((f, i) => blip(f, f * 1.5, 0.14, 0.04, i * 0.06, "triangle"));
+      blip(110, 55, 0.9, 0.05, 0.05, "sawtooth");
+      tripSay(true);
+    };
+    const endTrip = () => {
+      if (hunt.trip <= 0) return;
+      hunt.trip = 0;
+      tripSay(false);
+    };
     try {
       hunt.best = Number(localStorage.getItem(BEST_KEY)) || 0;
     } catch {}
@@ -459,15 +522,21 @@ export default function GunCursor({ active, muted, font }: Props) {
         hunt.score = 0;
         hunt.kills = 0;
       }
-      const pts = ammo === "bomb" ? BOMB_POINTS : Number(el.dataset.points) || KILL_POINTS;
+      const pts = (ammo === "bomb" ? BOMB_POINTS : Number(el.dataset.points) || KILL_POINTS) * (hunt.trip > 0 ? 2 : 1);
       hunt.score += pts;
       hunt.kills += 1;
-      pops.push({ x: cx, y: r.top - 6, text: `+${pts}`, life: 0.9, color: pts >= 20 ? "#ff3bd0" : pts >= 15 ? "#8affc8" : "#ffd84a", size: pts >= 20 ? 16 : 14 });
+      if (hunt.trip <= 0) {
+        hunt.streak += 1;
+        if (hunt.streak >= TRIP_KILLS) startTrip();
+      }
+      pops.push({ x: cx, y: r.top - 6, text: `+${pts}`, life: 0.9, color: hunt.trip > 0 ? "#ffffff" : pts >= 20 ? "#ff3bd0" : pts >= 15 ? "#8affc8" : "#ffd84a", size: pts >= 20 ? 16 : 14 });
       blip(900, 120, 0.22, 0.05);
       blip(1400, 700, 0.08, 0.03, 0.05);
     };
     const huntOver = () => {
       hunt.on = false;
+      endTrip();
+      hunt.streak = 0;
       hunt.lock = 8; // (seconds, in case the box never opens)
       if (hunt.score > hunt.best) {
         hunt.best = hunt.score;
@@ -500,9 +569,23 @@ export default function GunCursor({ active, muted, font }: Props) {
         blip(500 + fxLevel * 60, 500 + fxLevel * 60, 0.09, 0.05); // a test beep at the new volume
         return;
       }
+      // did it get the hype man? (he answers himself, see HypeMan.tsx)
+      let hype = false;
+      if (!s.hit && !s.solid) {
+        hype = !window.dispatchEvent(new CustomEvent("pinkmane-shot", { cancelable: true, detail: { x: s.x1, y: s.y1, pad: s.ammo === "bomb" ? 40 : 8 } }));
+        if (hype) {
+          coughSound();
+          if (hunt.on && hunt.lock <= 0 && hypeWait <= 0) {
+            const pts = HYPE_POINTS * (hunt.trip > 0 ? 2 : 1);
+            hunt.score += pts;
+            hypeWait = HYPE_WAIT;
+            pops.push({ x: s.x1, y: s.y1 - 30, text: `+${pts} HYPE!`, life: 1.1, color: "#ff3bd0", size: 16 });
+          }
+        }
+      }
       // did it get a flyer? (not through the iPod / handheld, and not when you shot a button)
       let killed = 0;
-      if (!s.hit && !s.solid) {
+      if (!s.hit && !s.solid && (!hype || s.ammo === "bomb")) {
         const padPx = s.ammo === "bomb" ? BOMB_RADIUS : 14;
         let best: { el: HTMLElement; r: DOMRect; d: number } | null = null;
         for (const el of flyers()) {
@@ -522,12 +605,17 @@ export default function GunCursor({ active, muted, font }: Props) {
           killed++;
         }
       }
+      // a miss during a round: the streak starts over
+      if (hunt.on && !killed && !hype && !s.hit && !s.solid) {
+        if (hunt.streak >= 3) pops.push({ x: s.x1, y: s.y1 - 22, text: "STREAK LOST", life: 0.8, color: "#ff6a6a", size: 11 });
+        hunt.streak = 0;
+      }
       if (s.hit) pops.push({ x: s.x1, y: s.y1 - 22, text: "HIT!", life: 0.7, color: "#ffffff", size: 12 });
-      else if (!killed) marks.push({ x: s.x1, y: s.y1, kind: s.ammo, life: 1.8, rot: Math.random() * 6 });
+      else if (!killed && !hype) marks.push({ x: s.x1, y: s.y1, kind: s.ammo, life: 1.8, rot: Math.random() * 6 });
       if (killed > 1) pops.push({ x: s.x1, y: s.y1 - 40, text: `${killed}X COMBO!`, life: 1, color: "#ff3bd0", size: 14 });
       if (marks.length > 40) marks.shift();
       // now the real click happens, on whatever you shot
-      if (s.target && !killed) {
+      if (s.target && !killed && !hype) {
         let el: Element | null = s.target;
         if (!el.isConnected) el = document.elementFromPoint(s.x1, s.y1);
         if (el) {
@@ -857,12 +945,21 @@ export default function GunCursor({ active, muted, font }: Props) {
         ctx.fillStyle = "#ff3bd0";
         ctx.fillRect(x - 150, y, (150 * hunt.timeLeft) / HUNT_TIME, 6);
         y += 14;
+        if (hunt.trip > 0) {
+          text(`TRIP MODE x2  ${Math.ceil(hunt.trip)}`, x, y, 11, `hsl(${Math.floor(clock * 240) % 360}, 100%, 70%)`, "right");
+          y += 16;
+        } else {
+          text(`STREAK ${hunt.streak}/${TRIP_KILLS}`, x, y, 10, hunt.streak >= TRIP_KILLS - 3 ? "#ff3bd0" : "#ffffff", "right");
+          y += 15;
+        }
       } else {
         text("SHOOT THE FLYING PINKMANES", x, y, 9, "#ffffff", "right");
         y += 13;
         text("FAR = 20 · MID = 15 · CLOSE = 10", x, y, 9, "#ffd84a", "right");
         y += 13;
         text(`BOMB = ${BOMB_POINTS} · ${HUNT_TIME} SECONDS`, x, y, 9, "#ffd84a", "right");
+        y += 13;
+        text(`${TRIP_KILLS} IN A ROW = TRIP MODE x2`, x, y, 9, "#ff3bd0", "right");
         y += 17;
       }
       text("TOP 3", x, y, 10, "#ff3bd0", "right");
@@ -916,6 +1013,7 @@ export default function GunCursor({ active, muted, font }: Props) {
           hunt.lock = 0;
           hunt.score = 0;
           hunt.kills = 0;
+          hunt.streak = 0;
         }
       }
 
@@ -951,6 +1049,20 @@ export default function GunCursor({ active, muted, font }: Props) {
       flash -= dt;
       ammoFlash -= dt;
       if (hunt.lock > 0 && !isBusy) hunt.lock -= dt;
+      if (hypeWait > 0) hypeWait -= dt;
+      if (hunt.trip > 0) {
+        hunt.trip -= dt;
+        if (hunt.trip <= 0) {
+          hunt.trip = 0.0001;
+          endTrip();
+        }
+      }
+      // the trip picture over the screen + a faster spiral in the aim
+      if ((hunt.trip > 0) !== tripShown) {
+        tripShown = hunt.trip > 0;
+        if (tripEl) tripEl.style.opacity = tripShown ? String(TRIP_LOOK) : "0";
+        aim.classList.toggle("gun-trip-on", tripShown);
+      }
       if (hunt.on) {
         hunt.timeLeft -= dt;
         if (hunt.timeLeft <= 0) huntOver();
@@ -1115,6 +1227,9 @@ export default function GunCursor({ active, muted, font }: Props) {
       window.removeEventListener("keydown", onKey, true);
       document.removeEventListener("pointerout", onOut);
       aim.style.opacity = "0";
+      aim.classList.remove("gun-trip-on");
+      if (tripEl) tripEl.style.opacity = "0";
+      if (hunt.trip > 0) tripSay(false);
       canvas.style.opacity = "0";
       ctx.clearRect(0, 0, vw, vh);
       boardRef.current?.hide();
@@ -1124,6 +1239,8 @@ export default function GunCursor({ active, muted, font }: Props) {
 
   return (
     <>
+      {/* TRIP MODE: the glitch art over everything */}
+      <div ref={tripRef} className="gun-trip" aria-hidden />
       <canvas ref={canvasRef} className="gun-layer" aria-hidden />
       <div ref={aimRef} className="gun-aim" aria-hidden>
         <div ref={reticleRef} className="gun-reticle">
@@ -1137,8 +1254,11 @@ export default function GunCursor({ active, muted, font }: Props) {
               <circle cx="17" cy="17" r="10" />
               <path d="M17 1v8M17 25v8M1 17h8M25 17h8" />
             </g>
-            <rect x="15" y="15" width="4" height="4" fill={INK} />
-            <rect x="16" y="16" width="2" height="2" fill="#ffffff" />
+            {/* PINKMANE's spiral eye in the middle (spins faster in TRIP MODE) */}
+            <circle cx="17" cy="17" r="8" fill="#ffffff" />
+            <g className="gun-spiral">
+              <path d={AIM_SPIRAL} fill="none" stroke="#000000" strokeWidth="1.4" strokeLinecap="round" shapeRendering="geometricPrecision" />
+            </g>
           </svg>
         </div>
       </div>
@@ -1178,6 +1298,49 @@ export default function GunCursor({ active, muted, font }: Props) {
         }
         .gun-reticle svg {
           display: block;
+        }
+        .gun-spiral {
+          transform-origin: 17px 17px;
+          transform-box: view-box;
+          animation: gun-spiral 1.1s linear infinite;
+        }
+        .gun-aim.gun-trip-on .gun-spiral {
+          animation-duration: 0.3s;
+        }
+        @keyframes gun-spiral {
+          to {
+            transform: rotate(360deg);
+          }
+        }
+        .gun-trip {
+          position: fixed;
+          inset: -4%;
+          pointer-events: none;
+          z-index: 2147483000;
+          opacity: 0;
+          transition: opacity 0.7s ease;
+          background: url("${TRIP_PIC}") center / cover no-repeat;
+          mix-blend-mode: difference;
+          animation: gun-trip-hue 3s linear infinite, gun-trip-sway 2.4s ease-in-out infinite;
+        }
+        @keyframes gun-trip-hue {
+          to {
+            filter: hue-rotate(360deg) saturate(1.4);
+          }
+        }
+        @keyframes gun-trip-sway {
+          0%,
+          100% {
+            transform: scale(1) rotate(0deg) skewX(0deg);
+          }
+          50% {
+            transform: scale(1.05) rotate(1.5deg) skewX(3deg);
+          }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .gun-trip {
+            animation: none;
+          }
         }
         .gun-board {
           position: fixed;
