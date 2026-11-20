@@ -24,6 +24,7 @@ import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components
 import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
 import GunCursor from "./components/GunCursor";
 import TrackVideo from "./components/TrackVideo";
+import { useHasMouse } from "./components/useHasMouse";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -1037,6 +1038,7 @@ export default function Home() {
   const [tpAOn, setTpAOn] = useState(false);
   const [tpBOn, setTpBOn] = useState(false);
   const fsc = useFullscreen(); // FULL SCREEN (see components/Fullscreen.tsx)
+  useHasMouse(); // puts "has-mouse" on the page when there's a mouse / touchpad (the CSS uses it)
   // True while the phone game covers the screen. The iPod behind it can't be seen then, so its beat-driven visuals aren't redrawn
   // (that was wasted work on a phone, every frame).
   const phoneGameRef = useRef(false);
@@ -4278,10 +4280,10 @@ activeGame === "bomber" ? (
           display: none;
         }
         @media (any-hover: none) {
-          .screen-art-touch {
+          html:not(.has-mouse) .screen-art-touch {
             display: inline;
           }
-          .screen-art-mouse {
+          html:not(.has-mouse) .screen-art-mouse {
             display: none;
           }
         }
@@ -4757,7 +4759,7 @@ activeGame === "bomber" ? (
         }
         /* Touch screens have no key legend, so no arrows either */
         @media (any-hover: none) {
-          .key-tip {
+          html:not(.has-mouse) .key-tip {
             display: none;
           }
         }
@@ -5441,10 +5443,10 @@ activeGame === "bomber" ? (
         }
         /* Touch screens: no keyboard, so show the text hint instead of keys */
         @media (any-hover: none) {
-          .hh-keys {
+          html:not(.has-mouse) .hh-keys {
             display: none;
           }
-          .hh-hint {
+          html:not(.has-mouse) .hh-hint {
             display: block;
           }
         }

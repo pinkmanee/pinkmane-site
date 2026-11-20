@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ScorePanel, type ScoreApi, type ScoreEntry } from "./Scoreboard";
+import { useHasMouse } from "./useHasMouse";
 
 // THE GUN (computers only, not phones). A shooter-game view on the main page:
 //   - the mouse is a pink aim, and PINKMANE's hand holds the PINKMANE pistol (PINKMANE's own drawing: public/gun/gun-drawn.png).
@@ -203,12 +204,11 @@ export default function GunCursor({ active, muted, font }: Props) {
   const [boardColor, setBoardColor] = useState("#d7efbc"); // the Top 10's colour = the screen's colour (MODE 1 light, 2 green, 3 red)
   const boardBoxRef = useRef<HTMLDivElement>(null);
   const fontName = font ?? "monospace";
+  // phones and tablets: no gun. Anything with a mouse or touchpad gets it (also laptops with a touch screen)
+  const hasMouse = useHasMouse();
 
   useEffect(() => {
-    if (!active || !GUN_ON) return;
-    // phones and tablets: no gun
-    // phones and tablets only (a laptop with a touch screen still has a mouse / touchpad, so it gets the gun)
-    if (window.matchMedia && !window.matchMedia("(any-pointer: fine)").matches) return;
+    if (!active || !GUN_ON || !hasMouse) return;
     const aim = aimRef.current;
     const reticle = reticleRef.current;
     const canvas = canvasRef.current;
@@ -1288,7 +1288,7 @@ export default function GunCursor({ active, muted, font }: Props) {
       boardRef.current?.hide();
       ac?.close().catch(() => {});
     };
-  }, [active, fontName]);
+  }, [active, fontName, hasMouse]);
 
   return (
     <>

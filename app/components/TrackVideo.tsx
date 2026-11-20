@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useHasMouse } from "./useHasMouse";
 
 // THE MUSIC VIDEO (computers with a wide enough screen): a little pixel TV to the left of the iPod.
 // While ENDER PEARLS is the song on the iPod, its YouTube video plays in it - muted (the sound is the site's own song),
@@ -81,12 +82,13 @@ export default function TrackVideo({ videoId, link, title, songRef, show, fontFa
   const showRef = useRef(show);
   showRef.current = show;
   const [started, setStarted] = useState(false); // the YouTube player is only made the first time the TV shows
+  const hasMouse = useHasMouse(); // phones and tablets: no TV (laptops with a touch screen do get it)
 
   useEffect(() => {
     // phones, tablets and small windows never get the TV, so YouTube isn't even loaded there (saves their data)
-    const noRoom = window.matchMedia?.("(max-width: 1150px), (any-hover: none)").matches ?? false;
+    const noRoom = (window.matchMedia?.("(max-width: 1150px)").matches ?? false) || !hasMouse;
     if (show && !noRoom) setStarted(true);
-  }, [show]);
+  }, [show, hasMouse]);
 
   // captions off (YouTube can turn them on by itself, e.g. auto-generated ones)
   const noCaptions = () => {
@@ -324,11 +326,15 @@ export default function TrackVideo({ videoId, link, title, songRef, show, fontFa
           background: #ff3bd0;
         }
         /* small windows (no room next to the iPod) and phones: no TV */
-        @media (max-width: 1150px), (any-hover: none) {
+        @media (max-width: 1150px) {
           .tv,
           .tv-link {
             display: none;
           }
+        }
+        html:not(.has-mouse) .tv,
+        html:not(.has-mouse) .tv-link {
+          display: none;
         }
       `}</style>
     </>
