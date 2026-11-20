@@ -677,6 +677,18 @@ const PixelIcon = ({ name }: { name: string }) => {
   );
 };
 
+// A word on the handheld's bottom bar (HOME, FULLSCREEN), in the same pink as the little icons
+const PixelWord = ({ text }: { text: string }) => (
+  <svg viewBox={`0 0 ${text.length * 5 + 1} 6`} className="hh-icon hh-word" aria-hidden="true">
+    <text x={0.6} y={5.6} fontSize={5} fill="#4a1447" style={{ fontFamily: "inherit" }}>
+      {text}
+    </text>
+    <text x={0} y={5} fontSize={5} fill="#d63cc8" style={{ fontFamily: "inherit" }}>
+      {text}
+    </text>
+  </svg>
+);
+
 // Equal-size triangles for the handheld's D-pad
 const DpadArrow = ({ dir }: { dir: "up" | "down" | "left" | "right" }) => {
   const rot = { up: 0, right: 90, down: 180, left: 270 }[dir];
@@ -3462,13 +3474,17 @@ activeGame === "bomber" ? (
             <button className="hh-hit" style={hhBox(4, 0, 13, 3)} onClick={() => hhSong(-1)} onMouseDown={noFocus} aria-label="Previous song" />
             <button className="hh-hit" style={hhBox(80, 0, 89, 3)} onClick={() => hhSong(1)} onMouseDown={noFocus} aria-label="Next song" />
 
-            <button className="hh-hit hh-bar" style={hhBox(14, 34, 20, 38)} onClick={goHome} onMouseDown={noFocus} aria-label="Home">
-              <PixelIcon name="home" />
+            {/* bottom bar, left: HOME, FULLSCREEN, then the music volume - / + */}
+            <button className="hh-hit hh-bar" style={hhBox(13, 34, 18, 38)} onClick={goHome} onMouseDown={noFocus} aria-label="Home">
+              <PixelWord text="HOME" />
             </button>
-            <button className="hh-hit hh-bar" style={hhBox(22, 34, 25, 38)} onClick={() => hhVolume(-0.1)} onMouseDown={noFocus} aria-label="Volume down">
+            <button className="hh-hit hh-bar" style={hhBox(19.5, 34, 32.5, 38)} onClick={toggleHhFull} onMouseDown={noFocus} data-instant="" aria-label="Full screen">
+              <PixelWord text="FULLSCREEN" />
+            </button>
+            <button className="hh-hit hh-bar" style={hhBox(34, 34, 36, 38)} onClick={() => hhVolume(-0.1)} onMouseDown={noFocus} aria-label="Volume down">
               <PixelIcon name="minus" />
             </button>
-            <button className="hh-hit hh-bar" style={hhBox(26, 34, 30, 38)} onClick={() => hhVolume(0.1)} onMouseDown={noFocus} aria-label="Volume up">
+            <button className="hh-hit hh-bar" style={hhBox(37, 34, 39.5, 38)} onClick={() => hhVolume(0.1)} onMouseDown={noFocus} aria-label="Volume up">
               <PixelIcon name="plus" />
             </button>
             <button className="hh-hit hh-bar" style={hhBox(60, 34, 63, 38)} onClick={() => hhSong(-1)} onMouseDown={noFocus} aria-label="Previous song">
@@ -3594,25 +3610,6 @@ activeGame === "bomber" ? (
           )}
 
           {/* Volume slider + what the buttons do */}
-          <div className={`hh-under ${pixelFont.className}`}>
-            <span>VOL</span>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={volume}
-              aria-label="Music volume"
-              className="volume-slider hh-volume"
-              onChange={(e) => changeVolume(Number(e.target.value))}
-              onPointerUp={(e) => e.currentTarget.blur()}
-              onTouchEnd={(e) => e.currentTarget.blur()}
-            />
-            <button className="hh-fs-btn" onClick={toggleHhFull} onMouseDown={noFocus} data-instant="" aria-label="Full screen">
-              FULL SCREEN
-            </button>
-          </div>
-
           {/* Keys you use, drawn as white key outlines (only on computers) */}
           <div className="hh-keys-wrap">
           {keyTip && (
@@ -4935,6 +4932,10 @@ activeGame === "bomber" ? (
           pointer-events: none;
           filter: drop-shadow(0.5px 0 0 #fff) drop-shadow(-0.5px 0 0 #fff) drop-shadow(0 0.5px 0 #fff) drop-shadow(0 -0.5px 0 #fff);
         }
+        .hh-icon.hh-word {
+          height: 30%;
+          overflow: visible;
+        }
         /* Popup on the screen for volume / mute / songs */
         .hh-osd {
           position: absolute;
@@ -5046,22 +5047,6 @@ activeGame === "bomber" ? (
         }
 
         /* PSP FULL SCREEN */
-        .hh-fs-btn {
-          margin-left: 14px;
-          padding: 6px 9px;
-          font: inherit;
-          font-size: 8px;
-          color: #fff;
-          background: rgba(0, 0, 0, 0.55);
-          border: 2px solid #fff;
-          box-shadow: 3px 3px 0 #d63cc8;
-          cursor: pointer;
-          text-shadow: none;
-        }
-        .hh-fs-btn:hover {
-          background: #d63cc8;
-          box-shadow: 3px 3px 0 #000;
-        }
         .hh-game {
           position: absolute;
           inset: 0;
