@@ -801,7 +801,13 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
     // phones: the joystick (x / y from -1 to 1) and the FIRE button from HellPad.tsx
     const stick = { mx: 0, my: 0, fire: false, pad: false };
     let canvasTouch = -1; // the finger that touched the game screen itself (other fingers are on the joystick / buttons)
-    const touchy = window.matchMedia?.("(pointer: coarse)").matches ?? false; // a phone / tablet: the start screen says TAP
+    // a phone / tablet: the start screen says TAP. A laptop with a touch screen can say it's "touch" too,
+    // so as soon as a real mouse / touchpad moves, it's a computer again (the crosshair shows on the menus as your pointer)
+    let touchy = (window.matchMedia?.("(pointer: coarse)").matches ?? false) && !document.documentElement.classList.contains("has-mouse");
+    const onMouseSeen = (e: PointerEvent) => {
+      if (e.pointerType === "mouse") touchy = false;
+    };
+    window.addEventListener("pointermove", onMouseSeen, { passive: true });
     const setPause = (on: boolean) => {
       if (s.mode !== "play" || s.paused === on) return;
       s.paused = on;
@@ -2160,6 +2166,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", onMenu);
+      window.removeEventListener("pointermove", onMouseSeen);
       goRef.current = null;
       try {
         ac?.close();
