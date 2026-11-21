@@ -8,7 +8,7 @@ import { KIT, SKIN_COLORS, drawOverScreen, drawStartScreen, makeArcade, rainbow,
 //   hold ← → (or A D) / click wheel / hold the left or right half of the screen = go round
 //   SPACE / OK / tap = start      ESC / P / the II button = pause menu      S / DOWN on the start + game over screen = PINK SHOP
 //   M = sounds on / off, - and + = FX volume (or the speaker + slider top left)
-// The middle hexagon and the walls pulse to the song that's playing. Every stage has its own colours.
+// The middle hexagon and the walls pulse to the song that's playing. The colours keep changing (see THE COLOURS below).
 // MONEY: VIBES. 1 for every 2 seconds you survive.
 // This one stays on the iPod screen (256 x 160) on purpose: the old-school look.
 // ONLINE TOP 10: board id "hex" (scores are times in hundredths of a second, see Scoreboard.tsx).
@@ -63,16 +63,24 @@ const DEATH_SOUND = "/sounds/killed.mp3";
 
 // Stage changes at these many seconds
 const STAGES = [10, 20, 30, 45, 60, 90];
-// Every stage's colours: two background shades, the walls, the walls' edge, and the text colour
-const PALETTES: { a: string; b: string; wall: string; edge: string; ink: string }[] = [
-  { a: "#d7efbc", b: "#c3e2a3", wall: "#111111", edge: "#d63cc8", ink: "#111111" }, // pale green (the classic)
-  { a: "#ffd6f2", b: "#f5b8e4", wall: "#5a0f4f", edge: "#ff2fb4", ink: "#5a0f4f" }, // pink
-  { a: "#cfe8ff", b: "#a9d2f7", wall: "#0d2a5a", edge: "#ff5fd2", ink: "#0d2a5a" }, // ice blue
-  { a: "#ffe1bf", b: "#ffc890", wall: "#5a1e00", edge: "#ff3b1a", ink: "#5a1e00" }, // orange
-  { a: "#2a1040", b: "#3a1858", wall: "#ff5fd2", edge: "#ffffff", ink: "#ffffff" }, // dark purple
-  { a: "#1a0a0a", b: "#2e0f0f", wall: "#ff2a2a", edge: "#ffd400", ink: "#ffd400" }, // black + red
-  { a: "#111111", b: "#1c1c1c", wall: "#ffffff", edge: "#ff5fd2", ink: "#ffffff" }, // black (and the walls turn rainbow)
-];
+// THE COLOURS (like the real game): bright walls on two dark shades of the same colour, and the colour never sits still.
+//  - it slides round the colour wheel the whole time (HUE_DRIFT degrees a second, a bit faster every stage)
+//  - the two background shades swap places on the beat, and the background pulses brighter on every kick
+//  - every new stage jumps to its own colour (STAGE_HUES, in degrees: 315 pink, 25 orange, 195 ice blue, 55 yellow...)
+const STAGE_HUES = [315, 25, 195, 55, 275, 0, 140];
+const HUE_DRIFT = 14; // degrees per second the colour slides on its own (bigger = changes faster)
+const HUE_DRIFT_UP = 6; // ...plus this much more for every stage
+const SWAP_EVERY_BEATS = 1; // the background shades swap every this many beats (2 = calmer)
+const hsl = (h: number, sat: number, l: number) => `hsl(${Math.round(((h % 360) + 360) % 360)}, ${sat}%, ${Math.round(l)}%)`;
+type Pal = { a: string; b: string; wall: string; edge: string; core: string };
+// the colours for a hue (pulse = the beat, it brightens the background a little)
+const colorsFor = (h: number, pulse = 0): Pal => ({
+  a: hsl(h, 62, 21 + pulse * 5),
+  b: hsl(h, 70, 13 + pulse * 4),
+  wall: hsl(h, 95, 57),
+  edge: hsl(h, 100, 82),
+  core: hsl(h, 70, 9),
+});
 
 const INK = "#111111";
 const PINK = "#d63cc8";
@@ -204,6 +212,10 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
       time: 0, // survival time in seconds
       best: 0, // in hundredths of a second
       stage: 0,
+      hue: STAGE_HUES[0], // the colour right now (degrees round the colour wheel)
+      swap: false, // the two background shades swapped
+      beats: 0,
+      kickHigh: false,
       flashText: "",
       textTimer: 0,
       particles: [] as Particle[],
@@ -219,7 +231,7 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
       s.best = Number(localStorage.getItem(BEST_KEY)) || 0;
     } catch {}
     const scoreNow = () => Math.floor(s.time * 100);
-    const palette = () => PALETTES[Math.min(s.stage, PALETTES.length - 1)];
+    const palette = () => colorsFor(s.hue, pulseNow());
 
     // ---------- pause, shop, FX (the same in every game, see PinkShop.ts) ----------
     const bankRun = () => {
@@ -304,6 +316,7 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
       s.flipIn = rand(5, 8);
       s.time = 0;
       s.stage = 0;
+      s.hue = STAGE_HUES[0];
       s.particles = [];
       s.trail = [];
       s.whiteout = 0;
@@ -379,6 +392,15 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
       for (const tr of s.trail) tr.life -= dt;
       s.trail = s.trail.filter((tr) => tr.life > 0);
 
+      // THE COLOURS keep moving (on the start screen too): the hue slides, and the background shades swap on the beat
+      s.hue += (HUE_DRIFT + Math.min(s.stage, STAGE_HUES.length - 1) * HUE_DRIFT_UP) * dt;
+      const kick = pulseNow();
+      if (kick > 0.85 && !s.kickHigh) {
+        s.kickHigh = true;
+        s.beats += 1;
+        if (s.beats % SWAP_EVERY_BEATS === 0) s.swap = !s.swap;
+      } else if (kick < 0.3) s.kickHigh = false;
+
       // The world keeps spinning slowly even on the start screen
       if (s.mode === "ready" || s.mode === "over") {
         s.rot += 0.5 * dt;
@@ -415,6 +437,7 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
       // Stages (new colours every time)
       if (s.stage < STAGES.length && s.time >= STAGES[s.stage]) {
         s.stage += 1;
+        s.hue = STAGE_HUES[Math.min(s.stage, STAGE_HUES.length - 1)]; // a whole new colour
         s.flashText = `STAGE ${s.stage + 1}`;
         s.textTimer = 1.4;
         s.whiteout = 0.2;
@@ -457,14 +480,17 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
       trail === "rainbow" ? rainbow(t, i) : trail === "fire" ? ["#ffd84a", "#ff7a00", "#ff3b1a"][i % 3] : PINK;
     // the shop's preview + the SHOP panel: the triangle going round a little hexagon
     const drawPreview = (c: CanvasRenderingContext2D, id: string | null, cx: number, cy: number, t: number) => {
-      c.fillStyle = PALETTES[0].a;
+      const pp = colorsFor(s.hue);
+      c.fillStyle = pp.a;
       c.fillRect(cx - 50, cy - 50, 100, 100);
       const skin = id && id.startsWith("skin:") ? id.split(":")[1] : arc.shop.wearingName("skin");
       const trail = id && id.startsWith("trail:") ? id.split(":")[1] : arc.shop.wearingName("trail");
       c.save();
       c.translate(cx, cy);
       const core = 7 + pulseNow() * 2;
-      c.fillStyle = INK;
+      c.fillStyle = pp.core;
+      c.strokeStyle = pp.wall;
+      c.lineWidth = 2;
       c.beginPath();
       for (let i = 0; i < 6; i++) {
         const [x, y] = hexPoint(core, i);
@@ -473,6 +499,7 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
       }
       c.closePath();
       c.fill();
+      c.stroke();
       const a = t * 2.5;
       if (trail !== "none") {
         for (let i = 1; i < 10; i++) {
@@ -483,7 +510,7 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
         }
         c.globalAlpha = 1;
       }
-      drawTriangle(c, a, triColor(skin, t), 0.8);
+      drawTriangle(c, a, skin === "pink" ? pp.edge : triColor(skin, t), 0.8);
       c.restore();
     };
 
@@ -499,7 +526,7 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
       ctx.scale(zoom, zoom);
       // Background: 6 slices in two shades
       for (let i = 0; i < 6; i++) {
-        ctx.fillStyle = i % 2 === 0 ? pal.a : pal.b;
+        ctx.fillStyle = (i % 2 === 0) !== s.swap ? pal.a : pal.b;
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.lineTo(Math.cos(i * SIDE) * 260, Math.sin(i * SIDE) * 260);
@@ -508,7 +535,6 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
         ctx.fill();
       }
       // Walls
-      const rainbowWalls = s.stage >= PALETTES.length - 1;
       for (const w of s.waves) {
         for (let i = 0; i < 6; i++) {
           if (!w.sides[i]) continue;
@@ -519,7 +545,7 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
           const [x2, y2] = hexPoint(inner, i + 1);
           const [x3, y3] = hexPoint(outer, i + 1);
           const [x4, y4] = hexPoint(outer, i);
-          ctx.fillStyle = rainbowWalls ? rainbow(s.clock, i) : pal.wall;
+          ctx.fillStyle = pal.wall;
           ctx.beginPath();
           ctx.moveTo(x1, y1);
           ctx.lineTo(x2, y2);
@@ -537,7 +563,7 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
       }
       // Middle hexagon, pulsing to the beat
       const core = CORE + pulse * 3;
-      ctx.fillStyle = pal.wall;
+      ctx.fillStyle = pal.core;
       ctx.beginPath();
       for (let i = 0; i < 6; i++) {
         const [x, y] = hexPoint(core, i);
@@ -546,7 +572,7 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
       }
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = pal.edge;
+      ctx.strokeStyle = pal.wall;
       ctx.lineWidth = 2;
       ctx.stroke();
       // the trail, then you: the triangle
@@ -559,7 +585,9 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
         });
         ctx.globalAlpha = 1;
       }
-      if (s.mode === "ready" || s.mode === "running") drawTriangle(ctx, s.angle, triColor(arc.shop.wearingName("skin"), s.clock));
+      // (the free PINK triangle takes the level's colour, like the real game; skins you bought keep theirs)
+      const skinNow = arc.shop.wearingName("skin");
+      if (s.mode === "ready" || s.mode === "running") drawTriangle(ctx, s.angle, skinNow === "pink" ? pal.edge : triColor(skinNow, s.clock));
       ctx.restore();
 
       for (const p of s.particles) {
@@ -748,7 +776,7 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
           height: "100%",
           objectFit: "contain",
           imageRendering: "pixelated",
-          background: PALETTES[0].a,
+          background: "#2a0a26",
           touchAction: "none",
           cursor: "pointer",
         }}

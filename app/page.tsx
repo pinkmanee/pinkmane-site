@@ -305,7 +305,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Jungle",
     id: "jungle",
-    preview: "/previews/jungle.gif",
+    preview: "/previews/jungle-worlds.gif",
     blurb: "Run down the old jungle path. Dodge rocks, roots and branches, BEARMANPIG is right behind you!",
     how: "left/right = lane · up = jump · down = duck",
     psp: true,
@@ -313,7 +313,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Hell",
     id: "hell",
-    preview: "/previews/hell.gif",
+    preview: "/previews/hell-maps.gif",
     blurb: "Demons pour out of the portals in waves. Grab the shotgun and blast them all, BEARMANPIG waits every 5th wave!",
     how: "WASD = move · mouse = aim · click = shoot · phone: joystick + FIRE",
     psp: true,
@@ -337,7 +337,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Kong Bong",
     id: "kong",
-    preview: "/previews/kong.gif",
+    preview: "/previews/kong-levels.gif",
     blurb: "BEARMANPIG throws speakers down the girders and hits his bong after every throw. Climb up, jump the speakers, grab THE STASH.",
     how: "left/right = walk · up/down = ladders · space = jump",
     psp: true,
@@ -353,7 +353,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Hexagon",
     id: "hex",
-    preview: "/previews/hex.gif",
+    preview: "/previews/hex-colours.gif",
     blurb: "The walls close in. Spin around the middle and slip through the gaps as long as you can.",
     how: "left/right = spin",
     psp: false,
