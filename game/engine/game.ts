@@ -8,7 +8,7 @@ import { CAMERA, FIXED_DT, PHYSICS as P } from "../config/physics";
 import { Player, type Pad } from "../entities/player";
 import { ASCII_LOOK, drawPlayer, LOOK, type Look } from "../entities/drawPlayer";
 import type { LevelData } from "../levels/types";
-import { AsciiLayer, PLAYER_STYLE, WORLD_STYLE, type Warp } from "./ascii";
+import { AsciiLayer, PLAYER_STYLE, WORLD_STYLE, type Liquid, type Warp } from "./ascii";
 import { Camera } from "./camera";
 import { Input } from "./input";
 import { Terrain } from "./terrain";
@@ -164,6 +164,9 @@ export class Game {
   private stuckT = 0; // pushing against something for this long: show a tip
   private stuckTip = "";
   private boardShown = false; // this run's time has gone to the scoreboard
+  private mouse: { x: number; y: number } | null = null; // the mouse over the map (the liquid code follows it)
+  private mouseIn = false;
+  private mouseK = 0; // how strong the liquid is right now (fades in / out)
   // THE SCOREBOARD (the page connects these to the Top 10 boxes, one per level)
   onLevelDone: (level: number, seconds: number) => void = () => {}; // a level was beaten: offer its Top 10
   onShowBoard: (level: number) => void = () => {}; // just look at a level's Top 10
@@ -300,6 +303,16 @@ export class Game {
     if (x >= b.x - 8 && x <= b.x + b.w + 8 && y >= b.y - 8 && y <= b.y + b.h + 8) this.pause();
   };
 
+  // the mouse moving over the map
+  private onMove = (e: PointerEvent) => {
+    const r = this.canvas.getBoundingClientRect();
+    this.mouse = { x: e.clientX - r.left, y: e.clientY - r.top };
+    this.mouseIn = e.pointerType === "mouse"; // (a finger lifting off shouldn't leave a puddle behind)
+  };
+  private onLeave = () => {
+    this.mouseIn = false;
+  };
+
   private pause() {
     if (this.mode !== "play" || this.paused) return;
     this.paused = true;
@@ -338,6 +351,8 @@ export class Game {
     document.addEventListener("visibilitychange", this.onHide);
     window.addEventListener("blur", this.onBlur);
     this.canvas.addEventListener("pointerdown", this.onPointer);
+    this.canvas.addEventListener("pointermove", this.onMove);
+    this.canvas.addEventListener("pointerleave", this.onLeave);
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.frame);
     (window as unknown as { pinkRush?: Game }).pinkRush = this; // (for testing from the browser console)
@@ -349,6 +364,8 @@ export class Game {
     document.removeEventListener("visibilitychange", this.onHide);
     window.removeEventListener("blur", this.onBlur);
     this.canvas.removeEventListener("pointerdown", this.onPointer);
+    this.canvas.removeEventListener("pointermove", this.onMove);
+    this.canvas.removeEventListener("pointerleave", this.onLeave);
     this.input.destroy();
   }
 
@@ -888,7 +905,6 @@ export class Game {
     const m = this.mapFrame();
     const wl = this.worldLayer;
     const pl = this.playerLayer;
-    void dt;
     if (this.lookName === "ascii" && wl && pl) {
       // Pinkmane's characters: about 13 rows tall on the map
       const want = Math.max(2.6, (27 * m.u) / 13 / ASCII_RATIO);
@@ -907,7 +923,10 @@ export class Game {
       pc.setTransform(pax, 0, 0, pay, pbx, pby);
       this.drawMapStops(pc);
       this.drawMapGuy(pc, th.look);
-      wl.compose(this.ctx, { background: ASCII_SCREEN });
+      // the green code spells PINKMANE (rows scrolling both ways); around the mouse it turns to liquid
+      this.mouseK += ((this.mouseIn ? 1 : 0) - this.mouseK) * ease(this.mouseIn ? 6 : 3, Math.max(dt, 1 / 60));
+      const liquid: Liquid | null = this.mouse && this.mouseK > 0.01 ? { x: this.mouse.x, y: this.mouse.y, r: Math.max(90, 26 * m.u), t: this.clock, k: this.mouseK, maxLum: 0.3 } : null;
+      wl.compose(this.ctx, { background: ASCII_SCREEN, text: { chars: "PINKMANE", maxLum: 0.3, shift: Math.floor(this.clock * 4) }, liquid });
       pl.compose(this.ctx, {});
     } else {
       const ctx = this.ctx;

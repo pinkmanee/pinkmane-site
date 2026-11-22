@@ -49,6 +49,11 @@ export const PLAYER_STYLE: AsciiStyle = {
 
 // the swirl: everything near (cx, cy) gets twisted round and pulled in. All in screen px.
 export type Warp = { cx: number; cy: number; radius: number; twist: number; pull: number };
+// TEXT FILL: dim cells (darker than maxLum) spell out `chars` over and over instead (rows scroll left / right by `shift`)
+export type TextFill = { chars: string; maxLum: number; shift: number };
+// LIQUID: around (x, y) the characters wobble, scramble and glow pink, like the code is liquid (k = 0..1 strength).
+// Only touches cells darker than maxLum (so bright things - paths, buttons - stay still). Screen px.
+export type Liquid = { x: number; y: number; r: number; t: number; k: number; maxLum: number };
 
 const EDGE_CHARS = ["-", "\\", "|", "/"];
 const FONT = 'ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
@@ -96,6 +101,7 @@ export class AsciiLayer {
       this.levelIdx.push(ids);
     }
     this.edgeIdx = EDGE_CHARS.map((c) => this.charId(c));
+    for (const c of "PINKMANE") this.charId(c); // (for the text fill)
   }
 
   private charId(c: string) {
@@ -182,7 +188,10 @@ export class AsciiLayer {
   // background = this is the bottom layer: fill the screen with this colour first
   // region (css px) = only this part of the screen (faster, for Pinkmane)
   // seed = change it every frame to make the characters flicker (like code rain); leave it out for steady characters
-  compose(target: CanvasRenderingContext2D, opts: { background?: [number, number, number]; region?: { x0: number; y0: number; x1: number; y1: number }; warp?: Warp | null; seed?: number } = {}) {
+  compose(
+    target: CanvasRenderingContext2D,
+    opts: { background?: [number, number, number]; region?: { x0: number; y0: number; x1: number; y1: number }; warp?: Warp | null; seed?: number; text?: TextFill; liquid?: Liquid | null } = {},
+  ) {
     const img = this.img;
     if (!img) return;
     const st = this.style;
@@ -230,6 +239,10 @@ export class AsciiLayer {
     const boost = st.boost;
     const haloA = Math.round(st.halo * 255);
     const line = this.line;
+    const text = opts.text;
+    const textIds = text ? Array.from(text.chars).map((c) => this.charId(c)) : [];
+    const liq = opts.liquid && opts.liquid.k > 0.01 ? opts.liquid : null;
+    const liqR2 = liq ? liq.r * liq.r : 0;
     for (let y = 0; y < h; y++) {
       const sy0 = Math.round(((y + r0) * ch + oy) * dpr);
       const sy1 = Math.round(((y + r0 + 1) * ch + oy) * dpr);
@@ -260,7 +273,7 @@ export class AsciiLayer {
         const sx0 = Math.round(((x + c0) * cw + ox) * dpr);
         const sx1 = Math.round(((x + c0 + 1) * cw + ox) * dpr);
         if (sx1 <= 0 || sx0 >= pw) continue;
-        let id: number;
+        let id = 0;
         let edge = -1;
         if (st.edges && x > 0 && y > 0 && x < w - 1 && y < h - 1) {
           const gx = L[i + 1] - L[i - 1];
@@ -272,16 +285,47 @@ export class AsciiLayer {
             edge = Math.round(a / (Math.PI / 4)) % 4;
           }
         }
-        if (edge >= 0) id = this.edgeIdx[edge];
+        // the liquid around the mouse: how strongly this cell is caught (0 = not at all)
+        let ff = 0;
+        let jx = 0;
+        let jy = 0;
+        if (liq && v < liq.maxLum) {
+          const cx = (x + c0 + 0.5) * cw + ox;
+          const cy = (y + r0 + 0.5) * ch + oy;
+          const dx = cx - liq.x;
+          const dy = cy - liq.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < liqR2) {
+            const f = 1 - Math.sqrt(d2) / liq.r;
+            ff = f * f * liq.k;
+            jx = (Math.sin(cy * 0.07 + liq.t * 9) * 1.2 + Math.sin(cx * 0.05 - liq.t * 6) * 0.5) * cw * ff;
+            jy = Math.cos(cx * 0.06 + liq.t * 8) * ch * 0.55 * ff;
+          }
+        }
+        if (text && v < text.maxLum) {
+          const yy = y + r0;
+          const dir = yy & 1 ? 1 : -1;
+          const n = textIds.length;
+          const k = dir * (x + c0) + yy * 3 + text.shift + (ff > 0 ? Math.floor(ff * 4 + (liq ? liq.t : 0) * 14 * ff) : 0);
+          id = textIds[((k % n) + n) % n];
+          edge = -2;
+        } else if (edge >= 0) id = this.edgeIdx[edge];
         else {
           const lv = Math.min(nl - 1, Math.floor(Math.pow(v, st.gamma) * nl));
           const grp = this.levelIdx[lv];
           id = grp[(((x + c0) * 7 + (y + r0) * 13 + (opts.seed ?? 0) * ((x * 31 + y * 17) % 5 === 0 ? 1 : 0)) % grp.length + grp.length) % grp.length];
         }
         const k = i * 4;
-        const cr = Math.min(255, data[k] * boost) | 0;
-        const cg = Math.min(255, data[k + 1] * boost) | 0;
-        const cb = Math.min(255, data[k + 2] * boost) | 0;
+        let cr = Math.min(255, data[k] * boost) | 0;
+        let cg = Math.min(255, data[k + 1] * boost) | 0;
+        let cb = Math.min(255, data[k + 2] * boost) | 0;
+        if (ff > 0) {
+          // caught in the liquid: glow pink
+          const g = Math.min(1, ff * 1.4);
+          cr = (cr + (255 - cr) * g) | 0;
+          cg = (cg + (90 - cg) * g) | 0;
+          cb = (cb + (220 - cb) * g) | 0;
+        }
         const strength = st.solid ? 255 : data[k + 3];
         // what's under the character: the dim block (bottom layer)
         let ur = BR;
@@ -293,7 +337,10 @@ export class AsciiLayer {
           ug = (BG + (data[k + 1] - BG) * a) | 0;
           ub = (BB + (data[k + 2] - BB) * a) | 0;
         }
-        const inside = sx0 >= 0 && sy0 >= 0 && sx0 + gw <= pw && sy0 + gh <= ph;
+        // where the character goes (moved a little when it's caught in the liquid)
+        const gx0 = jx || jy ? sx0 + Math.round(jx * dpr) : sx0;
+        const gy0 = jx || jy ? sy0 + Math.round(jy * dpr) : sy0;
+        const inside = gx0 >= 0 && gy0 >= 0 && gx0 + gw <= pw && gy0 + gh <= ph;
         // the dark block behind the character
         if (haloA > 0) {
           const hx0 = Math.max(0, sx0);
@@ -303,13 +350,13 @@ export class AsciiLayer {
         }
         const gl = this.glyphs[id];
         const ga = gl.a;
-        const base = sy0 * pw + sx0;
+        const base = gy0 * pw + gx0;
         for (let j = 0; j < ga.length; j++) {
           let p: number;
           if (inside) p = base + gl.off[j];
           else {
-            const px = sx0 + gl.dx[j];
-            const py = sy0 + gl.dy[j];
+            const px = gx0 + gl.dx[j];
+            const py = gy0 + gl.dy[j];
             if (px < 0 || py < 0 || px >= pw || py >= ph) continue;
             p = py * pw + px;
           }
