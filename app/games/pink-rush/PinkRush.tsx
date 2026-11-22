@@ -3,6 +3,7 @@
 // PINK RUSH on a web page: a canvas that fills the screen, and the game running in it.
 // The game itself lives in the game/ folder (engine, entities, levels, config).
 
+import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { Game } from "../../../game/engine/game";
 import type { LevelData } from "../../../game/levels/types";
@@ -22,6 +23,25 @@ export default function PinkRush({ font }: { font: string }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "#efe6da", overflow: "hidden", touchAction: "none" }}>
       <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%" }} aria-label="PINK RUSH" />
+      {/* back to the main site */}
+      <Link
+        href="/"
+        style={{
+          position: "absolute",
+          right: 16,
+          bottom: 14,
+          padding: "8px 12px",
+          fontFamily: font,
+          fontSize: 16,
+          color: "#16111d",
+          background: "#fffaf2",
+          border: "3px solid #16111d",
+          boxShadow: "3px 3px 0 #ff3bd0",
+          textDecoration: "none",
+        }}
+      >
+        ← PINKMANE.SITE
+      </Link>
     </div>
   );
 }

@@ -185,6 +185,7 @@ const ITEM_ICONS: Record<string, string> = {
   "Kong Bong": "/icons/kongbong.gif",
   "Pink Bomber": "/icons/pinkbomber.gif",
   "Pink Hell": "/icons/pinkhell.gif",
+  "Pink Rush": "/icons/pinkrush.gif",
   Back: "/icons/arrow.gif",
 };
 
@@ -292,8 +293,18 @@ const STRUCTURED_DATA = {
 // Clicking "Games" on the iPod turns on the PSP with this list. The highlighted game shows a little moving preview
 // (public/previews/<file>.gif, a few seconds recorded from the real game) with what it is and how to play.
 // The order here = the order on the PSP. Rename / reorder freely; "name" must match ITEM_ICONS for the icon.
-type GameId = "pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle" | "hell" | "jet" | "ninja" | "kong" | "bomber";
-const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; how: string; psp: boolean }[] = [
+// link = the game has its own page: picking it opens that page (PINK RUSH: pinkmane.site/games/pink-rush)
+type GameId = "pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle" | "hell" | "jet" | "ninja" | "kong" | "bomber" | "rush";
+const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; how: string; psp: boolean; link?: string }[] = [
+  {
+    name: "Pink Rush",
+    id: "rush",
+    preview: "/previews/pinkrush.gif",
+    blurb: "NEW · EARLY TEST. A fast hand-drawn platformer: build speed down the hills, fly off ramps, wall jump up towers. Opens full screen.",
+    how: "left/right = run · space = jump · down = slide (stomp in the air)",
+    psp: true,
+    link: "/games/pink-rush",
+  },
   {
     name: "Pinkmane Void",
     id: "super",
@@ -1489,6 +1500,11 @@ export default function Home() {
 
     if (menu === "games") {
       const game = PICKER_GAMES.find((g) => g.name === item);
+      // a game with its own page (PINK RUSH): go there
+      if (game?.link) {
+        window.location.href = game.link;
+        return;
+      }
       if (game) {
         spinRef.current = 0;
         setActiveGame(game.id);
