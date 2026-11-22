@@ -2334,10 +2334,17 @@ activeGame === "rush" ? (
   };
 
   // HOME on the handheld: leave the game and go all the way back to the main menu
+  // HOME on the PSP: in a game = back to the game list (the previews), on the game you were playing.
+  // Not in a game = the main menu.
   const goHome = () => {
     playSelectSound();
     trace("goHome", `playing=${playing}`);
-    setPlaying(false);
+    if (playing) {
+      setPlaying(false);
+      setMenu("games");
+      setSelected(Math.max(0, PICKER_GAMES.findIndex((g) => g.id === activeGame)));
+      return;
+    }
     setMenu("main");
     setSelected(0);
   };
