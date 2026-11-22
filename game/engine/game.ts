@@ -314,9 +314,13 @@ export class Game {
     }
   }
 
+  // after the done card: back to the map, standing on the stop you just beat (walk on to the next one yourself, like VOID)
   private nextLevel() {
-    if (this.levelIndex + 1 < this.levels.length) this.startLevel(this.levelIndex + 1);
-    else this.goSelect();
+    this.goSelect();
+    if (this.levelIndex + 1 < this.levels.length) {
+      this.flash = 2.2;
+      this.flashText = `LVL ${this.levelIndex + 2} IS OPEN!`;
+    }
   }
 
   start() {
@@ -476,7 +480,7 @@ export class Game {
       this.raf = requestAnimationFrame(this.frame);
       return;
     }
-    // the done card: SPACE / ENTER = next level
+    // the done card: SPACE / ENTER = back to the map
     if (this.finished && this.warpT >= VORTEX.card + 0.4 && (inp.take("jump") || inp.take("confirm"))) this.nextLevel();
     if (this.paused) {
       this.acc = 0;
@@ -1521,7 +1525,7 @@ export class Game {
       const lines: [string, number, string][] = [
         [last ? "ALL LEVELS DONE!" : `${this.level.name} DONE!`, 40, th.pink],
         [`TIME ${fmtTime(this.runTime)}${this.newBest ? "  NEW BEST!" : ""}`, 28, th.hudText],
-        [last ? `${go} = MAP   R = AGAIN` : `${go} = NEXT LEVEL   R = AGAIN   L = MAP`, 17, th.hudText],
+        [`${go} = BACK TO THE MAP   R = AGAIN`, 17, th.hudText],
       ];
       const cw = Math.min(480, W - 40);
       const appear = smooth((this.warpT - VORTEX.card) / 0.2);
