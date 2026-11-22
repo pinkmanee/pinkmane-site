@@ -2493,6 +2493,36 @@ activeGame === "rush" ? (
     if (down) buzz();
   };
 
+  // PINK RUSH + KONG BONG on phones: buttons that hold a key while your thumb is on it
+  // (each one is its own button, so you can hold ▶ and tap JUMP at the same time: wall jumps)
+  const [holdOn, setHoldOn] = useState<Record<string, boolean>>({});
+  const holdProps = (key: string) => ({
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      padKey(key, "keydown");
+      setHoldOn((h) => ({ ...h, [key]: true }));
+      buzz();
+    },
+    onPointerUp: () => {
+      padKey(key, "keyup");
+      setHoldOn((h) => ({ ...h, [key]: false }));
+    },
+    onPointerCancel: () => {
+      padKey(key, "keyup");
+      setHoldOn((h) => ({ ...h, [key]: false }));
+    },
+    onLostPointerCapture: () => {
+      padKey(key, "keyup");
+      setHoldOn((h) => ({ ...h, [key]: false }));
+    },
+  });
+  // Kong Bong jumps with OK (the same as tapping the screen)
+  const [kongJumpOn, setKongJumpOn] = useState(false);
+  useEffect(() => {
+    if (!handheld) setHoldOn({});
+  }, [handheld]);
+
   // While a game level plays its own song, the ticker and the play/pause buttons show that song
   const musicPaused = gameSong ? gameSong.paused : isPaused;
   const tickerSong = gameSong ? `${gameSong.artist} - ${gameSong.title}` : (tracks[trackIndex] ?? TRACKS[0]).title.toUpperCase();
@@ -3243,7 +3273,7 @@ activeGame === "rush" ? (
             <button className="tp-small" onClick={goBack} aria-label="Leave the game">
               EXIT
             </button>
-            {!gamePicker && (activeGame === "super" || activeGame === "jungle" || activeGame === "hell" || activeGame === "jet" || activeGame === "ninja" || activeGame === "kong" || activeGame === "bomber") && (
+            {!gamePicker && (activeGame === "super" || activeGame === "jungle" || activeGame === "hell" || activeGame === "jet" || activeGame === "ninja" || activeGame === "kong" || activeGame === "bomber" || activeGame === "rush") && (
               <button className="tp-small" onClick={() => tapKey("Escape")} aria-label="Pause">
                 PAUSE
               </button>
@@ -3270,7 +3300,33 @@ activeGame === "rush" ? (
 
           {/* Left thumb. Pink Jungle: nothing (you swipe). Pinkmane Void: two squares, walk left and walk right (slide between them without lifting).
               Pink Maze needs all four directions, so it keeps the round pad. */}
-          {gamePicker || activeGame === "jungle" || activeGame === "jet" || activeGame === "ninja" ? null : activeGame === "hell" ? (
+          {!gamePicker && (activeGame === "rush" || activeGame === "kong") ? (
+            // Pink Rush + Kong Bong: two big arrows, walk left / walk right.
+            // It's one pad that follows your thumb: slide from ◀ to ▶ without lifting and you turn round (for wall jumps).
+            <div
+              className="tp-walk tp-walk-big"
+              role="group"
+              aria-label="Walk left or right"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                tpWalk(e);
+              }}
+              onPointerMove={(e) => {
+                if (e.currentTarget.hasPointerCapture(e.pointerId)) tpWalk(e);
+              }}
+              onPointerUp={() => tpSet(null)}
+              onPointerCancel={() => tpSet(null)}
+              onLostPointerCapture={() => tpSet(null)}
+            >
+              <span className={`tp-sq tp-sq-big ${padDir === "ArrowLeft" ? "tp-on" : ""}`} aria-label="Left">
+                <DpadArrow dir="left" />
+              </span>
+              <span className={`tp-sq tp-sq-big ${padDir === "ArrowRight" ? "tp-on" : ""}`} aria-label="Right">
+                <DpadArrow dir="right" />
+              </span>
+            </div>
+          ) : gamePicker || activeGame === "jungle" || activeGame === "jet" || activeGame === "ninja" ? null : activeGame === "hell" ? (
             // Pink Hell: a pink joystick on the left, a big FIRE button + GUN on the right (components/HellPad.tsx)
             <HellPad onWeapon={() => tapKey("q")} />
           ) : activeGame === "super" ? (
@@ -3341,8 +3397,50 @@ activeGame === "rush" ? (
               <small>FIRE/DOWN</small>
             </button>
           )}
+          {/* Pink Rush: JUMP (hold = higher) and DUCK (slide; in the air = stomp) */}
+          {!gamePicker && activeGame === "rush" && (
+            <>
+              <button className={`tp-btn tp-b ${holdOn.ArrowDown ? "tp-on" : ""}`} aria-label="Duck" {...holdProps("ArrowDown")}>
+                <span>▼</span>
+                <small>DUCK</small>
+              </button>
+              {/* (JUMP = Space: it's also OK on the level map, the done card and the pause menu) */}
+              <button className={`tp-btn tp-a ${holdOn[" "] ? "tp-on" : ""}`} aria-label="Jump" {...holdProps(" ")}>
+                <span>▲</span>
+                <small>JUMP</small>
+              </button>
+            </>
+          )}
+          {/* Kong Bong: JUMP, and ▲ ▼ for the ladders */}
+          {!gamePicker && activeGame === "kong" && (
+            <>
+              <button className={`tp-btn tp-up ${holdOn.ArrowUp ? "tp-on" : ""}`} aria-label="Climb up" {...holdProps("ArrowUp")}>
+                <span>▲</span>
+              </button>
+              <button className={`tp-btn tp-down ${holdOn.ArrowDown ? "tp-on" : ""}`} aria-label="Climb down" {...holdProps("ArrowDown")}>
+                <span>▼</span>
+              </button>
+              <button
+                className={`tp-btn tp-a ${kongJumpOn ? "tp-on" : ""}`}
+                aria-label="Jump"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  setKongJumpOn(true);
+                  selectItem();
+                  buzz();
+                }}
+                onPointerUp={() => setKongJumpOn(false)}
+                onPointerCancel={() => setKongJumpOn(false)}
+                onLostPointerCapture={() => setKongJumpOn(false)}
+              >
+                <span>A</span>
+                <small>JUMP</small>
+              </button>
+            </>
+          )}
           {/* Pink Jungle on phones has no thumb buttons: you swipe on the screen instead */}
-          {!gamePicker && activeGame !== "jungle" && activeGame !== "hell" && activeGame !== "jet" && activeGame !== "ninja" && (
+          {!gamePicker && activeGame !== "jungle" && activeGame !== "hell" && activeGame !== "jet" && activeGame !== "ninja" && activeGame !== "rush" && activeGame !== "kong" && (
           <button
             className={`tp-btn tp-a ${tpAOn ? "tp-on" : ""}`}
             aria-label={activeGame === "super" ? "Jump" : "Start"}
@@ -4172,6 +4270,33 @@ activeGame === "rush" ? (
           font-size: 13px;
           background: rgba(138, 31, 134, 0.45);
         }
+        /* Pink Rush + Kong Bong: bigger arrow buttons, a gap between them */
+        .tp-walk-big {
+          gap: 14px;
+        }
+        .tp-sq-big {
+          width: min(27vh, 96px); /* SIZE of each arrow (sideways) */
+          border-radius: 10px;
+        }
+        /* Pink Rush: DUCK sits left of JUMP, a little lower than the Void's FIRE button */
+        .tp-b {
+          font-size: 16px;
+        }
+        /* Kong Bong: small ▲ ▼ for the ladders, left of JUMP */
+        .tp-up,
+        .tp-down {
+          right: calc(max(10px, env(safe-area-inset-right)) + min(30vh, 110px));
+          width: min(18vh, 64px);
+          font-size: 18px;
+          border-radius: 12px;
+          background: rgba(138, 31, 134, 0.45);
+        }
+        .tp-up {
+          bottom: calc(max(12px, env(safe-area-inset-bottom)) + min(20vh, 72px));
+        }
+        .tp-down {
+          bottom: max(12px, env(safe-area-inset-bottom));
+        }
         .tp-btn.tp-on {
           background: rgba(255, 143, 240, 0.9);
           scale: 0.94;
@@ -4211,6 +4336,18 @@ activeGame === "rush" ? (
             right: calc(14px + min(21vw, 84px));
             bottom: calc(max(30px, env(safe-area-inset-bottom)) + min(24vw, 96px));
             width: min(23vw, 90px); /* SIZE of the S (fire / down) button (upright) */
+          }
+          /* Kong Bong upright: ▲ ▼ side by side above JUMP (there's no room next to it) */
+          .tp-up,
+          .tp-down {
+            width: min(15vw, 60px);
+            bottom: calc(max(30px, env(safe-area-inset-bottom)) + min(27vw, 108px) + 14px);
+          }
+          .tp-up {
+            right: calc(14px + min(15vw, 60px) + 10px);
+          }
+          .tp-down {
+            right: 14px;
           }
           .tp-rotate {
             display: block;
