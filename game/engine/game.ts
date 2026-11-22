@@ -118,7 +118,7 @@ type Bit = { a: number; r: number; c: string; col: string; age: number }; // one
 type MapIcon = "leaf" | "spring" | "tower" | "tunnel" | "bolt" | "bug" | "loop" | "ring" | "fan" | "saw" | "bubble" | "arrows" | "cloud" | "skull" | "vortex";
 const MAP_W = 336; // how much of the map fits on the screen
 const MAP_H = 160;
-const MAP_TOTAL_W = 664; // the whole map (it scrolls along with you)
+const MAP_TOTAL_W = 740; // the whole map (it scrolls along with you)
 const MAP_NODES: { x: number; y: number; icon: MapIcon; badge: string; path: [number, number][] }[] = [
   { x: 36, y: 124, icon: "leaf", badge: "#6fdc5a", path: [] },
   { x: 104, y: 124, icon: "spring", badge: "#bfe8ff", path: [] },
@@ -134,7 +134,8 @@ const MAP_NODES: { x: number; y: number; icon: MapIcon; badge: string; path: [nu
   { x: 464, y: 54, icon: "arrows", badge: "#6fdc5a", path: [] },
   { x: 464, y: 120, icon: "cloud", badge: "#7ab8ff", path: [] },
   { x: 536, y: 120, icon: "skull", badge: "#8a1820", path: [] },
-  { x: 622, y: 84, icon: "vortex", badge: "#ff5fe0", path: [[622, 120]] }, // the last one: big, FINAL RUN
+  { x: 622, y: 84, icon: "vortex", badge: "#ff5fe0", path: [[622, 120]] }, // big: FINAL RUN
+  { x: 700, y: 40, icon: "bolt", badge: "#ff3bd0", path: [[622, 40]] }, // EXTRA (opens when you've beaten the final run)
 ];
 const MAP_WALK_SPEED = 95; // map units per second (like VOID)
 // the boxes / menus every game shares (PinkShop.ts): VOID's pale green, ink and pink
@@ -1211,7 +1212,7 @@ export class Game {
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     const ui = this.uiScale();
-    const big = MAP_NODES[MAP_NODES.length - 1];
+    const big = MAP_NODES[14];
     {
       const [bx, by] = this.m2s(m, big.x, big.y);
       ctx.font = `${Math.round(7 * ui)}px ${this.pixelFont}`;

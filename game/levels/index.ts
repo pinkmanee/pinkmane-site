@@ -17,5 +17,6 @@ import l12 from "./12-switchback.json";
 import l13 from "./13-sky-high.json";
 import l14 from "./14-gauntlet.json";
 import l15 from "./15-final-run.json";
+import l16 from "./16-zigzag.json";
 
-export const LEVELS: LevelData[] = [l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15] as unknown as LevelData[];
+export const LEVELS: LevelData[] = [l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16] as unknown as LevelData[];
