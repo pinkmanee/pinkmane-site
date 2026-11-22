@@ -27,6 +27,10 @@ type Theme = {
   block: string;
   blockEdge: string;
   crate: string; // boxes you jump over
+  danger: string; // spikes, saws, enemies
+  gold: string; // launch rings
+  bubble: string;
+  wind: string;
   pink: string;
   springBase: string;
   boosterBase: string;
@@ -48,6 +52,10 @@ const THEMES: Record<LookName, Theme> = {
     block: "#3a3150",
     blockEdge: "#16111d",
     crate: "#5a4a3a",
+    danger: "#e0303a",
+    gold: "#e0a800",
+    bubble: "#38b6e8",
+    wind: "rgba(56, 182, 232, 0.5)",
     pink: "#ff3bd0",
     springBase: "#16111d",
     boosterBase: "#16111d",
@@ -68,6 +76,10 @@ const THEMES: Record<LookName, Theme> = {
     block: "#3b3274",
     blockEdge: "#efeaff",
     crate: "#2a2040",
+    danger: "#ff4a4a",
+    gold: "#ffd23c",
+    bubble: "#7df9ff",
+    wind: "rgba(125, 249, 255, 0.55)",
     pink: "#ff3bd0",
     springBase: "#e2dcff",
     boosterBase: "#2e2752",
@@ -103,15 +115,26 @@ type Bit = { a: number; r: number; c: string; col: string; age: number }; // one
 
 // THE LEVEL MAP (like PINKMANE VOID's): stops joined by a winding path, on a 336 x 160 map.
 // path = the corners walked on the way TO that stop from the one before. (On a tall phone screen the map turns on its side.)
-type MapIcon = "leaf" | "spring" | "tower" | "tunnel" | "vortex";
-const MAP_W = 336;
+type MapIcon = "leaf" | "spring" | "tower" | "tunnel" | "bolt" | "bug" | "loop" | "ring" | "fan" | "saw" | "bubble" | "arrows" | "cloud" | "skull" | "vortex";
+const MAP_W = 336; // how much of the map fits on the screen
 const MAP_H = 160;
+const MAP_TOTAL_W = 664; // the whole map (it scrolls along with you)
 const MAP_NODES: { x: number; y: number; icon: MapIcon; badge: string; path: [number, number][] }[] = [
   { x: 36, y: 124, icon: "leaf", badge: "#6fdc5a", path: [] },
-  { x: 110, y: 124, icon: "spring", badge: "#bfe8ff", path: [] },
-  { x: 110, y: 72, icon: "tower", badge: "#b06ce0", path: [] },
-  { x: 210, y: 72, icon: "tunnel", badge: "#ff9a3c", path: [] },
-  { x: 292, y: 110, icon: "vortex", badge: "#ff5fe0", path: [[292, 72]] }, // the last one: big, FINAL RUN
+  { x: 104, y: 124, icon: "spring", badge: "#bfe8ff", path: [] },
+  { x: 104, y: 64, icon: "tower", badge: "#b06ce0", path: [] },
+  { x: 176, y: 64, icon: "tunnel", badge: "#ff9a3c", path: [] },
+  { x: 176, y: 124, icon: "bolt", badge: "#ffd23c", path: [] },
+  { x: 248, y: 124, icon: "bug", badge: "#ffb0b0", path: [] },
+  { x: 248, y: 58, icon: "loop", badge: "#8fe0c8", path: [] },
+  { x: 320, y: 58, icon: "ring", badge: "#5a4fb4", path: [] },
+  { x: 320, y: 118, icon: "fan", badge: "#bfe8ff", path: [] },
+  { x: 392, y: 118, icon: "saw", badge: "#c6b9d6", path: [] },
+  { x: 392, y: 54, icon: "bubble", badge: "#2f6fd0", path: [] },
+  { x: 464, y: 54, icon: "arrows", badge: "#6fdc5a", path: [] },
+  { x: 464, y: 120, icon: "cloud", badge: "#7ab8ff", path: [] },
+  { x: 536, y: 120, icon: "skull", badge: "#8a1820", path: [] },
+  { x: 622, y: 84, icon: "vortex", badge: "#ff5fe0", path: [[622, 120]] }, // the last one: big, FINAL RUN
 ];
 const MAP_WALK_SPEED = 95; // map units per second (like VOID)
 // the boxes / menus every game shares (PinkShop.ts): VOID's pale green, ink and pink
@@ -158,12 +181,20 @@ export class Game {
   private mapWalk: { pts: [number, number][]; d: number; to: number } | null = null;
   private mapTarget = -1; // tapped a stop further away: keep walking until you get there
   private mapGuy = new Player(0, 0); // Pinkmane on the map
+  private mapCamX = 0; // how far the map has scrolled
   private flash = 0; // a message on the map / in the game ("LOCKED ...")
   private flashText = "";
   private pauseRow = 0;
   private stuckT = 0; // pushing against something for this long: show a tip
   private stuckTip = "";
   private boardShown = false; // this run's time has gone to the scoreboard
+  // the moving things of the level
+  private foes: { x: number; y: number; dir: number; dead: number; t: number }[] = [];
+  private ringCool: number[] = [];
+  private bubbleCool: number[] = [];
+  private ride: { i: number; a: number; s: number } | null = null; // running round a loop (a = how far round, s = speed)
+  private pops: { x: number; y: number; t: number }[] = []; // little bursts (an enemy beaten, a bubble popped)
+  private hurtT = 0; // just got hurt: a red flash, and nothing can hurt you for a moment
   private mouse: { x: number; y: number } | null = null; // the mouse over the map (the liquid code follows it)
   private mouseIn = false;
   private mouseK = 0; // how strong the liquid is right now (fades in / out)
@@ -439,6 +470,157 @@ export class Game {
     this.newBest = false;
     this.boardShown = false;
     this.levelT = 0;
+    this.runClock = 0;
+    this.foes = (this.level.enemies ?? []).map((e, i) => ({ x: e.x, y: e.y, dir: i % 2 ? 1 : -1, dead: 0, t: i * 1.7 }));
+    this.ringCool = (this.level.rings ?? []).map(() => 0);
+    this.bubbleCool = (this.level.bubbles ?? []).map(() => 0);
+    this.ride = null;
+    this.pops = [];
+    this.hurtT = 0;
+  }
+
+  // touched something nasty: back to the last flag
+  private hurt() {
+    if (this.hurtT > 0) return;
+    this.ride = null;
+    this.respawn();
+    this.hurtT = 1;
+  }
+  private sawPos(s: NonNullable<LevelData["saws"]>[number]): [number, number] {
+    const len = Math.hypot(s.x2 - s.x1, s.y2 - s.y1) || 1;
+    const u = (((this.runClock * (s.speed ?? 260)) / len + (s.phase ?? 0)) % 2 + 2) % 2;
+    const k = u < 1 ? u : 2 - u;
+    return [s.x1 + (s.x2 - s.x1) * k, s.y1 + (s.y2 - s.y1) * k];
+  }
+  private loopCool = 0; // (just came out of a loop: don't go straight back in)
+  private runClock = 0; // seconds of physics since the level was loaded (the saws and bats move by this)
+
+  // running round a loop, upside down at the top
+  private rideLoop(dt: number) {
+    const r = this.ride;
+    const p = this.player;
+    const L = this.level.loops?.[r?.i ?? -1];
+    if (!r || !L) return;
+    p.prevX = p.x;
+    p.prevY = p.y;
+    p.prevRunPhase = p.runPhase;
+    r.s = Math.max(460, Math.min(P.maxSpeed, r.s - P.gravity * 0.5 * Math.sin(r.a) * dt));
+    r.a += (r.s / L.r) * dt;
+    p.gsp = r.s;
+    p.onGround = true;
+    p.sliding = false;
+    p.pose = "run";
+    p.facing = 1;
+    p.runPhase += Math.min(19, 3 + r.s / 62) * dt;
+    if (r.a >= Math.PI * 2) {
+      p.x = L.x + 2;
+      p.y = L.y;
+      p.angle = 0;
+      p.vx = r.s;
+      p.vy = 0;
+      this.visAngle += Math.PI * 2;
+      this.ride = null;
+      this.loopCool = 0.25;
+      return;
+    }
+    p.x = L.x + L.r * Math.sin(r.a);
+    p.y = L.y - L.r + L.r * Math.cos(r.a);
+    p.angle = -r.a;
+    p.vx = r.s * Math.cos(r.a);
+    p.vy = -r.s * Math.sin(r.a);
+  }
+
+  // loops, rings, bubbles, wind, spikes, saws and enemies
+  private stepThings(dt: number, jumpHeld: boolean) {
+    const p = this.player;
+    const lv = this.level;
+    const h = p.sliding ? P.slideHeight : P.height;
+    const cy = p.y - h / 2;
+    this.hurtT = Math.max(0, this.hurtT - dt);
+    for (const q of this.pops) q.t += dt;
+    this.pops = this.pops.filter((q) => q.t < 0.35);
+    // loops: fast enough = round you go
+    this.loopCool = Math.max(0, this.loopCool - dt);
+    (lv.loops ?? []).forEach((L, i) => {
+      if (!this.ride && this.loopCool <= 0 && p.onGround && p.gsp >= 480 && p.prevX < L.x && p.x >= L.x && Math.abs(p.y - L.y) < 26) this.ride = { i, a: 0, s: p.gsp };
+    });
+    if (this.ride) return;
+    // rings: shot where the arrow points
+    (lv.rings ?? []).forEach((r, i) => {
+      this.ringCool[i] = Math.max(0, this.ringCool[i] - dt);
+      if (this.ringCool[i] > 0 || Math.hypot(p.x - r.x, cy - r.y) > 62) return;
+      const a = (r.angle * Math.PI) / 180;
+      const pw = r.power ?? 1250;
+      p.x = r.x;
+      p.y = r.y + P.height / 2;
+      p.launch(Math.cos(a) * pw, Math.sin(a) * pw);
+      this.ringCool[i] = 0.45;
+    });
+    // bubbles: a bounce
+    (lv.bubbles ?? []).forEach((b, i) => {
+      this.bubbleCool[i] = Math.max(0, this.bubbleCool[i] - dt);
+      if (this.bubbleCool[i] > 0 || Math.hypot(p.x - b.x, cy - b.y) > 56) return;
+      p.x = b.x;
+      p.y = b.y + P.height / 2;
+      p.launch(p.vx, -900);
+      this.bubbleCool[i] = 0.9;
+      this.pops.push({ x: b.x, y: b.y, t: 0 });
+    });
+    // wind: carries you up
+    for (const f of lv.fans ?? []) {
+      if (p.x < f.x || p.x > f.x + f.w || cy < f.y || cy > f.y + f.h) continue;
+      if (p.onGround) p.launch(p.gsp * Math.cos(p.angle), -280);
+      p.vy = Math.max(-760, p.vy - (f.power ?? 4300) * dt);
+    }
+    // spikes
+    for (const sp of lv.spikes ?? []) {
+      const top = sp.ceil ? sp.y : sp.y - 22;
+      if (p.x + P.halfWidth - 3 > sp.x && p.x - P.halfWidth + 3 < sp.x + sp.w && p.y > top + 3 && p.y - h < top + 22 - 3) this.hurt();
+    }
+    // saws
+    for (const sw of lv.saws ?? []) {
+      const [sx, sy] = this.sawPos(sw);
+      const nx = Math.max(p.x - P.halfWidth, Math.min(sx, p.x + P.halfWidth));
+      const ny = Math.max(p.y - h, Math.min(sy, p.y));
+      if (Math.hypot(nx - sx, ny - sy) < (sw.r ?? 34) - 5) this.hurt();
+    }
+    // enemies
+    (lv.enemies ?? []).forEach((e, i) => {
+      const f = this.foes[i];
+      f.t += dt;
+      if (f.dead > 0) {
+        f.dead -= dt;
+        if (f.dead <= 0 && e.type !== "bat") f.dead = 1e9; // (only bats come back: you may need them to get across)
+        return;
+      }
+      const range = e.range ?? 0;
+      if (e.type === "bat") {
+        f.x = e.x + Math.sin(f.t * 1.3) * range;
+        f.y = e.y + Math.sin(f.t * 2.2) * 26;
+      } else {
+        f.x += f.dir * (e.speed ?? 110) * dt;
+        if (f.x > e.x + range) f.dir = -1;
+        if (f.x < e.x - range) f.dir = 1;
+        const g = this.terrain.groundBelow(f.x, f.y - 40, f.y + 40);
+        if (g) f.y = g.y;
+        else f.dir = -f.dir;
+      }
+      const bat = e.type === "bat";
+      const top = bat ? f.y - 18 : f.y - 42;
+      const bottom = bat ? f.y + 18 : f.y;
+      if (p.x + P.halfWidth < f.x - 24 || p.x - P.halfWidth > f.x + 24 || p.y < top || p.y - h > bottom) return;
+      const smash = Math.abs(p.onGround ? p.gsp : p.vx) > 1150;
+      const fromAbove = !p.onGround && p.vy > 0 && p.prevY <= top + 16;
+      const beat = () => {
+        f.dead = bat ? 2.5 : 1e9;
+        this.pops.push({ x: f.x, y: (top + bottom) / 2, t: 0 });
+      };
+      if (p.stomping || smash || (p.sliding && p.onGround && !bat)) beat();
+      else if (fromAbove && e.type !== "spiker") {
+        beat();
+        p.launch(p.vx, bat ? (jumpHeld ? -980 : -820) : jumpHeld ? -P.jumpSpeed : -560);
+      } else this.hurt();
+    });
   }
 
   // fell out of the level: back at the last flag you passed (or the start)
@@ -569,7 +751,10 @@ export class Game {
       jump: inp.held("jump"),
       jumpPressed: inp.take("jump"),
     };
-    p.update(dt, pad, this.terrain);
+    this.runClock += dt;
+    if (this.ride) this.rideLoop(dt);
+    else p.update(dt, pad, this.terrain);
+    this.stepThings(dt, pad.jump);
     // pushing against something and not moving: work out what to do and show a tip
     if (pad.dir !== 0 && Math.abs(p.gsp) < 5 && p.onGround && !p.sliding) {
       this.stuckT += dt;
@@ -604,7 +789,7 @@ export class Game {
     // flags: passing one = that's where you come back if you fall out
     const cps = this.level.checkpoints ?? [];
     for (let i = this.checkpoint + 1; i < cps.length; i++) {
-      if (p.x >= cps[i].x && Math.abs(p.y - cps[i].y) < 300) this.checkpoint = i;
+      if (Math.abs(p.x - cps[i].x) < 70 && Math.abs(p.y - cps[i].y) < 300) this.checkpoint = i;
     }
     // fell out of the level
     if (p.y > this.terrain.bottom) this.respawn();
@@ -646,7 +831,8 @@ export class Game {
     const u = Math.min(W / MAP_W, H / MAP_H);
     return { u, tall, ox: (W - MAP_W * u) / 2, oy: (H - MAP_H * u) / 2 };
   }
-  private m2s(m: { u: number; tall: boolean; ox: number; oy: number }, x: number, y: number): [number, number] {
+  private m2s(m: { u: number; tall: boolean; ox: number; oy: number }, x0: number, y: number): [number, number] {
+    const x = x0 - this.mapCamX;
     return m.tall ? [m.ox + y * m.u, m.oy + x * m.u] : [m.ox + x * m.u, m.oy + y * m.u];
   }
   // the points walked from stop `from` to the next / previous stop `to` (map units)
@@ -699,6 +885,9 @@ export class Game {
     const w = this.mapWalk;
     const g = this.mapGuy;
     g.prevRunPhase = g.runPhase;
+    // the map scrolls so you stay in view
+    const camTo = Math.max(0, Math.min(MAP_TOTAL_W - MAP_W, this.mapPos().x - MAP_W / 2));
+    this.mapCamX = this.selectT === 0 ? camTo : this.mapCamX + (camTo - this.mapCamX) * ease(5, dt);
     if (!w) {
       g.pose = "idle";
       g.gsp = 0;
@@ -752,7 +941,7 @@ export class Game {
     ctx.fillRect(0, 0, W, H);
     for (let k = 0; k < 90; k++) {
       ctx.fillStyle = ascii ? (k % 2 ? "#215f2c" : "#1a4d25") : k % 2 ? "#6cb85c" : "#8cd87a";
-      ctx.fillRect(Math.round(hash(k) * W), Math.round(hash(k + 50) * H), (6 + Math.round(hash(k + 9) * 10)) * u * 0.6, 3 * u * 0.6);
+      ctx.fillRect(Math.round((((hash(k) * W - this.mapCamX * u * (m.tall ? 0 : 1)) % W) + W) % W), Math.round((((hash(k + 50) * H - this.mapCamX * u * (m.tall ? 1 : 0)) % H) + H) % H), (6 + Math.round(hash(k + 9) * 10)) * u * 0.6, 3 * u * 0.6);
     }
     // little weed leaves bobbing in the grass
     for (let k = 0; k < 12; k++) {
@@ -875,6 +1064,76 @@ export class Game {
       ctx.arc(x, y, 5 * u, Math.PI, 0);
       ctx.lineTo(x + 5 * u, y + 7 * u);
       ctx.fill();
+    } else if (icon === "bolt") {
+      ctx.fillStyle = UI.ink;
+      ctx.beginPath();
+      ctx.moveTo(x + 2 * u, y - 8 * u);
+      ctx.lineTo(x - 5 * u, y + u);
+      ctx.lineTo(x - u, y + u);
+      ctx.lineTo(x - 2 * u, y + 8 * u);
+      ctx.lineTo(x + 5 * u, y - u);
+      ctx.lineTo(x + u, y - u);
+      ctx.closePath();
+      ctx.fill();
+    } else if (icon === "bug") {
+      ctx.fillStyle = "#c01828";
+      ctx.beginPath();
+      ctx.ellipse(x, y, 7 * u, 5.5 * u, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x - 4 * u, y - 3 * u, 2.5 * u, 3 * u);
+      ctx.fillRect(x + 1.5 * u, y - 3 * u, 2.5 * u, 3 * u);
+    } else if (icon === "loop" || icon === "ring" || icon === "bubble") {
+      ctx.strokeStyle = icon === "ring" ? "#ffd23c" : icon === "bubble" ? "#7df9ff" : UI.ink;
+      ctx.lineWidth = 2.4 * u;
+      ctx.beginPath();
+      ctx.arc(x, y, 6 * u, 0, Math.PI * 2);
+      ctx.stroke();
+      if (icon === "loop") ctx.fillRect(x - 9 * u, y + 6 * u, 18 * u, 1.6 * u);
+    } else if (icon === "fan") {
+      ctx.strokeStyle = "#2f6fd0";
+      ctx.lineWidth = 2 * u;
+      for (const k of [-4, 0, 4]) {
+        ctx.beginPath();
+        ctx.moveTo(x + k * u, y + 7 * u);
+        ctx.lineTo(x + k * u, y - 5 * u + Math.abs(k) * 0.5 * u);
+        ctx.stroke();
+      }
+    } else if (icon === "saw") {
+      ctx.fillStyle = "#c01828";
+      ctx.beginPath();
+      for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * Math.PI * 2 + this.clock * 3;
+        const rr = (k % 2 ? 5 : 8) * u;
+        ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+      }
+      ctx.fill();
+    } else if (icon === "arrows") {
+      ctx.fillStyle = UI.ink;
+      for (const d of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(x + d * 8 * u, y + d * 3 * u);
+        ctx.lineTo(x + d * 2 * u, y + d * 3 * u - 4 * u);
+        ctx.lineTo(x + d * 2 * u, y + d * 3 * u + 4 * u);
+        ctx.fill();
+        ctx.fillRect(x - 6 * u, y + d * 3 * u - u, 12 * u, 2 * u);
+      }
+    } else if (icon === "cloud") {
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(x - 4 * u, y + u, 4 * u, 0, Math.PI * 2);
+      ctx.arc(x + u, y - 2 * u, 5 * u, 0, Math.PI * 2);
+      ctx.arc(x + 5 * u, y + 2 * u, 3 * u, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (icon === "skull") {
+      ctx.fillStyle = "#ece6d6";
+      ctx.beginPath();
+      ctx.arc(x, y - u, 6.5 * u, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(x - 4 * u, y + 3 * u, 8 * u, 4 * u);
+      ctx.fillStyle = UI.ink;
+      ctx.fillRect(x - 4 * u, y - 3 * u, 3 * u, 3.5 * u);
+      ctx.fillRect(x + u, y - 3 * u, 3 * u, 3.5 * u);
     } else {
       // the vortex
       ctx.strokeStyle = "#ffffff";
@@ -1180,6 +1439,10 @@ export class Game {
       drawPlayer(ctx, p, px, py, this.visAngle, this.clock, th.look, extra);
     }
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    if (this.hurtT > 0.6) {
+      this.ctx.fillStyle = `rgba(255, 60, 70, ${(this.hurtT - 0.6) * 1.1})`;
+      this.ctx.fillRect(0, 0, W, H);
+    }
     if (warping) this.drawBits(th);
     this.drawHud(W, H, th);
   }
@@ -1192,7 +1455,171 @@ export class Game {
     this.drawFinish(th);
     this.drawBoosters(th);
     this.drawSprings(th);
+    this.drawThings(th);
     if (this.warpT >= 0) this.drawVortex(th);
+  }
+
+  // loops, wind, rings, bubbles, spikes, saws, enemies
+  private drawThings(th: Theme) {
+    const ctx = this.dctx;
+    const lv = this.level;
+    const t = this.clock;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (const L of lv.loops ?? []) {
+      ctx.strokeStyle = th.groundLip;
+      ctx.lineWidth = 26;
+      ctx.beginPath();
+      ctx.arc(L.x, L.y - L.r, L.r + 13, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = th.groundEdge;
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.arc(L.x, L.y - L.r, L.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    for (const f of lv.fans ?? []) {
+      // streaks of wind going up
+      ctx.strokeStyle = th.wind;
+      ctx.lineWidth = 7;
+      const n = Math.max(2, Math.round(f.w / 70));
+      for (let i = 0; i < n; i++) {
+        const x = f.x + ((i + 0.5) * f.w) / n;
+        for (let k = 0; k < 4; k++) {
+          const u = ((t * 0.9 + i * 0.37 + k * 0.25) % 1 + 1) % 1;
+          const y = f.y + f.h - u * f.h;
+          ctx.globalAlpha = Math.sin(u * Math.PI) * 0.8;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x, y - 90);
+          ctx.stroke();
+        }
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = th.springBase;
+      ctx.fillRect(f.x, f.y + f.h - 10, f.w, 10);
+    }
+    (lv.rings ?? []).forEach((r, i) => {
+      const a = (r.angle * Math.PI) / 180;
+      const k = 1 + (this.ringCool[i] > 0 ? this.ringCool[i] : 0);
+      ctx.strokeStyle = th.gold;
+      ctx.lineWidth = 9;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, 34 * k, 0, Math.PI * 2);
+      ctx.stroke();
+      // the arrow
+      ctx.fillStyle = th.gold;
+      ctx.beginPath();
+      ctx.moveTo(r.x + Math.cos(a) * 24, r.y + Math.sin(a) * 24);
+      ctx.lineTo(r.x + Math.cos(a + 2.4) * 16, r.y + Math.sin(a + 2.4) * 16);
+      ctx.lineTo(r.x + Math.cos(a - 2.4) * 16, r.y + Math.sin(a - 2.4) * 16);
+      ctx.closePath();
+      ctx.fill();
+    });
+    (lv.bubbles ?? []).forEach((b, i) => {
+      const c = this.bubbleCool[i];
+      const k = c > 0 ? Math.max(0.15, 1 - c / 0.9) : 1;
+      const y = b.y + Math.sin(t * 2 + i) * 4;
+      ctx.fillStyle = th.bubble;
+      ctx.globalAlpha = 0.45;
+      ctx.beginPath();
+      ctx.arc(b.x, y, 30 * k, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = th.bubble;
+      ctx.lineWidth = 6;
+      ctx.stroke();
+    });
+    for (const sp of lv.spikes ?? []) {
+      ctx.fillStyle = th.danger;
+      const n = Math.max(1, Math.round(sp.w / 26));
+      const w = sp.w / n;
+      for (let i = 0; i < n; i++) {
+        ctx.beginPath();
+        ctx.moveTo(sp.x + i * w, sp.y);
+        ctx.lineTo(sp.x + (i + 0.5) * w, sp.y + (sp.ceil ? 26 : -26));
+        ctx.lineTo(sp.x + (i + 1) * w, sp.y);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    for (const sw of lv.saws ?? []) {
+      const [x, y] = this.sawPos(sw);
+      const r = sw.r ?? 34;
+      // the rail it rides on
+      ctx.strokeStyle = th.groundLip;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(sw.x1, sw.y1);
+      ctx.lineTo(sw.x2, sw.y2);
+      ctx.stroke();
+      ctx.fillStyle = th.danger;
+      ctx.beginPath();
+      for (let i = 0; i < 20; i++) {
+        const a = (i / 20) * Math.PI * 2 + t * 9;
+        const rr = i % 2 ? r * 0.72 : r;
+        ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = th.door;
+      ctx.beginPath();
+      ctx.arc(x, y, r * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    (lv.enemies ?? []).forEach((e, i) => {
+      const f = this.foes[i];
+      if (!f || f.dead > 0) return;
+      if (e.type === "bat") {
+        const flap = Math.sin(t * 16 + i) * 12;
+        ctx.fillStyle = th.danger;
+        ctx.beginPath();
+        ctx.ellipse(f.x, f.y, 16, 14, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(f.x - 10, f.y);
+        ctx.lineTo(f.x - 40, f.y - 8 + flap);
+        ctx.lineTo(f.x - 22, f.y + 10);
+        ctx.moveTo(f.x + 10, f.y);
+        ctx.lineTo(f.x + 40, f.y - 8 + flap);
+        ctx.lineTo(f.x + 22, f.y + 10);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(f.x - 9, f.y - 5, 6, 6);
+        ctx.fillRect(f.x + 3, f.y - 5, 6, 6);
+      } else {
+        const step = Math.sin(f.t * 14) * 3;
+        ctx.fillStyle = th.danger;
+        ctx.beginPath();
+        ctx.ellipse(f.x, f.y - 22, 24, 18, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillRect(f.x - 16, f.y - 8 + step, 9, 8);
+        ctx.fillRect(f.x + 7, f.y - 8 - step, 9, 8);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(f.x + f.dir * 8 - 8, f.y - 30, 7, 8);
+        ctx.fillRect(f.x + f.dir * 8 + 3, f.y - 30, 7, 8);
+        if (e.type === "spiker") {
+          ctx.fillStyle = "#ffffff";
+          for (let k = -1; k <= 1; k++) {
+            ctx.beginPath();
+            ctx.moveTo(f.x + k * 14 - 7, f.y - 36);
+            ctx.lineTo(f.x + k * 14, f.y - 58);
+            ctx.lineTo(f.x + k * 14 + 7, f.y - 36);
+            ctx.fill();
+          }
+        }
+      }
+    });
+    for (const q of this.pops) {
+      ctx.strokeStyle = th.pink;
+      ctx.globalAlpha = 1 - q.t / 0.35;
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, 14 + q.t * 220, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // big soft swirls in the background (they drift slower than the world: a far-away layer)
