@@ -171,6 +171,14 @@ export class Game {
   onLevelDone: (level: number, seconds: number) => void = () => {}; // a level was beaten: offer its Top 10
   onShowBoard: (level: number) => void = () => {}; // just look at a level's Top 10
   isBusy: () => boolean = () => false; // a Top 10 box is open: the game ignores keys
+  // GAME MENU on the pause menu (on its own page: back to the site and open the game list; on the PSP: the page swaps this)
+  onGameMenu: () => void = () => {
+    try {
+      sessionStorage.setItem(OPEN_GAMES_KEY, "1");
+    } catch {}
+    window.location.href = "/";
+  };
+  private ro: ResizeObserver | null = null;
   topOf: (level: number) => { name: string; time: number } | null = () => null; // the #1 on a level's board
   private best: Record<string, number> = {};
   private newBest = false;
@@ -327,13 +335,7 @@ export class Game {
     this.input.clearPresses();
     if (pick === "RESTART") this.restart();
     else if (pick === "LEVEL MAP") this.goSelect();
-    else if (pick === "GAME MENU") {
-      // back to the site, which then opens its game list
-      try {
-        sessionStorage.setItem(OPEN_GAMES_KEY, "1");
-      } catch {}
-      window.location.href = "/";
-    }
+    else if (pick === "GAME MENU") this.onGameMenu();
   }
 
   // after the done card: back to the map, standing on the stop you just beat (walk on to the next one yourself, like VOID)
@@ -348,6 +350,11 @@ export class Game {
   start() {
     this.resize();
     window.addEventListener("resize", this.resize);
+    // (inside the PSP the screen changes size without the window changing: FULL SCREEN)
+    if (typeof ResizeObserver !== "undefined") {
+      this.ro = new ResizeObserver(() => this.resize());
+      this.ro.observe(this.canvas);
+    }
     document.addEventListener("visibilitychange", this.onHide);
     window.addEventListener("blur", this.onBlur);
     this.canvas.addEventListener("pointerdown", this.onPointer);
@@ -361,6 +368,7 @@ export class Game {
   destroy() {
     cancelAnimationFrame(this.raf);
     window.removeEventListener("resize", this.resize);
+    this.ro?.disconnect();
     document.removeEventListener("visibilitychange", this.onHide);
     window.removeEventListener("blur", this.onBlur);
     this.canvas.removeEventListener("pointerdown", this.onPointer);
@@ -1492,6 +1500,13 @@ export class Game {
     const ascii = this.lookName === "ascii";
     const font = (px: number) => (ascii ? `bold ${Math.round(px * 0.85)}px ${MONO}` : `${px}px ${this.font}`);
     ctx.save();
+    // on a small screen (the PSP) everything here is drawn as if the screen were bigger, then shrunk to fit
+    const hs = Math.max(0.45, Math.min(1, W / 1100, H / 600));
+    if (hs < 1) {
+      ctx.scale(hs, hs);
+      W /= hs;
+      H /= hs;
+    }
     ctx.textBaseline = "top";
     ctx.fillStyle = th.hudText;
     // the level's name, typed out when it starts
@@ -1510,7 +1525,7 @@ export class Game {
     const pb = this.pauseBtn();
     ctx.font = font(26);
     ctx.textAlign = "right";
-    ctx.fillText(fmtTime(this.runTime), pb.x - 14, 16);
+    ctx.fillText(fmtTime(this.runTime), (pb.x - 10) / hs, 16);
     // the speed meter
     const sp = this.finished ? 0 : Math.min(1, p.speed / P.maxSpeed);
     const over = sp * P.maxSpeed > P.topRunSpeed;
@@ -1572,7 +1587,9 @@ export class Game {
     }
     // a tip when you're stuck against something
     if (this.stuckTip && !this.finished && !this.paused) {
-      const [sx, sy] = this.toScreen(p.x, p.y);
+      const [sx0, sy0] = this.toScreen(p.x, p.y);
+      const sx = sx0 / hs;
+      const sy = sy0 / hs;
       ctx.font = font(17);
       ctx.textAlign = "center";
       const tw = ctx.measureText(this.stuckTip).width + 22;
@@ -1588,9 +1605,6 @@ export class Game {
       ctx.fillText(this.stuckTip, tx, ty + 2);
       ctx.globalAlpha = 1;
     }
-    if (!this.finished) this.drawPauseButton();
-    // paused: the same menu as every game
-    if (this.paused) this.drawPauseMenu();
     // finished: the card types itself out, like code
     if (this.finished && this.warpT >= VORTEX.card) {
       const typed = Math.floor((this.warpT - VORTEX.card) * 40);
@@ -1628,6 +1642,9 @@ export class Game {
       });
     }
     ctx.restore();
+    // (the II button and the pause menu size themselves like every game's, so they're drawn unscaled)
+    if (!this.finished) this.drawPauseButton();
+    if (this.paused) this.drawPauseMenu();
   }
 }
 

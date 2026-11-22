@@ -20,6 +20,7 @@ const KongGame = dynamic(() => import("./components/KongGame"), { ssr: false });
 const BomberGame = dynamic(() => import("./components/BomberGame"), { ssr: false });
 const HellGame = dynamic(() => import("./components/HellGame"), { ssr: false });
 const HellPad = dynamic(() => import("./components/HellPad"), { ssr: false });
+const PinkRushGame = dynamic(() => import("./components/PinkRushGame"), { ssr: false });
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
 import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
 import GunCursor from "./components/GunCursor";
@@ -301,10 +302,9 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     name: "Pink Rush",
     id: "rush",
     preview: "/previews/pinkrush.gif",
-    blurb: "NEW · 5 LEVELS. A fast platformer drawn in glowing text characters: build speed down the hills, fly off ramps, wall jump up towers, get sucked into the vortex. Opens full screen.",
+    blurb: "NEW · 5 LEVELS. A fast platformer drawn in glowing text characters: build speed down the hills, fly off ramps, wall jump up towers, get sucked into the vortex.",
     how: "left/right = run · space = jump · down = slide (stomp in the air) · V = paper look",
     psp: true,
-    link: "/games/pink-rush",
   },
   {
     name: "Pinkmane Void",
@@ -1635,7 +1635,7 @@ export default function Home() {
       // In Pink Snake the arrow keys steer (the game handles them itself)
       if (
         playing &&
-        (activeGame === "snake" || activeGame === "hex" || activeGame === "maze" || activeGame === "super" || activeGame === "jungle" || activeGame === "hell" || activeGame === "jet" || activeGame === "ninja" || activeGame === "kong" || activeGame === "bomber" || activeGame === "vortex") &&
+        (activeGame === "rush" || activeGame === "snake" || activeGame === "hex" || activeGame === "maze" || activeGame === "super" || activeGame === "jungle" || activeGame === "hell" || activeGame === "jet" || activeGame === "ninja" || activeGame === "kong" || activeGame === "bomber" || activeGame === "vortex") &&
         e.key.startsWith("Arrow")
       )
         return;
@@ -2159,7 +2159,9 @@ export default function Home() {
 
   // The game that's open right now (shown on the iPod, or on the handheld for Maze / Super)
   const gameElement = !playing ? null : (
-activeGame === "bomber" ? (
+activeGame === "rush" ? (
+                <PinkRushGame fontFamily={pixelFont.style.fontFamily} />
+              ) : activeGame === "bomber" ? (
                 <BomberGame
                   actionSignal={jumpSignal}
                   fontFamily={pixelFont.style.fontFamily}

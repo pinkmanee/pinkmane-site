@@ -28,6 +28,18 @@ const KEYS: Record<string, Button> = {
   Backquote: "debug",
 };
 
+// the same buttons by key name (the PSP's touch pad on phones sends keys by name only)
+const BY_NAME: Record<string, Button> = {
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  ArrowDown: "down",
+  ArrowUp: "jump",
+  " ": "jump",
+  Escape: "pause",
+  Enter: "confirm",
+};
+const buttonFor = (e: KeyboardEvent): Button | undefined => KEYS[e.code] ?? BY_NAME[e.key];
+
 export class Input {
   private keyHeld = new Set<Button>();
   private padHeld = new Set<Button>();
@@ -36,14 +48,14 @@ export class Input {
   private padWas = new Set<Button>();
   private onDown = (e: KeyboardEvent) => {
     if (!e.repeat && !e.metaKey && !e.ctrlKey && this.keys.length < 12) this.keys.push(e.key);
-    const b = KEYS[e.code];
+    const b = buttonFor(e);
     if (!b) return;
     e.preventDefault(); // (so the arrows and space don't scroll the page)
     if (!e.repeat && !this.keyHeld.has(b)) this.pressed.add(b);
     this.keyHeld.add(b);
   };
   private onUp = (e: KeyboardEvent) => {
-    const b = KEYS[e.code];
+    const b = buttonFor(e);
     if (!b) return;
     e.preventDefault();
     this.keyHeld.delete(b);
