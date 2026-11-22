@@ -1,25 +1,87 @@
 // THE GAME: runs the physics 60 times a second (on every screen), moves the camera and draws everything.
+// Two looks: ASCII (everything drawn as coloured text characters) and PAPER (hand-drawn style). V switches.
 
-import { FIXED_DT, PHYSICS as P } from "../config/physics";
+import { CAMERA, FIXED_DT, PHYSICS as P } from "../config/physics";
 import { Player, type Pad } from "../entities/player";
-import { drawPlayer, LOOK } from "../entities/drawPlayer";
+import { ASCII_LOOK, drawPlayer, LOOK, type Look } from "../entities/drawPlayer";
 import type { LevelData } from "../levels/types";
+import { AsciiLayer, PLAYER_STYLE, WORLD_STYLE } from "./ascii";
 import { Camera } from "./camera";
 import { Input } from "./input";
 import { Terrain } from "./terrain";
 
-// colours
-const PAPER = "#efe6da"; // the warm paper background
-const SWIRL = "rgba(120, 96, 92, 0.075)"; // the soft swirls on it
-const GROUND = "#2b2440"; // the ground
-const GROUND_LIP = "#3d3358"; // the lighter band along the top of the ground
-const BLOCK = "#3a3150";
-const PINK = "#ff3bd0";
+type LookName = "ascii" | "paper";
+const LOOK_KEY = "pinkrush-look"; // the look you picked is remembered
+
+// the colours of each look. In the ASCII look, brightness decides the character (dark = empty, bright = #)
+type Theme = {
+  bg: string; // behind everything
+  swirl: string; // the soft swirls in the background
+  ground: string;
+  groundLip: string; // the band along the top of the ground
+  groundEdge: string; // the line on top
+  block: string;
+  blockEdge: string;
+  pink: string;
+  springBase: string;
+  boosterBase: string;
+  signCard: string;
+  signEdge: string;
+  signText: string;
+  door: string;
+  hudText: string;
+  look: Look;
+};
+const THEMES: Record<LookName, Theme> = {
+  paper: {
+    bg: "#efe6da",
+    swirl: "rgba(120, 96, 92, 0.075)",
+    ground: "#2b2440",
+    groundLip: "#3d3358",
+    groundEdge: "#16111d",
+    block: "#3a3150",
+    blockEdge: "#16111d",
+    pink: "#ff3bd0",
+    springBase: "#16111d",
+    boosterBase: "#16111d",
+    signCard: "#fffaf2",
+    signEdge: "#16111d",
+    signText: "#16111d",
+    door: "#16111d",
+    hudText: "#16111d",
+    look: LOOK,
+  },
+  ascii: {
+    bg: "#1b1630",
+    swirl: "rgba(130, 112, 230, 0.32)",
+    ground: "#463d7c",
+    groundLip: "#8274d0",
+    groundEdge: "#f1ecff",
+    block: "#4b4282",
+    blockEdge: "#e8e2ff",
+    pink: "#ff3bd0",
+    springBase: "#d9d2ff",
+    boosterBase: "#2e2752",
+    signCard: "#0a0812",
+    signEdge: "#cfc6ff",
+    signText: "#ffffff",
+    door: "#0a0812",
+    hudText: "#ece6ff",
+    look: ASCII_LOOK,
+  },
+};
+const ASCII_SCREEN: [number, number, number] = [7, 6, 12]; // the screen behind the characters
+const MONO = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+const ASCII_COLUMNS = 150; // how many world characters fit across the screen (more = smaller characters, slower)
+const ASCII_RATIO = 1.55; // a character is this much taller than wide
+const PLAYER_FINER = 1.55; // Pinkmane's characters are this much smaller than the world's
+const ASCII_MAX_PIXELS = 3_000_000; // big sharp screens draw the ASCII look at fewer real pixels (keeps it at 60 fps)
 
 const ease = (rate: number, dt: number) => 1 - Math.exp(-rate * dt);
 
 export class Game {
   private ctx: CanvasRenderingContext2D;
+  private dctx: CanvasRenderingContext2D; // what we're drawing on right now (the screen, or an ASCII layer)
   private input = new Input();
   private terrain: Terrain;
   private player: Player;
@@ -43,6 +105,9 @@ export class Game {
   private viewH = 0;
   private dpr = 1;
   private touch = false;
+  private lookName: LookName = "ascii";
+  private worldLayer: AsciiLayer | null = null;
+  private playerLayer: AsciiLayer | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -52,6 +117,7 @@ export class Game {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("no canvas");
     this.ctx = ctx;
+    this.dctx = ctx;
     this.terrain = new Terrain(level);
     this.player = new Player(level.spawn[0], level.spawn[1]);
     this.springCool = level.springs.map(() => 0);
@@ -73,7 +139,11 @@ export class Game {
       this.groundFill.push(fill);
       this.groundTop.push(top);
     }
-    this.touch = typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches && !window.matchMedia?.("(any-pointer: fine)").matches;
+    this.touch = !!window.matchMedia?.("(pointer: coarse)").matches && !window.matchMedia?.("(any-pointer: fine)").matches;
+    try {
+      const saved = localStorage.getItem(LOOK_KEY);
+      if (saved === "paper" || saved === "ascii") this.lookName = saved;
+    } catch {}
   }
 
   start() {
@@ -85,11 +155,6 @@ export class Game {
     this.raf = requestAnimationFrame(this.frame);
     (window as unknown as { pinkRush?: Game }).pinkRush = this; // (for testing from the browser console)
   }
-  // a quick look at the player (for testing)
-  get state() {
-    const p = this.player;
-    return { x: p.x, y: p.y, gsp: p.gsp, vx: p.vx, vy: p.vy, onGround: p.onGround, pose: p.pose, angle: p.angle, finished: this.finished, time: this.runTime };
-  }
 
   destroy() {
     cancelAnimationFrame(this.raf);
@@ -97,6 +162,12 @@ export class Game {
     document.removeEventListener("visibilitychange", this.onHide);
     window.removeEventListener("blur", this.onBlur);
     this.input.destroy();
+  }
+
+  // a quick look at the player (for testing)
+  get state() {
+    const p = this.player;
+    return { x: p.x, y: p.y, gsp: p.gsp, vx: p.vx, vy: p.vy, onGround: p.onGround, pose: p.pose, angle: p.angle, finished: this.finished, time: this.runTime };
   }
 
   // the tab is hidden or the window lost focus: pause
@@ -108,13 +179,34 @@ export class Game {
   };
 
   private resize = () => {
-    this.dpr = Math.min(2.5, window.devicePixelRatio || 1);
     const r = this.canvas.getBoundingClientRect();
     this.viewW = Math.max(1, r.width);
     this.viewH = Math.max(1, r.height);
+    const sharp = Math.min(2.5, window.devicePixelRatio || 1);
+    this.dpr = this.lookName === "ascii" ? Math.min(sharp, Math.max(1, Math.sqrt(ASCII_MAX_PIXELS / (this.viewW * this.viewH)))) : sharp;
     this.canvas.width = Math.round(this.viewW * this.dpr);
     this.canvas.height = Math.round(this.viewH * this.dpr);
+    this.setupLook();
   };
+
+  // make (or resize) the ASCII layers, and set the zoom for the look
+  private setupLook() {
+    this.cam.viewHeight = this.lookName === "ascii" ? CAMERA.asciiViewHeight : CAMERA.viewHeight;
+    if (this.lookName !== "ascii") return;
+    if (!this.worldLayer) this.worldLayer = new AsciiLayer(WORLD_STYLE);
+    if (!this.playerLayer) this.playerLayer = new AsciiLayer(PLAYER_STYLE);
+    const cell = Math.max(6, this.viewW / ASCII_COLUMNS);
+    this.worldLayer.resize(this.viewW, this.viewH, this.dpr, cell, ASCII_RATIO);
+    this.playerLayer.resize(this.viewW, this.viewH, this.dpr, Math.max(3, cell / PLAYER_FINER), ASCII_RATIO);
+  }
+
+  private switchLook() {
+    this.lookName = this.lookName === "ascii" ? "paper" : "ascii";
+    try {
+      localStorage.setItem(LOOK_KEY, this.lookName);
+    } catch {}
+    this.resize();
+  }
 
   private restart() {
     this.player.respawn(this.level.spawn[0], this.level.spawn[1]);
@@ -133,6 +225,7 @@ export class Game {
     inp.pollGamepad();
     if (inp.take("pause")) this.paused = !this.paused;
     if (inp.take("debug")) this.debug = !this.debug;
+    if (inp.take("look")) this.switchLook();
     if (inp.take("restart")) this.restart();
     if (this.paused) {
       // (don't save up presses while paused)
@@ -201,43 +294,84 @@ export class Game {
   }
 
   // ======================= DRAWING =======================
+  // sx, sy = screen px -> the canvas we draw on (dpr for the screen, 1 / cell size for an ASCII layer)
+  private worldTransform(c: CanvasRenderingContext2D, sx: number, sy: number) {
+    const z = this.cam.zoom;
+    c.setTransform(sx * z, 0, 0, sy * z, sx * (this.viewW / 2 - this.cam.x * z), sy * (this.viewH / 2 - this.cam.y * z));
+  }
+
   private render(alpha: number, dt: number) {
-    const ctx = this.ctx;
     const W = this.viewW;
     const H = this.viewH;
     const p = this.player;
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.fillStyle = PAPER;
-    ctx.fillRect(0, 0, W, H);
-
+    const th = THEMES[this.lookName];
     // where he is right now, between the last two physics steps (smooth on any screen)
     const px = p.prevX + (p.x - p.prevX) * alpha;
     const py = p.prevY + (p.y - p.prevY) * alpha;
     this.cam.update(dt, px, py, p.vx, p.vy, p.speed, W, H);
-    this.drawSwirls(W, H);
-
-    const z = this.cam.zoom;
-    ctx.setTransform(this.dpr * z, 0, 0, this.dpr * z, this.dpr * (W / 2 - this.cam.x * z), this.dpr * (H / 2 - this.cam.y * z));
-    this.drawSigns();
-    this.drawGround();
-    this.drawBlocks();
-    this.drawFinish();
-    this.drawBoosters();
-    this.drawSprings();
-
     const want = p.onGround ? p.angle : 0;
     this.visAngle += (want - this.visAngle) * ease(p.onGround ? 20 : 8, dt);
-    drawPlayer(ctx, p, px, py, this.visAngle, this.clock);
 
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    this.drawHud(W, H);
+    const wl = this.worldLayer;
+    const pl = this.playerLayer;
+    if (this.lookName === "ascii" && wl && pl) {
+      // 1. the world, drawn small, then turned into big characters
+      const w = wl.sctx;
+      this.dctx = w;
+      w.setTransform(1, 0, 0, 1, 0, 0);
+      w.fillStyle = th.bg;
+      w.fillRect(0, 0, wl.cols, wl.rows);
+      w.setTransform(1 / wl.cw, 0, 0, 1 / wl.ch, 0, 0);
+      this.drawSwirls(W, H, th);
+      this.worldTransform(w, 1 / wl.cw, 1 / wl.ch);
+      this.drawWorld(th);
+      // 2. Pinkmane, drawn on his own, then turned into small characters
+      const pc = pl.sctx;
+      pc.setTransform(1, 0, 0, 1, 0, 0);
+      pc.clearRect(0, 0, pl.cols, pl.rows);
+      this.worldTransform(pc, 1 / pl.cw, 1 / pl.ch);
+      drawPlayer(pc, p, px, py, this.visAngle, this.clock, th.look);
+      // 3. onto the screen
+      const ctx = this.ctx;
+      wl.compose(ctx, ASCII_SCREEN);
+      const z = this.cam.zoom;
+      const sxp = W / 2 + (px - this.cam.x) * z;
+      const syp = H / 2 + (py - this.cam.y) * z;
+      pl.compose(ctx, undefined, { x0: sxp - 75 * z, y0: syp - 125 * z, x1: sxp + 75 * z, y1: syp + 25 * z });
+      // 4. the words on signs stay sharp, on top
+      this.dctx = ctx;
+      this.worldTransform(ctx, this.dpr, this.dpr);
+      this.drawSignText(th, true);
+    } else {
+      const ctx = this.ctx;
+      this.dctx = ctx;
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      ctx.fillStyle = th.bg;
+      ctx.fillRect(0, 0, W, H);
+      this.drawSwirls(W, H, th);
+      this.worldTransform(ctx, this.dpr, this.dpr);
+      this.drawWorld(th);
+      this.drawSignText(th, false);
+      drawPlayer(ctx, p, px, py, this.visAngle, this.clock, th.look);
+    }
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.drawHud(W, H, th);
   }
 
-  // big soft swirls on the paper (they drift slower than the world: a far-away layer)
-  private drawSwirls(W: number, H: number) {
-    const ctx = this.ctx;
+  private drawWorld(th: Theme) {
+    this.drawSigns(th);
+    this.drawGround(th);
+    this.drawBlocks(th);
+    this.drawFinish(th);
+    this.drawBoosters(th);
+    this.drawSprings(th);
+  }
+
+  // big soft swirls in the background (they drift slower than the world: a far-away layer)
+  private drawSwirls(W: number, H: number, th: Theme) {
+    const ctx = this.dctx;
     ctx.save();
-    ctx.strokeStyle = SWIRL;
+    ctx.strokeStyle = th.swirl;
     ctx.lineCap = "round";
     const period = 1400;
     const shift = (((-this.cam.x * 0.12) % period) + period) % period;
@@ -255,20 +389,20 @@ export class Game {
     ctx.restore();
   }
 
-  private drawGround() {
-    const ctx = this.ctx;
+  private drawGround(th: Theme) {
+    const ctx = this.dctx;
     for (let i = 0; i < this.groundFill.length; i++) {
-      ctx.fillStyle = GROUND;
+      ctx.fillStyle = th.ground;
       ctx.fill(this.groundFill[i]);
       // a lighter band just inside the top edge
       ctx.save();
       ctx.clip(this.groundFill[i]);
-      ctx.strokeStyle = GROUND_LIP;
+      ctx.strokeStyle = th.groundLip;
       ctx.lineWidth = 26;
       ctx.lineJoin = "round";
       ctx.stroke(this.groundTop[i]);
       ctx.restore();
-      ctx.strokeStyle = LOOK.ink;
+      ctx.strokeStyle = th.groundEdge;
       ctx.lineWidth = 6;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
@@ -276,50 +410,49 @@ export class Game {
     }
   }
 
-  private drawBlocks() {
-    const ctx = this.ctx;
+  private drawBlocks(th: Theme) {
+    const ctx = this.dctx;
     for (const b of this.terrain.blocks) {
-      ctx.fillStyle = BLOCK;
+      ctx.fillStyle = th.block;
       ctx.fillRect(b.x, b.y, b.w, b.h);
-      ctx.strokeStyle = LOOK.ink;
+      ctx.strokeStyle = th.blockEdge;
       ctx.lineWidth = 5;
       ctx.strokeRect(b.x, b.y, b.w, b.h);
     }
   }
 
-  private drawSprings() {
-    const ctx = this.ctx;
+  private drawSprings(th: Theme) {
+    const ctx = this.dctx;
     this.level.springs.forEach((s, i) => {
       const a = ((s.angle ?? -90) + 90) * (Math.PI / 180);
-      const squash = this.springSquash[i];
-      const h = 18 + squash * 10; // it shoots up when used, then settles
+      const h = 18 + this.springSquash[i] * 10; // it shoots up when used, then settles
       ctx.save();
       ctx.translate(s.x, s.y);
       ctx.rotate(a);
-      ctx.strokeStyle = LOOK.ink;
+      ctx.strokeStyle = th.springBase;
       ctx.lineWidth = 3;
       ctx.beginPath();
       for (let k = 0; k <= 4; k++) ctx.lineTo(k % 2 === 0 ? -9 : 9, -4 - (k / 4) * h);
       ctx.stroke();
-      ctx.fillStyle = LOOK.ink;
+      ctx.fillStyle = th.springBase;
       ctx.fillRect(-14, -5, 28, 5);
-      ctx.fillStyle = PINK;
+      ctx.fillStyle = th.pink;
       ctx.fillRect(-17, -h - 9, 34, 7);
       ctx.strokeRect(-17, -h - 9, 34, 7);
       ctx.restore();
     });
   }
 
-  private drawBoosters() {
-    const ctx = this.ctx;
+  private drawBoosters(th: Theme) {
+    const ctx = this.dctx;
     for (const b of this.level.boosters) {
-      ctx.fillStyle = LOOK.ink;
+      ctx.fillStyle = th.boosterBase;
       ctx.fillRect(b.x, b.y - 7, b.w, 7);
       ctx.save();
       ctx.beginPath();
       ctx.rect(b.x, b.y - 7, b.w, 7);
       ctx.clip();
-      ctx.fillStyle = PINK;
+      ctx.fillStyle = th.pink;
       const move = (this.clock * 90 * b.dir) % 22;
       for (let x = b.x - 22; x < b.x + b.w + 22; x += 22) {
         const cx = x + move;
@@ -334,74 +467,105 @@ export class Game {
     }
   }
 
-  private drawSigns() {
-    const ctx = this.ctx;
+  private signFont(ascii: boolean) {
+    return ascii ? `bold 17px ${MONO}` : `20px ${this.font}`;
+  }
+
+  // the sign boards (the words are drawn by drawSignText)
+  private drawSigns(th: Theme) {
+    const ctx = this.dctx;
     ctx.save();
-    ctx.font = `20px ${this.font}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
+    ctx.font = this.signFont(this.lookName === "ascii");
     for (const s of this.level.signs) {
       const w = ctx.measureText(s.text).width + 28;
-      ctx.strokeStyle = LOOK.ink;
+      ctx.strokeStyle = th.signEdge;
       ctx.lineWidth = 5;
       ctx.beginPath();
       ctx.moveTo(s.x, s.y + 20);
       ctx.lineTo(s.x, s.y + 150);
       ctx.stroke();
-      ctx.fillStyle = "#fffaf2";
+      ctx.fillStyle = th.signCard;
       ctx.fillRect(s.x - w / 2, s.y - 20, w, 40);
       ctx.lineWidth = 4;
       ctx.strokeRect(s.x - w / 2, s.y - 20, w, 40);
-      ctx.fillStyle = LOOK.ink;
-      ctx.fillText(s.text, s.x, s.y + 1);
     }
     ctx.restore();
   }
 
-  private drawFinish() {
-    const ctx = this.ctx;
-    const [fx, fy] = this.level.finish;
+  private drawSignText(th: Theme, ascii: boolean) {
+    const ctx = this.dctx;
     ctx.save();
-    ctx.fillStyle = LOOK.ink;
-    ctx.fillRect(fx - 30, fy - 110, 60, 110);
-    ctx.strokeStyle = PINK;
-    ctx.lineWidth = 7;
-    ctx.strokeRect(fx - 30, fy - 110, 60, 110);
-    ctx.font = `22px ${this.font}`;
+    ctx.font = this.signFont(ascii);
     ctx.textAlign = "center";
-    ctx.fillStyle = PINK;
-    ctx.fillText("FINISH", fx, fy - 124);
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = th.signText;
+    for (const s of this.level.signs) ctx.fillText(s.text, s.x, s.y + 1);
+    const [fx, fy] = this.level.finish;
+    ctx.font = ascii ? `bold 22px ${MONO}` : `22px ${this.font}`;
+    ctx.fillStyle = th.pink;
+    ctx.fillText("FINISH", fx, fy - 130);
     ctx.restore();
   }
 
-  private drawHud(W: number, H: number) {
+  private drawFinish(th: Theme) {
+    const ctx = this.dctx;
+    const [fx, fy] = this.level.finish;
+    ctx.fillStyle = th.door;
+    ctx.fillRect(fx - 30, fy - 110, 60, 110);
+    ctx.strokeStyle = th.pink;
+    ctx.lineWidth = 7;
+    ctx.strokeRect(fx - 30, fy - 110, 60, 110);
+  }
+
+  private drawHud(W: number, H: number, th: Theme) {
     const ctx = this.ctx;
     const p = this.player;
+    const ascii = this.lookName === "ascii";
+    const font = (px: number) => (ascii ? `bold ${Math.round(px * 0.85)}px ${MONO}` : `${px}px ${this.font}`);
     ctx.save();
     ctx.textBaseline = "top";
+    ctx.fillStyle = th.hudText;
     // the time
-    ctx.font = `26px ${this.font}`;
+    ctx.font = font(26);
     ctx.textAlign = "right";
-    ctx.fillStyle = LOOK.ink;
     ctx.fillText(fmtTime(this.runTime), W - 20, 16);
     // the speed meter
-    const bw = Math.min(260, W * 0.4);
     const sp = Math.min(1, p.speed / P.maxSpeed);
+    const over = sp * P.maxSpeed > P.topRunSpeed;
     ctx.textAlign = "left";
-    ctx.font = `16px ${this.font}`;
-    ctx.fillText("SPEED", 20, H - 52);
-    ctx.fillStyle = "rgba(22,17,29,0.18)";
-    ctx.fillRect(20, H - 30, bw, 12);
-    ctx.fillStyle = sp * P.maxSpeed > P.topRunSpeed ? PINK : LOOK.ink;
-    ctx.fillRect(20, H - 30, bw * sp, 12);
-    ctx.fillStyle = LOOK.ink;
-    ctx.fillRect(20 + bw * (P.topRunSpeed / P.maxSpeed), H - 34, 2, 20);
+    if (ascii) {
+      const n = 24;
+      const k = Math.round(sp * n);
+      ctx.font = font(18);
+      ctx.fillText("SPEED [", 20, H - 38);
+      const x0 = 20 + ctx.measureText("SPEED [").width;
+      ctx.fillStyle = over ? th.pink : th.hudText;
+      ctx.fillText("#".repeat(k), x0, H - 38);
+      ctx.fillStyle = "rgba(236,230,255,0.35)";
+      const xk = x0 + ctx.measureText("#".repeat(k)).width;
+      ctx.fillText("-".repeat(n - k), xk, H - 38);
+      ctx.fillStyle = th.hudText;
+      ctx.fillText("]", xk + ctx.measureText("-".repeat(n - k)).width, H - 38);
+    } else {
+      const bw = Math.min(260, W * 0.4);
+      ctx.font = font(16);
+      ctx.fillText("SPEED", 20, H - 52);
+      ctx.fillStyle = "rgba(22,17,29,0.18)";
+      ctx.fillRect(20, H - 30, bw, 12);
+      ctx.fillStyle = over ? th.pink : th.hudText;
+      ctx.fillRect(20, H - 30, bw * sp, 12);
+      ctx.fillStyle = th.hudText;
+      ctx.fillRect(20 + bw * (P.topRunSpeed / P.maxSpeed), H - 34, 2, 20);
+    }
     // the controls (until you've been playing a little)
+    ctx.fillStyle = th.hudText;
     if (this.clock < 14 && !this.finished) {
       ctx.globalAlpha = Math.min(1, (14 - this.clock) / 2);
-      ctx.font = `16px ${this.font}`;
+      ctx.font = font(16);
       ctx.fillText(
-        this.touch ? "TOUCH BUTTONS COME IN A LATER STAGE: USE A KEYBOARD OR A GAMEPAD FOR NOW" : "← → RUN   SPACE JUMP   ↓ SLIDE / STOMP   R RESTART   ESC PAUSE   F2 NUMBERS",
+        this.touch
+          ? "TOUCH BUTTONS COME IN A LATER STAGE: USE A KEYBOARD OR A GAMEPAD FOR NOW"
+          : "← → RUN   SPACE JUMP   ↓ SLIDE / STOMP   R RESTART   ESC PAUSE   V LOOK   F2 NUMBERS",
         20,
         18,
       );
@@ -419,38 +583,38 @@ export class Game {
         `x ${p.x.toFixed(0)}  y ${p.y.toFixed(0)}`,
       ];
       ctx.font = "13px monospace";
-      ctx.fillStyle = "rgba(255,250,242,0.85)";
+      ctx.fillStyle = ascii ? "rgba(10,8,18,0.85)" : "rgba(255,250,242,0.85)";
       ctx.fillRect(16, 46, 330, lines.length * 17 + 10);
-      ctx.fillStyle = LOOK.ink;
+      ctx.fillStyle = th.hudText;
       lines.forEach((l, i) => ctx.fillText(l, 22, 52 + i * 17));
     }
     // paused
     if (this.paused) {
-      ctx.fillStyle = "rgba(239,230,218,0.75)";
+      ctx.fillStyle = ascii ? "rgba(7,6,12,0.78)" : "rgba(239,230,218,0.75)";
       ctx.fillRect(0, 0, W, H);
       ctx.textAlign = "center";
-      ctx.fillStyle = LOOK.ink;
-      ctx.font = `54px ${this.font}`;
+      ctx.fillStyle = th.hudText;
+      ctx.font = font(54);
       ctx.fillText("PAUSED", W / 2, H / 2 - 50);
-      ctx.font = `20px ${this.font}`;
-      ctx.fillText("ESC = PLAY    R = RESTART", W / 2, H / 2 + 16);
+      ctx.font = font(20);
+      ctx.fillText("ESC = PLAY    R = RESTART    V = LOOK", W / 2, H / 2 + 16);
     }
     // finished
     if (this.finished) {
       ctx.textAlign = "center";
-      const cw = Math.min(460, W - 40);
-      ctx.fillStyle = "#fffaf2";
+      const cw = Math.min(480, W - 40);
+      ctx.fillStyle = ascii ? "#0a0812" : "#fffaf2";
       ctx.fillRect(W / 2 - cw / 2, H / 2 - 90, cw, 170);
-      ctx.strokeStyle = LOOK.ink;
-      ctx.lineWidth = 5;
+      ctx.strokeStyle = ascii ? th.pink : th.hudText;
+      ctx.lineWidth = ascii ? 3 : 5;
       ctx.strokeRect(W / 2 - cw / 2, H / 2 - 90, cw, 170);
-      ctx.fillStyle = PINK;
-      ctx.font = `40px ${this.font}`;
+      ctx.fillStyle = th.pink;
+      ctx.font = font(40);
       ctx.fillText(`${this.level.name} DONE!`, W / 2, H / 2 - 70);
-      ctx.fillStyle = LOOK.ink;
-      ctx.font = `28px ${this.font}`;
+      ctx.fillStyle = th.hudText;
+      ctx.font = font(28);
       ctx.fillText(`TIME ${fmtTime(this.runTime)}`, W / 2, H / 2 - 12);
-      ctx.font = `18px ${this.font}`;
+      ctx.font = font(18);
       ctx.fillText("R = RUN IT AGAIN", W / 2, H / 2 + 36);
     }
     ctx.restore();

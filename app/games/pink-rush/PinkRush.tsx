@@ -21,7 +21,7 @@ export default function PinkRush({ font }: { font: string }) {
   }, [font]);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#efe6da", overflow: "hidden", touchAction: "none" }}>
+    <div style={{ position: "fixed", inset: 0, background: "#07060c", overflow: "hidden", touchAction: "none" }}>
       <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%" }} aria-label="PINK RUSH" />
       {/* back to the main site */}
       <Link
@@ -31,11 +31,12 @@ export default function PinkRush({ font }: { font: string }) {
           right: 16,
           bottom: 14,
           padding: "8px 12px",
-          fontFamily: font,
-          fontSize: 16,
-          color: "#16111d",
-          background: "#fffaf2",
-          border: "3px solid #16111d",
+          fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+          fontWeight: 700,
+          fontSize: 14,
+          color: "#ece6ff",
+          background: "#0a0812",
+          border: "2px solid #ece6ff",
           boxShadow: "3px 3px 0 #ff3bd0",
           textDecoration: "none",
         }}

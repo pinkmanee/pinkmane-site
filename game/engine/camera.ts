@@ -11,10 +11,11 @@ export class Camera {
   zoom = 1;
   private look = 0;
   private ready = false;
+  viewHeight: number = C.viewHeight; // how much of the world fits top to bottom (the ASCII look zooms in more)
 
   // how much to zoom so the right amount of the world fits on this screen
   baseZoom(viewW: number, viewH: number) {
-    return Math.min(viewH / C.viewHeight, viewW / C.minViewWidth);
+    return Math.min(viewH / this.viewHeight, viewW / C.minViewWidth);
   }
 
   snap(x: number, y: number, viewW: number, viewH: number) {

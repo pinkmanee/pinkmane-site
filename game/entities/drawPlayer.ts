@@ -5,13 +5,26 @@
 import { PHYSICS as P } from "../config/physics";
 import type { Player, Pose } from "./player";
 
-export const LOOK = {
+export type Look = { ink: string; skin: string; mohawk: string; mohawkEdge: string; hairSize: number; pants: string; pantsBack: string };
+// the paper look
+export const LOOK: Look = {
   ink: "#16111d", // outlines
   skin: "#fff8ee", // the head
   mohawk: "#ff3bd0", // the pink mohawk
-  mohawkDark: "#b8188f",
+  mohawkEdge: "#16111d", // the mohawk's outline
+  hairSize: 1, // how big the spikes are
   pants: "#6d6a78", // baggy grey pants
-  shirt: "#1d1824", // black shirt
+  pantsBack: "#57545f", // the leg that's further away
+};
+// the ASCII look (on a dark background the lines have to be light)
+export const ASCII_LOOK: Look = {
+  ink: "#f3efff",
+  skin: "#ffffff",
+  mohawk: "#ff3bd0",
+  mohawkEdge: "#ff2fc8",
+  hairSize: 1.12,
+  pants: "#a7a1c4",
+  pantsBack: "#7d7799",
 };
 
 type Rig = {
@@ -73,7 +86,8 @@ function rigFor(pose: Pose, p: Player, t: number): Rig {
 }
 
 // draw him at (x, y) = the middle of his feet, tilted by angle, facing left (-1) or right (1)
-export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, x: number, y: number, angle: number, t: number) {
+export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, x: number, y: number, angle: number, t: number, look: Look = LOOK) {
+  const LOOK = look;
   const r = rigFor(p.pose, p, t);
   ctx.save();
   ctx.translate(x, y);
@@ -107,7 +121,7 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, x: number, 
     const l = limb(hip, rig[0] + r.lean * 0.3, rig[1], 13, 13);
     // baggy pants: a thick grey line with an ink outline
     line([hip, l.mid, l.end], 11, LOOK.ink);
-    line([hip, l.mid, l.end], 7, back ? "#57545f" : LOOK.pants);
+    line([hip, l.mid, l.end], 7, back ? LOOK.pantsBack : LOOK.pants);
     // shoe
     ctx.fillStyle = LOOK.ink;
     ctx.beginPath();
@@ -138,16 +152,18 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, x: number, 
   // the pink mohawk: chunky spikes along the top of the head, swept back when you're fast
   const tilt = r.lean * 0.7;
   ctx.fillStyle = LOOK.mohawk;
-  ctx.strokeStyle = LOOK.ink;
-  ctx.lineWidth = 1.6;
+  ctx.strokeStyle = LOOK.mohawkEdge;
+  ctx.lineWidth = 1.6 * LOOK.hairSize;
+  ctx.lineJoin = "round";
   const spikes = 6;
+  const hs = LOOK.hairSize;
   for (let i = 0; i < spikes; i++) {
     const f = i / (spikes - 1); // 0 = back of the head, 1 = front
     const a = tilt + (-1.05 + f * 1.75); // where on the head (0 = straight up)
-    const len = 8 + Math.sin(f * Math.PI) * 8;
+    const len = (8 + Math.sin(f * Math.PI) * 8) * hs;
     const sweep = -r.hair * (0.3 + 0.25 * (1 - f));
-    const base1 = up(a - 0.26, 8);
-    const base2 = up(a + 0.26, 8);
+    const base1 = up(a - 0.26 * hs, 8);
+    const base2 = up(a + 0.26 * hs, 8);
     const tip = up(a + sweep, 8 + len);
     ctx.beginPath();
     ctx.moveTo(head[0] + base1[0], head[1] + base1[1]);

@@ -1,9 +1,9 @@
 // THE CONTROLS: keyboard + gamepad, turned into simple buttons the game asks about.
 //   ← → / A D = run      SPACE / Z / ↑ / W = jump      ↓ / S = slide (and stomp in the air)      ESC / P = pause
-//   R = back to the start      F2 = the tuning numbers on screen
+//   R = back to the start      V = switch the look (ASCII / paper)      F2 = the tuning numbers on screen
 // Gamepad: left stick or d-pad = run / slide, A = jump, B = slide, START = pause.
 
-export type Button = "left" | "right" | "down" | "jump" | "pause" | "restart" | "debug";
+export type Button = "left" | "right" | "down" | "jump" | "pause" | "restart" | "debug" | "look";
 
 const KEYS: Record<string, Button> = {
   ArrowLeft: "left",
@@ -20,6 +20,7 @@ const KEYS: Record<string, Button> = {
   KeyP: "pause",
   KeyR: "restart",
   F2: "debug",
+  KeyV: "look",
   Backquote: "debug",
 };
 

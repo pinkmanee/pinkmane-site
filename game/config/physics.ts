@@ -74,6 +74,7 @@ export const FIXED_DT = 1 / 60;
 // THE CAMERA
 export const CAMERA = {
   viewHeight: 560, // how much of the world fits from top to bottom of the screen (px). Bigger = see more
+  asciiViewHeight: 340, // ...the same in the ASCII look (zoomed in more, so Pinkmane is made of more characters)
   minViewWidth: 620, // on narrow screens (phones held upright) at least this much fits side to side (px)
   lookAhead: 0.33, // the camera looks ahead in the direction you're moving: this much of your speed...
   lookAheadMax: 320, // ...up to this many pixels
