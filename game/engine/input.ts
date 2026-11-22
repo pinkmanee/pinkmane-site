@@ -32,8 +32,10 @@ export class Input {
   private keyHeld = new Set<Button>();
   private padHeld = new Set<Button>();
   private pressed = new Set<Button>(); // pressed since the game last asked
+  private keys: string[] = []; // the actual keys pressed since the game last asked (for menus: ↑ ↓ ENTER ...)
   private padWas = new Set<Button>();
   private onDown = (e: KeyboardEvent) => {
+    if (!e.repeat && !e.metaKey && !e.ctrlKey && this.keys.length < 12) this.keys.push(e.key);
     const b = KEYS[e.code];
     if (!b) return;
     e.preventDefault(); // (so the arrows and space don't scroll the page)
@@ -57,6 +59,14 @@ export class Input {
   // forget presses that haven't been used yet (when switching between the menu and the game)
   clearPresses() {
     this.pressed.clear();
+    this.keys = [];
+  }
+
+  // the keys pressed since last time (and forget them)
+  takeKeys(): string[] {
+    const k = this.keys;
+    this.keys = [];
+    return k;
   }
 
   destroy() {

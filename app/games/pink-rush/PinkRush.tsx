@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
 import { Game } from "../../../game/engine/game";
 import { LEVELS } from "../../../game/levels";
 
-export default function PinkRush({ font }: { font: string }) {
+export default function PinkRush({ font, pixelFont }: { font: string; pixelFont: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -17,10 +17,10 @@ export default function PinkRush({ font }: { font: string }) {
     if (!canvas) return;
     const asked = Number(new URLSearchParams(window.location.search).get("level"));
     const start = Number.isInteger(asked) && asked >= 1 && asked <= LEVELS.length ? asked - 1 : undefined;
-    const game = new Game(canvas, LEVELS, font, start);
+    const game = new Game(canvas, LEVELS, font, start, pixelFont);
     game.start();
     return () => game.destroy();
-  }, [font]);
+  }, [font, pixelFont]);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#07060c", overflow: "hidden", touchAction: "none" }}>

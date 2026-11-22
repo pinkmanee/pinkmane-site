@@ -1117,6 +1117,14 @@ export default function Home() {
     enteredRef.current = true;
     setEntered(true);
     startSongRef.current();
+    // came back from a full-screen game (like PINK RUSH) with its GAME MENU: open the game list straight away
+    try {
+      if (sessionStorage.getItem("pinkmane-open-games") === "1") {
+        sessionStorage.removeItem("pinkmane-open-games");
+        setMenu("games");
+        setSelected(0);
+      }
+    } catch {}
   };
   // Which background mode is picked (0, 1 or 2), remembered for next visit
   const [bgMode, setBgMode] = useState(0);
