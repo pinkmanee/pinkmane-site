@@ -210,6 +210,7 @@ export class Game {
     window.location.href = "/";
   };
   private ro: ResizeObserver | null = null;
+  private viewBase: number = CAMERA.viewHeight; // how much world fits top to bottom (less on small screens, so Pinkmane isn't tiny)
   topOf: (level: number) => { name: string; time: number } | null = () => null; // the #1 on a level's board
   private best: Record<string, number> = {};
   private newBest = false;
@@ -430,6 +431,10 @@ export class Game {
     this.dpr = this.lookName === "ascii" ? Math.min(sharp, Math.max(1, Math.sqrt(ASCII_MAX_PIXELS / (this.viewW * this.viewH)))) : sharp;
     this.canvas.width = Math.round(this.viewW * this.dpr);
     this.canvas.height = Math.round(this.viewH * this.dpr);
+    // a small screen (a phone, the PSP's screen): zoom in, so Pinkmane is at least ~26 px tall
+    const was = this.viewBase;
+    this.viewBase = Math.max(380, Math.min(CAMERA.viewHeight, (this.viewH / 26) * P.height));
+    if (this.cam.viewHeight === was || this.warpT < 0) this.cam.viewHeight = this.warpT >= 0 ? this.viewBase * VORTEX.zoomIn : this.viewBase;
     this.setupLook();
   };
 
@@ -458,7 +463,7 @@ export class Game {
 
   private restart() {
     this.player.respawn(this.level.spawn[0], this.level.spawn[1]);
-    this.cam.viewHeight = CAMERA.viewHeight;
+    this.cam.viewHeight = this.viewBase;
     this.cam.snap(this.player.x, this.player.y, this.viewW, this.viewH);
     this.started = false;
     this.finished = false;
@@ -804,7 +809,7 @@ export class Game {
       this.warpT = 0;
       this.warpFrom = [p.x, p.y];
       p.pose = "fall"; // (arms flailing)
-      this.cam.viewHeight = CAMERA.viewHeight * VORTEX.zoomIn;
+      this.cam.viewHeight = this.viewBase * VORTEX.zoomIn;
     }
   }
 
@@ -1222,7 +1227,8 @@ export class Game {
       const lv = this.levels[i];
       const best = this.best[lv.name];
       this.uiBox(`LVL ${i + 1}: ${lv.name}`, 6 * ui, false);
-      this.uiBox(best !== undefined ? `BEST ${fmtTime(best)}  -  OK TO PLAY` : "OK TO PLAY", 18 * ui, false);
+      const narrow = this.viewW < 560; // (a phone: keep the boxes short so they don't run into the TOP 10 button)
+      this.uiBox(best !== undefined ? (narrow ? `BEST ${fmtTime(best)}` : `BEST ${fmtTime(best)}  -  OK TO PLAY`) : "OK TO PLAY", 18 * ui, false);
     }
     if (this.flash > 0) this.uiBox(this.flashText, 34 * ui, true);
     // TOP 10 button (top right) + the #1 on this level's board
@@ -1238,7 +1244,7 @@ export class Game {
       ctx.fillStyle = "#ffffff";
       ctx.fillText(this.touch ? "TOP 10" : "T: TOP 10", tb.x + tb.w / 2, tb.y + tb.h / 2 + ui * 0.5);
       const top = this.topOf(this.levelIndex);
-      if (top && !this.mapWalk) {
+      if (top && !this.mapWalk && this.viewW >= 560) {
         ctx.font = `${Math.round(6 * ui)}px ${this.pixelFont}`;
         ctx.textAlign = "right";
         ctx.textBaseline = "top";
@@ -1270,7 +1276,7 @@ export class Game {
 
   // the size of the shared menus / boxes (they're drawn for a 336 x 160 screen, like the other games)
   private uiScale() {
-    return Math.max(1.6, Math.min(4, Math.min(this.viewW / MAP_W, this.viewH / MAP_H)));
+    return Math.max(1.05, Math.min(4, Math.min(this.viewW / MAP_W, this.viewH / MAP_H)));
   }
   // a little box with text in it, centred (pink when it's the picked row) - the same as every game's
   private uiBox(text: string, y: number, picked: boolean, pad = 10) {
