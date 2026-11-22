@@ -18,5 +18,15 @@ import l13 from "./13-sky-high.json";
 import l14 from "./14-gauntlet.json";
 import l15 from "./15-final-run.json";
 import l16 from "./16-zigzag.json";
+import l17 from "./17-rush-hour.json";
+import l18 from "./18-cliffhanger.json";
+import l19 from "./19-saw-city.json";
+import l20 from "./20-bubble-trouble.json";
+import l21 from "./21-the-climb.json";
+import l22 from "./22-freefall.json";
+import l23 from "./23-ring-master.json";
+import l24 from "./24-nightmare.json";
+import l25 from "./25-tower-of-pain.json";
+import l26 from "./26-pink-apocalypse.json";
 
-export const LEVELS: LevelData[] = [l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16] as unknown as LevelData[];
+export const LEVELS: LevelData[] = [l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26] as unknown as LevelData[];

@@ -118,7 +118,7 @@ type Bit = { a: number; r: number; c: string; col: string; age: number }; // one
 type MapIcon = "leaf" | "spring" | "tower" | "tunnel" | "bolt" | "bug" | "loop" | "ring" | "fan" | "saw" | "bubble" | "arrows" | "cloud" | "skull" | "vortex";
 const MAP_W = 336; // how much of the map fits on the screen
 const MAP_H = 160;
-const MAP_TOTAL_W = 740; // the whole map (it scrolls along with you)
+const MAP_TOTAL_W = 1116; // the whole map (it scrolls along with you)
 const MAP_NODES: { x: number; y: number; icon: MapIcon; badge: string; path: [number, number][] }[] = [
   { x: 36, y: 124, icon: "leaf", badge: "#6fdc5a", path: [] },
   { x: 104, y: 124, icon: "spring", badge: "#bfe8ff", path: [] },
@@ -136,6 +136,17 @@ const MAP_NODES: { x: number; y: number; icon: MapIcon; badge: string; path: [nu
   { x: 536, y: 120, icon: "skull", badge: "#8a1820", path: [] },
   { x: 622, y: 84, icon: "vortex", badge: "#ff5fe0", path: [[622, 120]] }, // big: FINAL RUN
   { x: 700, y: 40, icon: "bolt", badge: "#ff3bd0", path: [[622, 40]] }, // EXTRA (opens when you've beaten the final run)
+  // PART 2: levels 17 - 26, harder
+  { x: 700, y: 120, icon: "bolt", badge: "#ffd23c", path: [] },
+  { x: 772, y: 120, icon: "cloud", badge: "#7ab8ff", path: [] },
+  { x: 772, y: 56, icon: "saw", badge: "#c6b9d6", path: [] },
+  { x: 844, y: 56, icon: "bubble", badge: "#2f6fd0", path: [] },
+  { x: 844, y: 124, icon: "tower", badge: "#b06ce0", path: [] },
+  { x: 916, y: 124, icon: "arrows", badge: "#6fdc5a", path: [] },
+  { x: 916, y: 56, icon: "ring", badge: "#5a4fb4", path: [] },
+  { x: 988, y: 56, icon: "skull", badge: "#8a1820", path: [] },
+  { x: 988, y: 120, icon: "tower", badge: "#3a1f5a", path: [] },
+  { x: 1074, y: 84, icon: "vortex", badge: "#ff2fc8", path: [[1074, 120]] }, // big: PINK APOCALYPSE
 ];
 const MAP_WALK_SPEED = 95; // map units per second (like VOID)
 // the boxes / menus every game shares (PinkShop.ts): VOID's pale green, ink and pink
@@ -1212,16 +1223,16 @@ export class Game {
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     const ui = this.uiScale();
-    const big = MAP_NODES[14];
-    {
+    for (const [ni, label] of [[14, "FINAL RUN"], [MAP_NODES.length - 1, "APOCALYPSE"]] as [number, string][]) {
+      const big = MAP_NODES[ni];
       const [bx, by] = this.m2s(m, big.x, big.y);
       ctx.font = `${Math.round(7 * ui)}px ${this.pixelFont}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       ctx.fillStyle = UI.ink;
-      ctx.fillText("FINAL RUN", bx + ui, by + 17 * m.u + ui);
+      ctx.fillText(label, bx + ui, by + 17 * m.u + ui);
       ctx.fillStyle = "#ff2fc8";
-      ctx.fillText("FINAL RUN", bx, by + 17 * m.u);
+      ctx.fillText(label, bx, by + 17 * m.u);
     }
     if (!this.mapWalk) {
       const i = this.levelIndex;
