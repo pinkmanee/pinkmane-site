@@ -59,6 +59,18 @@ for (let n = 1; n <= LEVEL_COUNT; n++) {
   };
 }
 
+// PINK RUSH: a time board for every level (rush-l1 ... rush-l30), the same way as the Super Pinkmane levels.
+// minMs = the fastest time that's believable for any level (a perfect run of the shortest level takes about 11 seconds).
+for (let n = 1; n <= LEVEL_COUNT; n++) {
+  GAMES[`rush-l${n}`] = {
+    key: `pinkrush:l${n}:times`,
+    rate: 0,
+    base: 0,
+    max: LEVEL_TIME_BASE,
+    timed: { minMs: 6000 },
+  };
+}
+
 // Which board a request is for. No game given at all = Pink Run (the oldest game asks without one).
 // A game name that isn't in GAMES above = null, so a new game can never land on Pink Run's board by mistake:
 // add every new game to GAMES first.

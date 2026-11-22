@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 //   ...before restarting:     if (board.current?.busy()) return;   (the Top 10 box is still open)
 //   ...when a new run starts: board.current?.hide()
 //   ...the start screen:      board.current?.top()   = the #1 on the board ({ name, score }) or null
+//   ...just look at it:       board.current?.show()  = opens the Top 10 without a new score (OK closes it)
 //   <ScorePanel game="hell" title="PINK HELL" apiRef={board} fontFamily={fontFamily} width={W} height={H} />
 //   (next to the game's canvas; width / height = the game's own size in pixels, so it lines up exactly)
 //
@@ -40,6 +41,7 @@ export type ScoreApi = {
   hide: () => void;
   busy: () => boolean;
   top: () => ScoreEntry | null;
+  show: () => void;
 };
 type Phase = "hidden" | "loading" | "entry" | "board" | "offline";
 
@@ -124,6 +126,7 @@ export function ScorePanel({
   const myName = useRef("");
   const topRef = useRef<ScoreEntry | null>(null);
   const run = useRef({ score: 0, runTime: 0 });
+  const viewOnly = useRef(false); // opened with show(): no "YOU" line
   const phaseRef = useRef<Phase>("hidden");
   const closedAt = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -152,6 +155,7 @@ export function ScorePanel({
   apiRef.current = {
     gameOver: (score, runTime) => {
       run.current = { score: Math.floor(score), runTime };
+      viewOnly.current = false;
       setMessage("");
       go("loading");
       fetchBoard(game).then((list) => {
@@ -167,6 +171,18 @@ export function ScorePanel({
       });
     },
     hide: () => go("hidden"),
+    show: () => {
+      viewOnly.current = true;
+      myName.current = cleanName(readLocal(NAME_KEY));
+      setMessage("");
+      go("loading");
+      fetchBoard(game).then((list) => {
+        if (phaseRef.current !== "loading") return;
+        if (!list) return go("offline");
+        keepScores(list);
+        go("board");
+      });
+    },
     // the box is open (or just closed this instant, so the same key press doesn't also restart the game)
     busy: () => phaseRef.current !== "hidden" || performance.now() - closedAt.current < 350,
     top: () => topRef.current,
@@ -273,7 +289,7 @@ export function ScorePanel({
           ctx.restore();
         });
         ctx.textAlign = "center";
-        ctx.fillText(`YOU ${format(run.current.score)}`, W / 2, H - 26);
+        if (!viewOnly.current) ctx.fillText(`YOU ${format(run.current.score)}`, W / 2, H - 26);
         if (blink) ctx.fillText("OK TO CONTINUE", W / 2, H - 12);
       }
 

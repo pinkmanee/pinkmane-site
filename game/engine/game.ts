@@ -163,6 +163,12 @@ export class Game {
   private pauseRow = 0;
   private stuckT = 0; // pushing against something for this long: show a tip
   private stuckTip = "";
+  private boardShown = false; // this run's time has gone to the scoreboard
+  // THE SCOREBOARD (the page connects these to the Top 10 boxes, one per level)
+  onLevelDone: (level: number, seconds: number) => void = () => {}; // a level was beaten: offer its Top 10
+  onShowBoard: (level: number) => void = () => {}; // just look at a level's Top 10
+  isBusy: () => boolean = () => false; // a Top 10 box is open: the game ignores keys
+  topOf: (level: number) => { name: string; time: number } | null = () => null; // the #1 on a level's board
   private best: Record<string, number> = {};
   private newBest = false;
   private checkpoint = -1; // the last flag you passed (-1 = none)
@@ -263,7 +269,10 @@ export class Game {
     const r = this.canvas.getBoundingClientRect();
     const x = e.clientX - r.left;
     const y = e.clientY - r.top;
+    if (this.isBusy()) return;
     if (this.mode === "select") {
+      const tb = this.topBtn();
+      if (x >= tb.x && x <= tb.x + tb.w && y >= tb.y && y <= tb.y + tb.h) return this.onShowBoard(this.levelIndex);
       // tap a stop: walk there (tap the one you're on = play it)
       const m = this.mapFrame();
       const hit = MAP_NODES.findIndex((n) => {
@@ -403,6 +412,7 @@ export class Game {
     this.visAngle = 0;
     this.checkpoint = -1;
     this.newBest = false;
+    this.boardShown = false;
     this.levelT = 0;
   }
 
@@ -432,6 +442,14 @@ export class Game {
     if (dt > 0) this.fps += (1 / dt - this.fps) * 0.05;
     const inp = this.input;
     inp.pollGamepad();
+    if (this.isBusy()) {
+      // a Top 10 box is open on top: keys belong to it
+      inp.clearPresses();
+      this.clock += dt;
+      this.render(1, this.mode === "play" ? dt : 0);
+      this.raf = requestAnimationFrame(this.frame);
+      return;
+    }
     if (inp.take("debug")) this.debug = !this.debug;
     if (inp.take("look")) this.switchLook();
     this.flash = Math.max(0, this.flash - dt);
@@ -443,6 +461,7 @@ export class Game {
         else if (k === "ArrowUp" || k === "w" || k === "W") this.mapMove(0, -1);
         else if (k === "ArrowDown" || k === "s" || k === "S") this.mapMove(0, 1);
         else if (k === "Enter" || k === " " || k === "z" || k === "Z") this.playPick();
+        else if (k === "t" || k === "T") this.onShowBoard(this.levelIndex);
       }
       inp.clearPresses();
       this.updateMap(dt);
@@ -479,6 +498,11 @@ export class Game {
       this.goSelect();
       this.raf = requestAnimationFrame(this.frame);
       return;
+    }
+    // the time goes to the level's Top 10 once the done card is up
+    if (this.finished && !this.boardShown && this.warpT >= VORTEX.card + 1.1) {
+      this.boardShown = true;
+      this.onLevelDone(this.levelIndex, this.runTime);
     }
     // the done card: SPACE / ENTER = back to the map
     if (this.finished && this.warpT >= VORTEX.card + 0.4 && (inp.take("jump") || inp.take("confirm"))) this.nextLevel();
@@ -915,6 +939,30 @@ export class Game {
       this.uiBox(best !== undefined ? `BEST ${fmtTime(best)}  -  OK TO PLAY` : "OK TO PLAY", 18 * ui, false);
     }
     if (this.flash > 0) this.uiBox(this.flashText, 34 * ui, true);
+    // TOP 10 button (top right) + the #1 on this level's board
+    {
+      const tb = this.topBtn();
+      ctx.fillStyle = UI.ink;
+      ctx.fillRect(tb.x, tb.y, tb.w, tb.h);
+      ctx.fillStyle = UI.pink;
+      ctx.fillRect(tb.x + ui, tb.y + ui, tb.w - 2 * ui, tb.h - 2 * ui);
+      ctx.font = `${Math.round(7 * ui)}px ${this.pixelFont}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(this.touch ? "TOP 10" : "T: TOP 10", tb.x + tb.w / 2, tb.y + tb.h / 2 + ui * 0.5);
+      const top = this.topOf(this.levelIndex);
+      if (top && !this.mapWalk) {
+        ctx.font = `${Math.round(6 * ui)}px ${this.pixelFont}`;
+        ctx.textAlign = "right";
+        ctx.textBaseline = "top";
+        const line = `#1 ${top.name} ${fmtTime(top.time)}`;
+        ctx.fillStyle = UI.ink;
+        ctx.fillText(line, tb.x + tb.w + ui, tb.y + tb.h + 4 * ui + ui);
+        ctx.fillStyle = "#ffd700";
+        ctx.fillText(line, tb.x + tb.w, tb.y + tb.h + 4 * ui);
+      }
+    }
     if (Math.floor(this.clock * 2) % 2 === 0) {
       const tip = this.touch ? "TAP A STOP TO WALK, TAP AGAIN TO PLAY" : "ARROWS / WASD TO WALK, SPACE TO PLAY";
       ctx.font = `${Math.round(7 * ui)}px ${this.pixelFont}`;
@@ -925,6 +973,13 @@ export class Game {
       ctx.fillStyle = "#ffffff";
       ctx.fillText(tip, W / 2, H - 14 * ui, W - 20);
     }
+  }
+
+  // the TOP 10 button on the map (top right)
+  private topBtn() {
+    const ui = this.uiScale();
+    const w = (this.touch ? 52 : 66) * ui;
+    return { x: this.viewW - w - 12, y: 12, w, h: 14 * ui };
   }
 
   // the size of the shared menus / boxes (they're drawn for a 336 x 160 screen, like the other games)
