@@ -23,6 +23,7 @@ const HellPad = dynamic(() => import("./components/HellPad"), { ssr: false });
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
 import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
 import GunCursor from "./components/GunCursor";
+import AsciiIntro from "./components/AsciiIntro";
 import TrackVideo from "./components/TrackVideo";
 import { useHasMouse } from "./components/useHasMouse";
 
@@ -300,7 +301,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     name: "Pink Rush",
     id: "rush",
     preview: "/previews/pinkrush.gif",
-    blurb: "NEW · EARLY TEST. A fast platformer drawn in glowing text characters: build speed down the hills, fly off ramps, wall jump up towers. Opens full screen.",
+    blurb: "NEW · 5 LEVELS. A fast platformer drawn in glowing text characters: build speed down the hills, fly off ramps, wall jump up towers, get sucked into the vortex. Opens full screen.",
     how: "left/right = run · space = jump · down = slide (stomp in the air) · V = paper look",
     psp: true,
     link: "/games/pink-rush",
@@ -2501,6 +2502,8 @@ activeGame === "bomber" ? (
         "--hh-glow": HH_BG_MODES[hhBgMode].glow,
       } as React.CSSProperties}
     >
+      {/* THE INTRO: code rain prints PINKMANE in glowing characters, then a vortex opens the site (once per visit) */}
+      <AsciiIntro />
       {/* The background picture, on its own layer so it can wiggle and shake */}
       <div
         className="bg-shake"

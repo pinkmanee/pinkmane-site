@@ -8,8 +8,10 @@
 //   y goes DOWN: a bigger y is lower on the screen.
 // BLOCKS: solid boxes (walls, platforms, low ceilings). x, y = the top left corner.
 // SPRINGS: angle in degrees (-90 = straight up, -60 = up and to the right, -120 = up and to the left).
+//   w = how wide it is (leave it out for a normal small spring; pit floors are one wide trampoline).
 // BOOSTERS: lie on the ground from x to x + w at height y. dir = 1 (right) or -1 (left).
 // SIGNS: little text signs floating above the ground (the tutorial).
+// CHECKPOINTS: flags on the ground. Fall out of the level = you come back at the last flag you passed.
 
 export type PathCmd = ["M", number, number] | ["L", number, number] | ["Q", number, number, number, number];
 
@@ -20,7 +22,8 @@ export type LevelData = {
   bounds: { left: number; right: number; bottom: number };
   ground: { path: PathCmd[] }[];
   blocks: { x: number; y: number; w: number; h: number }[];
-  springs: { x: number; y: number; angle?: number; power?: number }[];
+  springs: { x: number; y: number; angle?: number; power?: number; w?: number }[];
   boosters: { x: number; y: number; w: number; dir: number; speed?: number }[];
   signs: { x: number; y: number; text: string }[];
+  checkpoints?: { x: number; y: number }[];
 };

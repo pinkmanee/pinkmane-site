@@ -2,12 +2,12 @@
 
 // PINK RUSH on a web page: a canvas that fills the screen, and the game running in it.
 // The game itself lives in the game/ folder (engine, entities, levels, config).
+// It opens on the level select. pinkmane.site/games/pink-rush?level=3 jumps straight into level 3.
 
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { Game } from "../../../game/engine/game";
-import type { LevelData } from "../../../game/levels/types";
-import testHill from "../../../game/levels/test-hill.json";
+import { LEVELS } from "../../../game/levels";
 
 export default function PinkRush({ font }: { font: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -15,7 +15,9 @@ export default function PinkRush({ font }: { font: string }) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const game = new Game(canvas, testHill as unknown as LevelData, font);
+    const asked = Number(new URLSearchParams(window.location.search).get("level"));
+    const start = Number.isInteger(asked) && asked >= 1 && asked <= LEVELS.length ? asked - 1 : undefined;
+    const game = new Game(canvas, LEVELS, font, start);
     game.start();
     return () => game.destroy();
   }, [font]);

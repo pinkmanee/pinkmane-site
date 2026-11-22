@@ -49,6 +49,7 @@ export function flattenPath(path: PathCmd[]): [number, number][] {
 export class Terrain {
   segs: Seg[] = [];
   blocks: Block[];
+  walls: Block[] = []; // invisible walls on the cliff faces at the ends of the ground (you can't run into the ground, and you can wall jump off them)
   paths: [number, number][][] = []; // the ground's outline, for drawing
   bottom: number;
   private grid = new Map<number, Seg[]>();
@@ -61,6 +62,12 @@ export class Terrain {
       const pts = flattenPath(g.path);
       this.paths.push(pts);
       for (let i = 0; i < pts.length - 1; i++) this.add(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], true, maxA);
+      // the cliff faces under the first and last point
+      const [sx, sy] = pts[0];
+      const [ex, ey] = pts[pts.length - 1];
+      const deep = level.bounds.bottom + 2000;
+      this.walls.push({ x: sx, y: sy + 4, w: 4, h: deep - sy });
+      this.walls.push({ x: ex - 4, y: ey + 4, w: 4, h: deep - ey });
     }
     // the tops of blocks are ground too
     for (const b of this.blocks) this.add(b.x, b.y, b.x + b.w, b.y, false, maxA);
@@ -115,12 +122,14 @@ export class Terrain {
       if (s.y1 + (x - s.x1) * s.slope <= y) return true;
     }
     for (const b of this.blocks) if (x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h) return true;
+    for (const b of this.walls) if (x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h) return true;
     return false;
   }
 
   // does this box (left, top, right, bottom) touch a block?
   boxHitsBlock(l: number, t: number, r: number, btm: number): boolean {
     for (const b of this.blocks) if (r > b.x && l < b.x + b.w && btm > b.y && t < b.y + b.h) return true;
+    for (const b of this.walls) if (r > b.x && l < b.x + b.w && btm > b.y && t < b.y + b.h) return true;
     return false;
   }
 }

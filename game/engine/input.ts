@@ -1,9 +1,10 @@
 // THE CONTROLS: keyboard + gamepad, turned into simple buttons the game asks about.
 //   ← → / A D = run      SPACE / Z / ↑ / W = jump      ↓ / S = slide (and stomp in the air)      ESC / P = pause
 //   R = back to the start      V = switch the look (ASCII / paper)      F2 = the tuning numbers on screen
+//   ENTER = OK (menus)      L = back to the level select
 // Gamepad: left stick or d-pad = run / slide, A = jump, B = slide, START = pause.
 
-export type Button = "left" | "right" | "down" | "jump" | "pause" | "restart" | "debug" | "look";
+export type Button = "left" | "right" | "down" | "jump" | "pause" | "restart" | "debug" | "look" | "confirm" | "menu";
 
 const KEYS: Record<string, Button> = {
   ArrowLeft: "left",
@@ -21,6 +22,9 @@ const KEYS: Record<string, Button> = {
   KeyR: "restart",
   F2: "debug",
   KeyV: "look",
+  Enter: "confirm",
+  NumpadEnter: "confirm",
+  KeyL: "menu",
   Backquote: "debug",
 };
 
@@ -48,6 +52,11 @@ export class Input {
     window.addEventListener("keydown", this.onDown);
     window.addEventListener("keyup", this.onUp);
     window.addEventListener("blur", this.onBlur);
+  }
+
+  // forget presses that haven't been used yet (when switching between the menu and the game)
+  clearPresses() {
+    this.pressed.clear();
   }
 
   destroy() {

@@ -1,6 +1,7 @@
 // THE GAME: runs the physics 60 times a second (on every screen), moves the camera and draws everything.
 // Two looks: ASCII (everything drawn as coloured text characters) and PAPER (hand-drawn style). V switches.
 // Reaching the door: a vortex twists the world into the door and sucks Pinkmane in like code.
+// Starts on the LEVEL SELECT (the chosen level slowly scrolls by behind it). Best times are remembered.
 
 import { CAMERA, FIXED_DT, PHYSICS as P } from "../config/physics";
 import { Player, type Pad } from "../entities/player";
@@ -13,6 +14,7 @@ import { Terrain } from "./terrain";
 
 type LookName = "ascii" | "paper";
 const LOOK_KEY = "pinkrush-look"; // the look you picked is remembered
+const BEST_KEY = "pinkrush-best"; // your best time on each level
 
 // the colours of each look. In the ASCII look, brightness decides the character (dark = empty, bright = #)
 type Theme = {
@@ -94,6 +96,7 @@ const VORTEX = {
 const CODE_CHARS = "01<>/\\{}[];=+*#$&%01010110";
 
 type Bit = { a: number; r: number; c: string; col: string; age: number }; // one flying code character
+type Rect = { x: number; y: number; w: number; h: number };
 
 const ease = (rate: number, dt: number) => 1 - Math.exp(-rate * dt);
 const smooth = (u: number) => {
@@ -122,8 +125,18 @@ export class Game {
   private warpT = -1; // seconds since you touched the door (-1 = not yet)
   private warpFrom: [number, number] = [0, 0];
   private bits: Bit[] = [];
-  private springCool: number[];
-  private springSquash: number[];
+  private levels: LevelData[];
+  private levelIndex = 0;
+  private level!: LevelData;
+  private mode: "select" | "play" = "select";
+  private selectT = 0; // (the level scrolling by behind the level select)
+  private cards: Rect[] = []; // where the level cards are (for clicking / tapping)
+  private best: Record<string, number> = {};
+  private newBest = false;
+  private checkpoint = -1; // the last flag you passed (-1 = none)
+  private levelT = 0; // seconds since this level started (for the level name banner)
+  private springCool: number[] = [];
+  private springSquash: number[] = [];
   private groundFill: Path2D[] = [];
   private groundTop: Path2D[] = [];
   private viewW = 0;
@@ -134,19 +147,43 @@ export class Game {
   private worldLayer: AsciiLayer | null = null;
   private playerLayer: AsciiLayer | null = null;
 
+  // startLevel = jump straight into that level (0 = the first); leave it out to start on the level select
   constructor(
     private canvas: HTMLCanvasElement,
-    private level: LevelData,
+    levels: LevelData[],
     private font: string,
+    startLevel?: number,
   ) {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("no canvas");
     this.ctx = ctx;
     this.dctx = ctx;
+    this.levels = levels;
+    const first = startLevel !== undefined && startLevel >= 0 && startLevel < levels.length ? startLevel : 0;
+    this.mode = startLevel !== undefined ? "play" : "select";
+    this.terrain = new Terrain(levels[first]);
+    this.player = new Player(levels[first].spawn[0], levels[first].spawn[1]);
+    this.loadLevel(first);
+    this.touch = !!window.matchMedia?.("(pointer: coarse)").matches && !window.matchMedia?.("(any-pointer: fine)").matches;
+    try {
+      const saved = localStorage.getItem(LOOK_KEY);
+      if (saved === "paper" || saved === "ascii") this.lookName = saved;
+      const b = JSON.parse(localStorage.getItem(BEST_KEY) || "{}");
+      if (b && typeof b === "object") this.best = b;
+    } catch {}
+  }
+
+  // set up a level: its ground, springs, flags ... (and put Pinkmane at its start)
+  private loadLevel(i: number) {
+    this.levelIndex = i;
+    const level = this.levels[i];
+    this.level = level;
     this.terrain = new Terrain(level);
     this.player = new Player(level.spawn[0], level.spawn[1]);
     this.springCool = level.springs.map(() => 0);
     this.springSquash = level.springs.map(() => 0);
+    this.groundFill = [];
+    this.groundTop = [];
     // the ground's shapes, made once
     for (const pts of this.terrain.paths) {
       const fill = new Path2D();
@@ -164,11 +201,43 @@ export class Game {
       this.groundFill.push(fill);
       this.groundTop.push(top);
     }
-    this.touch = !!window.matchMedia?.("(pointer: coarse)").matches && !window.matchMedia?.("(any-pointer: fine)").matches;
-    try {
-      const saved = localStorage.getItem(LOOK_KEY);
-      if (saved === "paper" || saved === "ascii") this.lookName = saved;
-    } catch {}
+    this.restart();
+  }
+
+  private startLevel(i: number) {
+    this.loadLevel(i);
+    this.mode = "play";
+    this.input.clearPresses();
+  }
+
+  private goSelect() {
+    this.mode = "select";
+    this.paused = false;
+    this.selectT = 0;
+    this.input.clearPresses();
+    this.restart();
+  }
+
+  // a click / tap: pick a level card, or go on to the next level
+  private onPointer = (e: PointerEvent) => {
+    const r = this.canvas.getBoundingClientRect();
+    const x = e.clientX - r.left;
+    const y = e.clientY - r.top;
+    if (this.mode === "select") {
+      const hit = this.cards.findIndex((c) => x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h);
+      if (hit < 0) return;
+      if (hit === this.levelIndex) this.startLevel(hit);
+      else {
+        this.loadLevel(hit);
+        this.selectT = 0;
+      }
+    } else if (this.finished && this.warpT >= VORTEX.card + 0.4) this.nextLevel();
+    else if (this.paused) this.paused = false;
+  };
+
+  private nextLevel() {
+    if (this.levelIndex + 1 < this.levels.length) this.startLevel(this.levelIndex + 1);
+    else this.goSelect();
   }
 
   start() {
@@ -176,6 +245,7 @@ export class Game {
     window.addEventListener("resize", this.resize);
     document.addEventListener("visibilitychange", this.onHide);
     window.addEventListener("blur", this.onBlur);
+    this.canvas.addEventListener("pointerdown", this.onPointer);
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.frame);
     (window as unknown as { pinkRush?: Game }).pinkRush = this; // (for testing from the browser console)
@@ -186,21 +256,22 @@ export class Game {
     window.removeEventListener("resize", this.resize);
     document.removeEventListener("visibilitychange", this.onHide);
     window.removeEventListener("blur", this.onBlur);
+    this.canvas.removeEventListener("pointerdown", this.onPointer);
     this.input.destroy();
   }
 
   // a quick look at the player (for testing)
   get state() {
     const p = this.player;
-    return { x: p.x, y: p.y, gsp: p.gsp, vx: p.vx, vy: p.vy, onGround: p.onGround, pose: p.pose, angle: p.angle, finished: this.finished, time: this.runTime, warp: this.warpT };
+    return { x: p.x, y: p.y, gsp: p.gsp, vx: p.vx, vy: p.vy, onGround: p.onGround, pose: p.pose, angle: p.angle, finished: this.finished, time: this.runTime, warp: this.warpT, level: this.levelIndex, mode: this.mode, checkpoint: this.checkpoint, wallDir: p.wallDir };
   }
 
   // the tab is hidden or the window lost focus: pause
   private onHide = () => {
-    if (document.hidden) this.paused = true;
+    if (document.hidden && this.mode === "play") this.paused = true;
   };
   private onBlur = () => {
-    this.paused = true;
+    if (this.mode === "play") this.paused = true;
   };
 
   private resize = () => {
@@ -247,6 +318,29 @@ export class Game {
     this.bits = [];
     this.runTime = 0;
     this.visAngle = 0;
+    this.checkpoint = -1;
+    this.newBest = false;
+    this.levelT = 0;
+  }
+
+  // fell out of the level: back at the last flag you passed (or the start)
+  private respawn() {
+    const cp = this.level.checkpoints?.[this.checkpoint];
+    const [x, y] = cp ? [cp.x, cp.y] : this.level.spawn;
+    this.player.respawn(x, y);
+    this.cam.snap(x, y, this.viewW, this.viewH);
+  }
+
+  private saveBest() {
+    const name = this.level.name;
+    const old = this.best[name];
+    if (old === undefined || this.runTime < old - 1e-6) {
+      this.best[name] = this.runTime;
+      this.newBest = true;
+      try {
+        localStorage.setItem(BEST_KEY, JSON.stringify(this.best));
+      } catch {}
+    }
   }
 
   private frame = (now: number) => {
@@ -255,10 +349,39 @@ export class Game {
     if (dt > 0) this.fps += (1 / dt - this.fps) * 0.05;
     const inp = this.input;
     inp.pollGamepad();
-    if (inp.take("pause")) this.paused = !this.paused;
     if (inp.take("debug")) this.debug = !this.debug;
     if (inp.take("look")) this.switchLook();
+    if (this.mode === "select") {
+      // THE LEVEL SELECT: ← → pick, SPACE / ENTER go
+      const n = this.levels.length;
+      if (inp.take("left")) {
+        this.loadLevel((this.levelIndex + n - 1) % n);
+        this.selectT = 0;
+      }
+      if (inp.take("right")) {
+        this.loadLevel((this.levelIndex + 1) % n);
+        this.selectT = 0;
+      }
+      if (inp.take("jump") || inp.take("confirm")) this.startLevel(this.levelIndex);
+      inp.take("pause");
+      inp.take("restart");
+      inp.take("menu");
+      inp.take("down");
+      this.selectT += dt;
+      this.clock += dt;
+      this.render(1, dt);
+      this.raf = requestAnimationFrame(this.frame);
+      return;
+    }
+    if (inp.take("pause")) this.paused = !this.paused;
     if (inp.take("restart")) this.restart();
+    if (inp.take("menu")) {
+      this.goSelect();
+      this.raf = requestAnimationFrame(this.frame);
+      return;
+    }
+    // the done card: SPACE / ENTER = next level
+    if (this.finished && this.warpT >= VORTEX.card + 0.4 && (inp.take("jump") || inp.take("confirm"))) this.nextLevel();
     if (this.paused) {
       // (don't save up presses while paused)
       inp.take("jump");
@@ -274,6 +397,7 @@ export class Game {
       }
       if (n === 8) this.acc = 0; // (the computer fell way behind: skip ahead rather than run in slow motion)
       this.clock += dt;
+      this.levelT += dt;
     }
     this.render(this.acc / FIXED_DT, this.paused ? 0 : dt);
     this.raf = requestAnimationFrame(this.frame);
@@ -306,7 +430,7 @@ export class Game {
       this.springCool[i] = Math.max(0, this.springCool[i] - dt);
       this.springSquash[i] = Math.max(0, this.springSquash[i] - dt * 4);
       if (this.springCool[i] > 0) return;
-      if (Math.abs(p.x - s.x) < 26 && p.y > s.y - 42 && p.y < s.y + 8) {
+      if (Math.abs(p.x - s.x) < (s.w ?? 52) / 2 && p.y > s.y - 42 && p.y < s.y + 8) {
         const a = ((s.angle ?? -90) * Math.PI) / 180;
         const power = s.power ?? P.springPower;
         const straightUp = Math.abs((s.angle ?? -90) + 90) < 5;
@@ -320,18 +444,21 @@ export class Game {
     for (const b of this.level.boosters) {
       if (p.onGround && p.x >= b.x && p.x <= b.x + b.w && Math.abs(p.y - b.y) < 26) p.boost(b.dir, b.speed ?? P.boosterSpeed);
     }
-    // fell out of the level: back to the start
-    if (p.y > this.terrain.bottom) {
-      p.respawn(this.level.spawn[0], this.level.spawn[1]);
-      this.cam.snap(p.x, p.y, this.viewW, this.viewH);
+    // flags: passing one = that's where you come back if you fall out
+    const cps = this.level.checkpoints ?? [];
+    for (let i = this.checkpoint + 1; i < cps.length; i++) {
+      if (p.x >= cps[i].x && Math.abs(p.y - cps[i].y) < 300) this.checkpoint = i;
     }
+    // fell out of the level
+    if (p.y > this.terrain.bottom) this.respawn();
     // the timer starts when you move
     if (!this.started && (p.speed > 1 || !p.onGround)) this.started = true;
     if (this.started) this.runTime += dt;
     // the finish door: the time stops and the vortex starts
     const f = this.level.finish;
-    if (Math.abs(p.x - f[0]) < 40 && Math.abs(p.y - f[1]) < 90) {
+    if (Math.abs(p.x - f[0]) < 40 && p.y > f[1] - 320 && p.y < f[1] + 40) {
       this.finished = true;
+      this.saveBest();
       this.warpT = 0;
       this.warpFrom = [p.x, p.y];
       p.pose = "fall"; // (arms flailing)
@@ -381,7 +508,13 @@ export class Game {
       scale = 1 - smooth((this.warpT - 0.12) / (VORTEX.suck - 0.12));
       spin = this.warpT * this.warpT * 9;
       this.cam.update(dt, cx, cy + 40, 0, 0, 0, W, H);
+    } else if (this.mode === "select") {
+      // the level slowly scrolls by behind the level select
+      const [ax, ay, wrapped] = this.attractPoint();
+      if (wrapped) this.cam.snap(ax, ay, W, H);
+      this.cam.update(dt, ax, ay, 0, 0, 0, W, H);
     } else this.cam.update(dt, px, py, p.vx, p.vy, p.speed, W, H);
+    const showPlayer = this.mode === "play";
     const z = this.cam.zoom;
     if (this.lookName === "ascii" && Math.abs(z - z0) > 1e-4 && this.worldLayer && this.playerLayer) {
       // (the camera zooms out at speed: keep Pinkmane's characters about the same count)
@@ -412,6 +545,11 @@ export class Game {
       this.drawSwirls(W, H, th);
       this.worldTransform(w, wax, way, wbx, wby);
       this.drawWorld(th);
+      if (this.mode === "select") {
+        // the title, in big pink characters
+        w.setTransform(wax, 0, 0, way, wbx, wby);
+        this.drawTitle(W, H, th, true);
+      }
       // 2. Pinkmane, drawn on his own (his grid moves with him), then turned into small characters
       const [sxp, syp] = this.toScreen(px, py);
       pl.anchor(sxp, syp);
@@ -424,11 +562,11 @@ export class Game {
       // 3. onto the screen
       const ctx = this.ctx;
       wl.compose(ctx, { background: ASCII_SCREEN, warp });
-      pl.compose(ctx, { region: { x0: sxp - 80 * z, y0: syp - 130 * z, x1: sxp + 80 * z, y1: syp + 28 * z }, warp: warping ? warp : null });
+      if (showPlayer) pl.compose(ctx, { region: { x0: sxp - 80 * z, y0: syp - 130 * z, x1: sxp + 80 * z, y1: syp + 28 * z }, warp: warping ? warp : null });
       // 4. the words on signs stay sharp, on top
       this.dctx = ctx;
       this.worldTransform(ctx, this.dpr, this.dpr);
-      this.drawSignText(th, true);
+      if (this.mode === "play") this.drawSignText(th, true);
     } else {
       const ctx = this.ctx;
       this.dctx = ctx;
@@ -438,16 +576,52 @@ export class Game {
       this.drawSwirls(W, H, th);
       this.worldTransform(ctx, this.dpr, this.dpr);
       this.drawWorld(th);
-      this.drawSignText(th, false);
-      drawPlayer(ctx, p, px, py, this.visAngle, this.clock, th.look, extra);
+      if (showPlayer) this.drawSignText(th, false);
+      if (showPlayer) drawPlayer(ctx, p, px, py, this.visAngle, this.clock, th.look, extra);
+      else {
+        ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+        this.drawTitle(W, H, th, false);
+      }
     }
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     if (warping) this.drawBits(th);
     this.drawHud(W, H, th);
   }
 
+  // where the camera looks on the level select: slowly along the level, start to finish, then again
+  private lastAttractX = 0;
+  private attractPoint(): [number, number, boolean] {
+    const x0 = this.level.spawn[0];
+    const span = Math.max(1000, this.level.finish[0] - x0);
+    const x = x0 + ((this.selectT * 300) % span);
+    const hit = this.terrain.groundBelow(x, -6000, 6000);
+    const y = (hit ? hit.y : this.level.spawn[1]) - 120;
+    const wrapped = x < this.lastAttractX || this.selectT === 0;
+    this.lastAttractX = x;
+    return [x, y, wrapped];
+  }
+
+  // PINK RUSH, big (on the level select)
+  private drawTitle(W: number, H: number, th: Theme, ascii: boolean) {
+    const ctx = this.dctx === this.ctx ? this.ctx : this.dctx;
+    const size = Math.min(W * 0.14, H * 0.2, 170);
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = ascii ? `900 ${Math.round(size)}px Impact, "Arial Black", "Helvetica Neue", sans-serif` : `${Math.round(size * 0.8)}px ${this.font}`;
+    ctx.fillStyle = ascii ? "#ff7ddf" : th.pink;
+    if (!ascii) {
+      ctx.fillStyle = th.hudText;
+      ctx.fillText("PINK RUSH", W / 2 + 4, H * 0.2 + 4);
+      ctx.fillStyle = th.pink;
+    }
+    ctx.fillText("PINK RUSH", W / 2, H * 0.2);
+    ctx.restore();
+  }
+
   private drawWorld(th: Theme) {
     this.drawSigns(th);
+    this.drawCheckpoints(th);
     this.drawGround(th);
     this.drawBlocks(th);
     this.drawFinish(th);
@@ -513,21 +687,35 @@ export class Game {
   private drawSprings(th: Theme) {
     const ctx = this.dctx;
     this.level.springs.forEach((s, i) => {
-      const a = ((s.angle ?? -90) + 90) * (Math.PI / 180);
       const h = 18 + this.springSquash[i] * 10; // it shoots up when used, then settles
       ctx.save();
       ctx.translate(s.x, s.y);
-      ctx.rotate(a);
       ctx.strokeStyle = th.springBase;
       ctx.lineWidth = 3.5;
-      ctx.beginPath();
-      for (let k = 0; k <= 4; k++) ctx.lineTo(k % 2 === 0 ? -9 : 9, -4 - (k / 4) * h);
-      ctx.stroke();
-      ctx.fillStyle = th.springBase;
-      ctx.fillRect(-14, -5, 28, 5);
-      ctx.fillStyle = th.pink;
-      ctx.fillRect(-18, -h - 10, 36, 9);
-      ctx.strokeRect(-18, -h - 10, 36, 9);
+      if (s.w) {
+        // a wide trampoline (pit floors): a long pink pad on a row of springs
+        const half = s.w / 2;
+        const n = Math.max(2, Math.round(s.w / 70));
+        for (let j = 0; j <= n; j++) {
+          const cx = -half + 10 + ((s.w - 20) * j) / n;
+          ctx.beginPath();
+          for (let k = 0; k <= 4; k++) ctx.lineTo(cx + (k % 2 === 0 ? -7 : 7), -2 - (k / 4) * h);
+          ctx.stroke();
+        }
+        ctx.fillStyle = th.pink;
+        ctx.fillRect(-half, -h - 9, s.w, 8);
+        ctx.strokeRect(-half, -h - 9, s.w, 8);
+      } else {
+        ctx.rotate(((s.angle ?? -90) + 90) * (Math.PI / 180));
+        ctx.beginPath();
+        for (let k = 0; k <= 4; k++) ctx.lineTo(k % 2 === 0 ? -9 : 9, -4 - (k / 4) * h);
+        ctx.stroke();
+        ctx.fillStyle = th.springBase;
+        ctx.fillRect(-14, -5, 28, 5);
+        ctx.fillStyle = th.pink;
+        ctx.fillRect(-18, -h - 10, 36, 9);
+        ctx.strokeRect(-18, -h - 10, 36, 9);
+      }
       ctx.restore();
     });
   }
@@ -598,6 +786,29 @@ export class Game {
       ctx.fillText("FINISH", fx, fy - 130);
     }
     ctx.restore();
+  }
+
+  // the flags (pink once you've passed them)
+  private drawCheckpoints(th: Theme) {
+    const ctx = this.dctx;
+    const cps = this.level.checkpoints ?? [];
+    cps.forEach((c, i) => {
+      const on = i <= this.checkpoint && this.mode === "play";
+      const wave = Math.sin(this.clock * 6 + i) * 5;
+      ctx.strokeStyle = th.signEdge;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(c.x, c.y);
+      ctx.lineTo(c.x, c.y - 120);
+      ctx.stroke();
+      ctx.fillStyle = on ? th.pink : th.groundLip;
+      ctx.beginPath();
+      ctx.moveTo(c.x + 2, c.y - 120);
+      ctx.lineTo(c.x + 48, c.y - 104 + wave);
+      ctx.lineTo(c.x + 2, c.y - 86);
+      ctx.closePath();
+      ctx.fill();
+    });
   }
 
   private drawFinish(th: Theme) {
@@ -706,6 +917,77 @@ export class Game {
     ctx.restore();
   }
 
+  // THE LEVEL SELECT: a card per level (best time on it), the chosen one lit up pink
+  private drawSelect(W: number, H: number, th: Theme, font: FontFn) {
+    const ctx = this.ctx;
+    const ascii = this.lookName === "ascii";
+    const n = this.levels.length;
+    const wide = W >= 760;
+    this.cards = [];
+    if (wide) {
+      const gap = 14;
+      const cw = Math.min(190, (W - 80 - gap * (n - 1)) / n);
+      const ch = 128;
+      const x0 = W / 2 - (cw * n + gap * (n - 1)) / 2;
+      const y0 = H * 0.5 - ch / 2;
+      for (let i = 0; i < n; i++) this.cards.push({ x: x0 + i * (cw + gap), y: y0 - (i === this.levelIndex ? 10 : 0), w: cw, h: ch });
+    } else {
+      const cw = Math.min(440, W - 36);
+      const ch = Math.min(58, (H * 0.56) / n - 8);
+      const y0 = H * 0.33;
+      for (let i = 0; i < n; i++) this.cards.push({ x: W / 2 - cw / 2 + (i === this.levelIndex ? 0 : 0), y: y0 + i * (ch + 8), w: cw, h: ch });
+    }
+    ctx.textBaseline = "middle";
+    this.cards.forEach((c, i) => {
+      const lv = this.levels[i];
+      const on = i === this.levelIndex;
+      const best = this.best[lv.name];
+      ctx.fillStyle = ascii ? "rgba(10,8,18,0.9)" : "rgba(255,250,242,0.95)";
+      ctx.fillRect(c.x, c.y, c.w, c.h);
+      ctx.strokeStyle = on ? th.pink : ascii ? "rgba(236,230,255,0.45)" : "rgba(22,17,29,0.5)";
+      ctx.lineWidth = on ? 3 : 1.5;
+      ctx.strokeRect(c.x, c.y, c.w, c.h);
+      ctx.fillStyle = on ? th.pink : th.hudText;
+      if (wide) {
+        ctx.textAlign = "center";
+        ctx.font = font(44);
+        ctx.fillText(String(i + 1), c.x + c.w / 2, c.y + 34);
+        ctx.font = font(15);
+        ctx.fillStyle = th.hudText;
+        ctx.fillText(lv.name, c.x + c.w / 2, c.y + 76, c.w - 12);
+        ctx.font = font(13);
+        ctx.globalAlpha = 0.8;
+        ctx.fillText(best !== undefined ? `BEST ${fmtTime(best)}` : "NOT DONE YET", c.x + c.w / 2, c.y + 104, c.w - 12);
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.textAlign = "left";
+        ctx.font = font(24);
+        ctx.fillText(String(i + 1), c.x + 14, c.y + c.h / 2);
+        ctx.font = font(15);
+        ctx.fillStyle = th.hudText;
+        ctx.fillText(lv.name, c.x + 48, c.y + c.h / 2);
+        ctx.textAlign = "right";
+        ctx.font = font(13);
+        ctx.globalAlpha = 0.8;
+        ctx.fillText(best !== undefined ? fmtTime(best) : "--", c.x + c.w - 14, c.y + c.h / 2);
+        ctx.globalAlpha = 1;
+      }
+    });
+    ctx.textAlign = "center";
+    ctx.fillStyle = th.hudText;
+    ctx.font = font(16);
+    const hintY = wide ? H * 0.5 + 100 : this.cards[n - 1].y + this.cards[n - 1].h + 30;
+    ctx.fillText(this.touch ? "TAP A LEVEL · TAP IT AGAIN TO GO" : "← → PICK A LEVEL   SPACE / ENTER = GO   V = LOOK", W / 2, hintY, W - 30);
+    if (!ascii) {
+      ctx.font = font(18);
+      ctx.fillText("A PINKMANE GAME", W / 2, H * 0.2 + Math.min(W * 0.14, H * 0.2, 170) * 0.62);
+    } else {
+      ctx.font = font(18);
+      ctx.fillStyle = th.hudText;
+      ctx.fillText("A PINKMANE GAME", W / 2, H * 0.2 + Math.min(W * 0.14, H * 0.2, 170) * 0.66);
+    }
+  }
+
   private drawHud(W: number, H: number, th: Theme) {
     const ctx = this.ctx;
     const p = this.player;
@@ -714,6 +996,23 @@ export class Game {
     ctx.save();
     ctx.textBaseline = "top";
     ctx.fillStyle = th.hudText;
+    if (this.mode === "select") {
+      this.drawSelect(W, H, th, font);
+      ctx.restore();
+      return;
+    }
+    // the level's name, typed out when it starts
+    if (this.levelT < 3.2 && !this.finished) {
+      const text = `LEVEL ${this.levelIndex + 1} · ${this.level.name}`;
+      const shown = text.slice(0, Math.floor(this.levelT * 32));
+      ctx.globalAlpha = Math.min(1, (3.2 - this.levelT) / 0.6);
+      ctx.font = font(30);
+      ctx.textAlign = "center";
+      ctx.fillStyle = th.pink;
+      ctx.fillText(shown + (shown.length < text.length ? "_" : ""), W / 2, Math.max(56, H * 0.12));
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = th.hudText;
+    }
     // the time
     ctx.font = font(26);
     ctx.textAlign = "right";
@@ -786,15 +1085,17 @@ export class Game {
       ctx.font = font(54);
       ctx.fillText("PAUSED", W / 2, H / 2 - 50);
       ctx.font = font(20);
-      ctx.fillText("ESC = PLAY    R = RESTART    V = LOOK", W / 2, H / 2 + 16);
+      ctx.fillText("ESC = PLAY    R = RESTART    L = LEVELS    V = LOOK", W / 2, H / 2 + 16);
     }
     // finished: the card types itself out, like code
     if (this.finished && this.warpT >= VORTEX.card) {
       const typed = Math.floor((this.warpT - VORTEX.card) * 40);
+      const last = this.levelIndex + 1 >= this.levels.length;
+      const go = this.touch ? "TAP" : "SPACE";
       const lines: [string, number, string][] = [
-        [`${this.level.name} DONE!`, 40, th.pink],
-        [`TIME ${fmtTime(this.runTime)}`, 28, th.hudText],
-        ["R = RUN IT AGAIN", 18, th.hudText],
+        [last ? "ALL LEVELS DONE!" : `${this.level.name} DONE!`, 40, th.pink],
+        [`TIME ${fmtTime(this.runTime)}${this.newBest ? "  NEW BEST!" : ""}`, 28, th.hudText],
+        [last ? `${go} = LEVELS   R = AGAIN` : `${go} = NEXT LEVEL   R = AGAIN   L = LEVELS`, 17, th.hudText],
       ];
       const cw = Math.min(480, W - 40);
       const appear = smooth((this.warpT - VORTEX.card) / 0.2);
@@ -825,6 +1126,8 @@ export class Game {
     ctx.restore();
   }
 }
+
+type FontFn = (px: number) => string;
 
 function fmtTime(t: number) {
   const m = Math.floor(t / 60);

@@ -181,7 +181,8 @@ export class AsciiLayer {
   // turn the scene into characters and put them on the screen.
   // background = this is the bottom layer: fill the screen with this colour first
   // region (css px) = only this part of the screen (faster, for Pinkmane)
-  compose(target: CanvasRenderingContext2D, opts: { background?: [number, number, number]; region?: { x0: number; y0: number; x1: number; y1: number }; warp?: Warp | null } = {}) {
+  // seed = change it every frame to make the characters flicker (like code rain); leave it out for steady characters
+  compose(target: CanvasRenderingContext2D, opts: { background?: [number, number, number]; region?: { x0: number; y0: number; x1: number; y1: number }; warp?: Warp | null; seed?: number } = {}) {
     const img = this.img;
     if (!img) return;
     const st = this.style;
@@ -275,7 +276,7 @@ export class AsciiLayer {
         else {
           const lv = Math.min(nl - 1, Math.floor(Math.pow(v, st.gamma) * nl));
           const grp = this.levelIdx[lv];
-          id = grp[(((x + c0) * 7 + (y + r0) * 13) % grp.length + grp.length) % grp.length];
+          id = grp[(((x + c0) * 7 + (y + r0) * 13 + (opts.seed ?? 0) * ((x * 31 + y * 17) % 5 === 0 ? 1 : 0)) % grp.length + grp.length) % grp.length];
         }
         const k = i * 4;
         const cr = Math.min(255, data[k] * boost) | 0;
