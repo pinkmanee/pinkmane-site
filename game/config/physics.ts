@@ -24,26 +24,26 @@ export const PHYSICS = {
   launchSpeed: 520, // ...faster than this = you fly off it instead of sticking to it
 
   // ---------- in the air ----------
-  gravity: 2150, // the pull down (px/s²)
+  gravity: 1950, // the pull down (px/s²)
   fallGravity: 1.2, // falling pulls this much harder than rising: snappy, not floaty
-  apexGravity: 0.55, // at the top of a held jump gravity is softer: a little hang time
-  apexWindow: 150, // "the top of the jump" = moving up or down slower than this (px/s)
+  apexGravity: 0.45, // at the top of a held jump gravity is softer: a little hang time
+  apexWindow: 190, // "the top of the jump" = moving up or down slower than this (px/s)
   maxFall: 1550, // fastest fall (px/s)
   airAccel: 1000, // steering in the air (px/s²)
   airTopSpeed: 880, // steering in the air speeds you up to this (you keep more if you were already faster)
   airDrag: 0.3, // no keys in the air: sideways speed fades by this much per second (0 = never, 1 = fast)
 
   // ---------- jumping ----------
-  jumpSpeed: 790, // jump power (px/s). A full held jump goes about 2 x your height
-  jumpCut: 320, // let go of jump early: your upward speed is cut to this = a small hop
+  jumpSpeed: 930, // jump power (px/s). A full held jump goes about 3.5 x your height
+  jumpCut: 380, // let go of jump early: your upward speed is cut to this = a small hop
   jumpFromSlope: 0.6, // jumping while running up a hill adds this much of your upward speed
   coyoteTime: 0.1, // you can still jump this long after running off an edge (s)
   jumpBuffer: 0.12, // pressing jump this long before you land still jumps when you land (s)
 
   // ---------- walls ----------
   wallSlideSpeed: 230, // sliding down a wall: the fastest you slide (px/s)
-  wallJumpX: 610, // wall jump: push away from the wall (px/s)
-  wallJumpY: 770, // wall jump: push up (px/s)
+  wallJumpX: 640, // wall jump: push away from the wall (px/s)
+  wallJumpY: 860, // wall jump: push up (px/s)
   wallJumpLock: 0.15, // after a wall jump, your keys don't steer for this long, so it's snappy (s)
   wallCoyote: 0.09, // you can still wall jump this long after leaving the wall (s)
 
@@ -52,7 +52,8 @@ export const PHYSICS = {
   slideFriction: 220, // how fast a slide slows down on flat ground (px/s²)
   slideDownhill: 1.5, // a slide speeds up more going downhill...
   slideUphill: 0.6, // ...and loses less going uphill
-  crawlSpeed: 150, // crawling (↓ when slow, or stuck under something low) (px/s)
+  crawlSpeed: 300, // crawling (↓ + left/right when slow) (px/s)
+  lowScoot: 480, // under something low you always keep at least this speed, so you slide right through (px/s)
 
   // ---------- stomp (↓ + jump in the air) ----------
   stompSpeed: 1600, // how fast you slam down (px/s)
@@ -73,8 +74,7 @@ export const FIXED_DT = 1 / 60;
 
 // THE CAMERA
 export const CAMERA = {
-  viewHeight: 560, // how much of the world fits from top to bottom of the screen (px). Bigger = see more
-  asciiViewHeight: 340, // ...the same in the ASCII look (zoomed in more, so Pinkmane is made of more characters)
+  viewHeight: 680, // how much of the world fits from top to bottom of the screen (px). Bigger = see more
   minViewWidth: 620, // on narrow screens (phones held upright) at least this much fits side to side (px)
   lookAhead: 0.33, // the camera looks ahead in the direction you're moving: this much of your speed...
   lookAheadMax: 320, // ...up to this many pixels

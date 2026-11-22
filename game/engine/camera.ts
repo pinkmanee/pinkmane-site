@@ -11,7 +11,7 @@ export class Camera {
   zoom = 1;
   private look = 0;
   private ready = false;
-  viewHeight: number = C.viewHeight; // how much of the world fits top to bottom (the ASCII look zooms in more)
+  viewHeight: number = C.viewHeight; // how much of the world fits top to bottom (lower = zoomed in; the door vortex zooms in)
 
   // how much to zoom so the right amount of the world fits on this screen
   baseZoom(viewW: number, viewH: number) {

@@ -5,7 +5,7 @@
 import { PHYSICS as P } from "../config/physics";
 import type { Player, Pose } from "./player";
 
-export type Look = { ink: string; skin: string; mohawk: string; mohawkEdge: string; hairSize: number; pants: string; pantsBack: string };
+export type Look = { ink: string; skin: string; mohawk: string; mohawkEdge: string; hairSize: number; pants: string; pantsBack: string; thick: number };
 // the paper look
 export const LOOK: Look = {
   ink: "#16111d", // outlines
@@ -15,16 +15,18 @@ export const LOOK: Look = {
   hairSize: 1, // how big the spikes are
   pants: "#6d6a78", // baggy grey pants
   pantsBack: "#57545f", // the leg that's further away
+  thick: 1, // how thick his lines are
 };
 // the ASCII look (on a dark background the lines have to be light)
 export const ASCII_LOOK: Look = {
-  ink: "#f3efff",
+  ink: "#ffffff",
   skin: "#ffffff",
   mohawk: "#ff3bd0",
   mohawkEdge: "#ff2fc8",
-  hairSize: 1.12,
-  pants: "#a7a1c4",
-  pantsBack: "#7d7799",
+  hairSize: 1.15,
+  pants: "#ddd7f6",
+  pantsBack: "#b4acd8",
+  thick: 1.35,
 };
 
 type Rig = {
@@ -39,14 +41,13 @@ type Rig = {
 
 const polar = (a: number, len: number): [number, number] => [Math.sin(a) * len, Math.cos(a) * len];
 
-function rigFor(pose: Pose, p: Player, t: number): Rig {
+function rigFor(pose: Pose, p: Player, t: number, ph: number): Rig {
   const s = p.speed;
   const k = Math.min(1, s / P.topRunSpeed);
   const fast = Math.min(1, Math.max(0, (s - P.topRunSpeed) / (P.maxSpeed - P.topRunSpeed)));
-  const ph = p.runPhase;
   switch (pose) {
     case "run": {
-      const A = 0.32 + 0.6 * k;
+      const A = 0.34 + 0.62 * k + 0.12 * fast; // longer strides when faster
       // thigh swings back and forth; the knee bends most just after the leg passes under you (heel kicks up)
       const leg = (o: number): [number, number] => [Math.sin(ph + o) * A + 0.1 * k, -(0.15 + 1.55 * Math.max(0, Math.cos(ph + o - 0.4))) * (0.5 + 0.5 * k)];
       const arm = (o: number): [number, number] => [-Math.sin(ph + o) * A * 1.15, 0.6 + 0.9 * k];
@@ -85,13 +86,58 @@ function rigFor(pose: Pose, p: Player, t: number): Rig {
   }
 }
 
+// SMOOTH CHANGES BETWEEN POSES: when the pose changes (run -> jump, jump -> land...) the body moves
+// from where it was into the new pose over a split second, instead of snapping.
+const BLEND: Partial<Record<Pose, number>> = { jump: 0.07, stomp: 0.06, wall: 0.08, skid: 0.08, slide: 0.08 }; // seconds (others 0.11)
+type Blend = { pose: Pose; from: Rig; start: number; last: Rig | null; lastT: number };
+const blends = new WeakMap<Player, Blend>();
+const mix = (a: number, b: number, k: number) => a + (b - a) * k;
+const mix2 = (a: [number, number], b: [number, number], k: number): [number, number] => [mix(a[0], b[0], k), mix(a[1], b[1], k)];
+function mixRig(a: Rig, b: Rig, k: number): Rig {
+  return { hipY: mix(a.hipY, b.hipY, k), lean: mix(a.lean, b.lean, k), legF: mix2(a.legF, b.legF, k), legB: mix2(a.legB, b.legB, k), armF: mix2(a.armF, b.armF, k), armB: mix2(a.armB, b.armB, k), hair: mix(a.hair, b.hair, k) };
+}
+function smoothRig(p: Player, t: number, ph: number): Rig {
+  const target = rigFor(p.pose, p, t, ph);
+  let b = blends.get(p);
+  if (!b || t < b.lastT || t - b.lastT > 0.5) {
+    b = { pose: p.pose, from: target, start: t, last: null, lastT: t };
+    blends.set(p, b);
+  }
+  if (p.pose !== b.pose) {
+    b.from = b.last ?? target;
+    b.pose = p.pose;
+    b.start = t;
+  }
+  const dur = BLEND[p.pose] ?? 0.11;
+  const u = Math.min(1, (t - b.start) / dur);
+  const r = u >= 1 ? target : mixRig(b.from, target, u * u * (3 - 2 * u));
+  b.last = r;
+  b.lastT = t;
+  return r;
+}
+
+export type DrawExtra = {
+  phase?: number; // the run cycle right now (smooth between physics steps)
+  scale?: number; // smaller (for getting sucked into the door)
+  spin?: number; // extra spin (radians)
+};
+
 // draw him at (x, y) = the middle of his feet, tilted by angle, facing left (-1) or right (1)
-export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, x: number, y: number, angle: number, t: number, look: Look = LOOK) {
+export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, x: number, y: number, angle: number, t: number, look: Look = LOOK, extra: DrawExtra = {}) {
   const LOOK = look;
-  const r = rigFor(p.pose, p, t);
+  const r = smoothRig(p, t, extra.phase ?? p.runPhase);
+  const sc = extra.scale ?? 1;
+  if (sc <= 0.01) return;
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
+  if (sc !== 1 || extra.spin) {
+    // shrink and spin around his middle
+    ctx.translate(0, -30);
+    ctx.rotate(extra.spin ?? 0);
+    ctx.scale(sc, sc);
+    ctx.translate(0, 30);
+  }
   ctx.scale(p.facing, 1);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -111,7 +157,7 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, x: number, 
   };
   const line = (pts: [number, number][], w: number, color: string) => {
     ctx.strokeStyle = color;
-    ctx.lineWidth = w;
+    ctx.lineWidth = w * LOOK.thick;
     ctx.beginPath();
     ctx.moveTo(pts[0][0], pts[0][1]);
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);

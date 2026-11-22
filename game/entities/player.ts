@@ -38,6 +38,7 @@ export class Player {
   lastWallDir = 0;
   pose: Pose = "idle";
   runPhase = 0; // where his legs are in the run cycle
+  prevRunPhase = 0; // ...one physics step ago (so the legs move smoothly on fast screens too)
   events: PlayerEvent[] = [];
   private coyote = 0;
   private jumpBuf = 0;
@@ -45,6 +46,7 @@ export class Player {
   private lock = 0; // can't steer (after a wall jump)
   private springTime = 0; // just launched by a spring: letting go of jump doesn't cut it
   private skidding = false;
+  private crawling = false; // (stays on until you speed up again, so the pose doesn't flicker)
 
   constructor(x: number, y: number) {
     this.x = this.prevX = x;
@@ -95,6 +97,7 @@ export class Player {
   update(dt: number, pad: Pad, t: Terrain) {
     this.prevX = this.x;
     this.prevY = this.y;
+    this.prevRunPhase = this.runPhase;
     this.events.length = 0;
     this.jumpBuf = pad.jumpPressed ? P.jumpBuffer : Math.max(0, this.jumpBuf - dt);
     this.coyote = Math.max(0, this.coyote - dt);
@@ -129,13 +132,18 @@ export class Player {
 
     // running
     this.skidding = false;
-    const crawling = this.sliding && Math.abs(this.gsp) < P.slideMinSpeed * 0.6;
-    if (this.sliding && !crawling) {
+    if (!this.sliding || Math.abs(this.gsp) > P.crawlSpeed + 60) this.crawling = false;
+    else if (Math.abs(this.gsp) < P.slideMinSpeed * 0.6) this.crawling = true;
+    if (this.sliding && ceiling) {
+      // under something low: keep sliding through it (never slower than lowScoot)
+      const way = dir !== 0 ? dir : this.gsp !== 0 ? Math.sign(this.gsp) : this.facing;
+      this.gsp = way * Math.max(Math.abs(this.gsp), P.lowScoot);
+      this.crawling = false;
+    } else if (this.sliding && !this.crawling) {
       this.slowDown(P.slideFriction * dt);
-    } else if (crawling) {
-      // crawling: slow and steady (and you can't stop under something low)
+    } else if (this.crawling) {
+      // crawling: slow and steady
       if (dir !== 0) this.gsp = dir * P.crawlSpeed;
-      else if (ceiling) this.gsp = this.facing * P.crawlSpeed;
       else this.slowDown(P.friction * 2 * dt);
     } else if (dir !== 0) {
       if (this.gsp !== 0 && Math.sign(this.gsp) !== dir) {
@@ -405,13 +413,13 @@ export class Player {
   private updatePose(dt: number, pad: Pad) {
     if (this.onGround) {
       const s = Math.abs(this.gsp);
-      if (this.sliding) this.pose = s < P.slideMinSpeed * 0.6 ? "crawl" : "slide";
+      if (this.sliding) this.pose = this.crawling ? "crawl" : "slide";
       else if (this.skidding) this.pose = "skid";
       else if (s > 15 || pad.dir !== 0) this.pose = "run";
       else this.pose = "idle";
-      // legs go round faster the faster you run
-      const rate = this.pose === "crawl" ? s / 18 : s / 25;
-      this.runPhase += Math.min(rate, 42) * dt;
+      // legs go round faster the faster you run (but not so fast they flicker: longer strides instead)
+      const rate = this.pose === "crawl" ? Math.min(14, s / 14) : Math.min(19, 3 + s / 62);
+      this.runPhase += rate * dt;
     } else {
       if (this.stomping) this.pose = "stomp";
       else if (this.wallDir !== 0 && this.vy > 0) this.pose = "wall";

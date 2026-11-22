@@ -1,11 +1,12 @@
 // THE GAME: runs the physics 60 times a second (on every screen), moves the camera and draws everything.
 // Two looks: ASCII (everything drawn as coloured text characters) and PAPER (hand-drawn style). V switches.
+// Reaching the door: a vortex twists the world into the door and sucks Pinkmane in like code.
 
 import { CAMERA, FIXED_DT, PHYSICS as P } from "../config/physics";
 import { Player, type Pad } from "../entities/player";
 import { ASCII_LOOK, drawPlayer, LOOK, type Look } from "../entities/drawPlayer";
 import type { LevelData } from "../levels/types";
-import { AsciiLayer, PLAYER_STYLE, WORLD_STYLE } from "./ascii";
+import { AsciiLayer, PLAYER_STYLE, WORLD_STYLE, type Warp } from "./ascii";
 import { Camera } from "./camera";
 import { Input } from "./input";
 import { Terrain } from "./terrain";
@@ -30,6 +31,7 @@ type Theme = {
   signText: string;
   door: string;
   hudText: string;
+  code: string[]; // the colours of the code flying into the vortex
   look: Look;
 };
 const THEMES: Record<LookName, Theme> = {
@@ -49,35 +51,55 @@ const THEMES: Record<LookName, Theme> = {
     signText: "#16111d",
     door: "#16111d",
     hudText: "#16111d",
+    code: ["#ff3bd0", "#16111d", "#7a5cff"],
     look: LOOK,
   },
   ascii: {
-    bg: "#1b1630",
-    swirl: "rgba(130, 112, 230, 0.32)",
-    ground: "#463d7c",
-    groundLip: "#8274d0",
-    groundEdge: "#f1ecff",
-    block: "#4b4282",
-    blockEdge: "#e8e2ff",
+    bg: "#0d0a18", // (dark enough that the sky stays empty: only things you can touch get characters)
+    swirl: "rgba(120, 100, 220, 0.28)",
+    ground: "#3a3270",
+    groundLip: "#7466c8",
+    groundEdge: "#f4f0ff",
+    block: "#3b3274",
+    blockEdge: "#efeaff",
     pink: "#ff3bd0",
-    springBase: "#d9d2ff",
+    springBase: "#e2dcff",
     boosterBase: "#2e2752",
     signCard: "#0a0812",
     signEdge: "#cfc6ff",
     signText: "#ffffff",
     door: "#0a0812",
     hudText: "#ece6ff",
+    code: ["#ff3bd0", "#ffffff", "#a99cff", "#ff8be6"],
     look: ASCII_LOOK,
   },
 };
 const ASCII_SCREEN: [number, number, number] = [7, 6, 12]; // the screen behind the characters
 const MONO = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
-const ASCII_COLUMNS = 150; // how many world characters fit across the screen (more = smaller characters, slower)
 const ASCII_RATIO = 1.55; // a character is this much taller than wide
-const PLAYER_FINER = 1.55; // Pinkmane's characters are this much smaller than the world's
+const WORLD_COLUMNS = 165; // about how many world characters fit across the screen
+const PLAYER_ROWS = 12; // Pinkmane is about this many characters tall
 const ASCII_MAX_PIXELS = 3_000_000; // big sharp screens draw the ASCII look at fewer real pixels (keeps it at 60 fps)
 
+// THE DOOR VORTEX (seconds)
+const VORTEX = {
+  suck: 1.15, // how long Pinkmane takes to get pulled in
+  build: 1.4, // how long the swirl takes to reach full strength
+  card: 1.55, // when the "done" card starts typing
+  radius: 210, // how far the swirl reaches (world px)
+  twist: 7, // how tightly it twists (radians in the middle)
+  pull: 2.3, // how hard it pulls everything in
+  zoomIn: 0.78, // the camera moves in this much
+};
+const CODE_CHARS = "01<>/\\{}[];=+*#$&%01010110";
+
+type Bit = { a: number; r: number; c: string; col: string; age: number }; // one flying code character
+
 const ease = (rate: number, dt: number) => 1 - Math.exp(-rate * dt);
+const smooth = (u: number) => {
+  const v = Math.min(1, Math.max(0, u));
+  return v * v * (3 - 2 * v);
+};
 
 export class Game {
   private ctx: CanvasRenderingContext2D;
@@ -97,6 +119,9 @@ export class Game {
   private started = false;
   private runTime = 0;
   private finished = false;
+  private warpT = -1; // seconds since you touched the door (-1 = not yet)
+  private warpFrom: [number, number] = [0, 0];
+  private bits: Bit[] = [];
   private springCool: number[];
   private springSquash: number[];
   private groundFill: Path2D[] = [];
@@ -167,7 +192,7 @@ export class Game {
   // a quick look at the player (for testing)
   get state() {
     const p = this.player;
-    return { x: p.x, y: p.y, gsp: p.gsp, vx: p.vx, vy: p.vy, onGround: p.onGround, pose: p.pose, angle: p.angle, finished: this.finished, time: this.runTime };
+    return { x: p.x, y: p.y, gsp: p.gsp, vx: p.vx, vy: p.vy, onGround: p.onGround, pose: p.pose, angle: p.angle, finished: this.finished, time: this.runTime, warp: this.warpT };
   }
 
   // the tab is hidden or the window lost focus: pause
@@ -189,15 +214,19 @@ export class Game {
     this.setupLook();
   };
 
-  // make (or resize) the ASCII layers, and set the zoom for the look
+  // make (or resize) the ASCII layers
   private setupLook() {
-    this.cam.viewHeight = this.lookName === "ascii" ? CAMERA.asciiViewHeight : CAMERA.viewHeight;
     if (this.lookName !== "ascii") return;
     if (!this.worldLayer) this.worldLayer = new AsciiLayer(WORLD_STYLE);
     if (!this.playerLayer) this.playerLayer = new AsciiLayer(PLAYER_STYLE);
-    const cell = Math.max(6, this.viewW / ASCII_COLUMNS);
-    this.worldLayer.resize(this.viewW, this.viewH, this.dpr, cell, ASCII_RATIO);
-    this.playerLayer.resize(this.viewW, this.viewH, this.dpr, Math.max(3, cell / PLAYER_FINER), ASCII_RATIO);
+    const W = this.viewW;
+    const H = this.viewH;
+    const cell = Math.min(11, Math.max(6.5, W / WORLD_COLUMNS));
+    this.worldLayer.resize(W, H, this.dpr, cell, ASCII_RATIO);
+    // Pinkmane's characters: small enough that he's always about PLAYER_ROWS characters tall
+    const heightOnScreen = P.height * this.cam.baseZoom(W, H);
+    const pcell = Math.min(cell / 1.3, Math.max(2.6, heightOnScreen / PLAYER_ROWS / ASCII_RATIO));
+    this.playerLayer.resize(W, H, this.dpr, pcell, ASCII_RATIO);
   }
 
   private switchLook() {
@@ -210,9 +239,12 @@ export class Game {
 
   private restart() {
     this.player.respawn(this.level.spawn[0], this.level.spawn[1]);
+    this.cam.viewHeight = CAMERA.viewHeight;
     this.cam.snap(this.player.x, this.player.y, this.viewW, this.viewH);
     this.started = false;
     this.finished = false;
+    this.warpT = -1;
+    this.bits = [];
     this.runTime = 0;
     this.visAngle = 0;
   }
@@ -251,13 +283,21 @@ export class Game {
   private step(dt: number) {
     const inp = this.input;
     const p = this.player;
-    const lockKeys = this.finished;
+    if (this.finished) {
+      // in the vortex: he's not running any more (presses are thrown away)
+      inp.take("jump");
+      inp.take("down");
+      p.prevX = p.x;
+      p.prevY = p.y;
+      p.prevRunPhase = p.runPhase;
+      return;
+    }
     const pad: Pad = {
-      dir: lockKeys ? 0 : (inp.held("right") ? 1 : 0) - (inp.held("left") ? 1 : 0),
-      down: !lockKeys && inp.held("down"),
-      downPressed: inp.take("down") && !lockKeys,
-      jump: !lockKeys && inp.held("jump"),
-      jumpPressed: inp.take("jump") && !lockKeys,
+      dir: (inp.held("right") ? 1 : 0) - (inp.held("left") ? 1 : 0),
+      down: inp.held("down"),
+      downPressed: inp.take("down"),
+      jump: inp.held("jump"),
+      jumpPressed: inp.take("jump"),
     };
     p.update(dt, pad, this.terrain);
 
@@ -287,17 +327,31 @@ export class Game {
     }
     // the timer starts when you move
     if (!this.started && (p.speed > 1 || !p.onGround)) this.started = true;
-    if (this.started && !this.finished) this.runTime += dt;
-    // the finish door
+    if (this.started) this.runTime += dt;
+    // the finish door: the time stops and the vortex starts
     const f = this.level.finish;
-    if (!this.finished && Math.abs(p.x - f[0]) < 40 && Math.abs(p.y - f[1]) < 90) this.finished = true;
+    if (Math.abs(p.x - f[0]) < 40 && Math.abs(p.y - f[1]) < 90) {
+      this.finished = true;
+      this.warpT = 0;
+      this.warpFrom = [p.x, p.y];
+      p.pose = "fall"; // (arms flailing)
+      this.cam.viewHeight = CAMERA.viewHeight * VORTEX.zoomIn;
+    }
   }
 
   // ======================= DRAWING =======================
-  // sx, sy = screen px -> the canvas we draw on (dpr for the screen, 1 / cell size for an ASCII layer)
-  private worldTransform(c: CanvasRenderingContext2D, sx: number, sy: number) {
+  // the world -> the canvas we draw on. a, b = screen px -> that canvas (scale, offset)
+  private worldTransform(c: CanvasRenderingContext2D, ax: number, ay: number, bx = 0, by = 0) {
     const z = this.cam.zoom;
-    c.setTransform(sx * z, 0, 0, sy * z, sx * (this.viewW / 2 - this.cam.x * z), sy * (this.viewH / 2 - this.cam.y * z));
+    c.setTransform(ax * z, 0, 0, ay * z, ax * (this.viewW / 2 - this.cam.x * z) + bx, ay * (this.viewH / 2 - this.cam.y * z) + by);
+  }
+  private toScreen(x: number, y: number): [number, number] {
+    const z = this.cam.zoom;
+    return [this.viewW / 2 + (x - this.cam.x) * z, this.viewH / 2 + (y - this.cam.y) * z];
+  }
+  private doorCentre(): [number, number] {
+    const [fx, fy] = this.level.finish;
+    return [fx, fy - 55];
   }
 
   private render(alpha: number, dt: number) {
@@ -305,39 +359,72 @@ export class Game {
     const H = this.viewH;
     const p = this.player;
     const th = THEMES[this.lookName];
+    const z0 = this.cam.zoom;
     // where he is right now, between the last two physics steps (smooth on any screen)
-    const px = p.prevX + (p.x - p.prevX) * alpha;
-    const py = p.prevY + (p.y - p.prevY) * alpha;
-    this.cam.update(dt, px, py, p.vx, p.vy, p.speed, W, H);
+    let px = p.prevX + (p.x - p.prevX) * alpha;
+    let py = p.prevY + (p.y - p.prevY) * alpha;
+    const phase = p.prevRunPhase + (p.runPhase - p.prevRunPhase) * alpha;
     const want = p.onGround ? p.angle : 0;
     this.visAngle += (want - this.visAngle) * ease(p.onGround ? 20 : 8, dt);
+
+    // the vortex: he gets pulled into the door, shrinking and spinning
+    let scale = 1;
+    let spin = 0;
+    const warping = this.warpT >= 0;
+    if (warping) {
+      this.warpT += dt;
+      this.updateBits(dt);
+      const [cx, cy] = this.doorCentre();
+      const q = smooth(this.warpT / VORTEX.suck);
+      px = this.warpFrom[0] + (cx - this.warpFrom[0]) * q;
+      py = this.warpFrom[1] + (cy + 30 - this.warpFrom[1]) * q;
+      scale = 1 - smooth((this.warpT - 0.12) / (VORTEX.suck - 0.12));
+      spin = this.warpT * this.warpT * 9;
+      this.cam.update(dt, cx, cy + 40, 0, 0, 0, W, H);
+    } else this.cam.update(dt, px, py, p.vx, p.vy, p.speed, W, H);
+    const z = this.cam.zoom;
+    if (this.lookName === "ascii" && Math.abs(z - z0) > 1e-4 && this.worldLayer && this.playerLayer) {
+      // (the camera zooms out at speed: keep Pinkmane's characters about the same count)
+      const want2 = Math.min(this.worldLayer.cell / 1.3, Math.max(2.6, (P.height * z) / PLAYER_ROWS / ASCII_RATIO));
+      if (Math.abs(want2 - this.playerLayer.cell) / this.playerLayer.cell > 0.12) this.playerLayer.resize(W, H, this.dpr, want2, ASCII_RATIO);
+    }
+    const extra = { phase, scale, spin };
 
     const wl = this.worldLayer;
     const pl = this.playerLayer;
     if (this.lookName === "ascii" && wl && pl) {
-      // 1. the world, drawn small, then turned into big characters
+      // the swirl (screen px)
+      let warp: Warp | null = null;
+      if (warping) {
+        const [cx, cy] = this.toScreen(...this.doorCentre());
+        const e = smooth(this.warpT / VORTEX.build);
+        warp = { cx, cy, radius: VORTEX.radius * z, twist: VORTEX.twist * e, pull: VORTEX.pull * e };
+      }
+      // 1. the world, drawn small (its grid moves with the world), then turned into big characters
+      wl.anchor(W / 2 - this.cam.x * z, H / 2 - this.cam.y * z);
+      const [wax, way, wbx, wby] = wl.sceneMatrix();
       const w = wl.sctx;
       this.dctx = w;
       w.setTransform(1, 0, 0, 1, 0, 0);
       w.fillStyle = th.bg;
       w.fillRect(0, 0, wl.cols, wl.rows);
-      w.setTransform(1 / wl.cw, 0, 0, 1 / wl.ch, 0, 0);
+      w.setTransform(wax, 0, 0, way, wbx, wby);
       this.drawSwirls(W, H, th);
-      this.worldTransform(w, 1 / wl.cw, 1 / wl.ch);
+      this.worldTransform(w, wax, way, wbx, wby);
       this.drawWorld(th);
-      // 2. Pinkmane, drawn on his own, then turned into small characters
+      // 2. Pinkmane, drawn on his own (his grid moves with him), then turned into small characters
+      const [sxp, syp] = this.toScreen(px, py);
+      pl.anchor(sxp, syp);
+      const [pax, pay, pbx, pby] = pl.sceneMatrix();
       const pc = pl.sctx;
       pc.setTransform(1, 0, 0, 1, 0, 0);
       pc.clearRect(0, 0, pl.cols, pl.rows);
-      this.worldTransform(pc, 1 / pl.cw, 1 / pl.ch);
-      drawPlayer(pc, p, px, py, this.visAngle, this.clock, th.look);
+      this.worldTransform(pc, pax, pay, pbx, pby);
+      drawPlayer(pc, p, px, py, this.visAngle, this.clock, th.look, extra);
       // 3. onto the screen
       const ctx = this.ctx;
-      wl.compose(ctx, ASCII_SCREEN);
-      const z = this.cam.zoom;
-      const sxp = W / 2 + (px - this.cam.x) * z;
-      const syp = H / 2 + (py - this.cam.y) * z;
-      pl.compose(ctx, undefined, { x0: sxp - 75 * z, y0: syp - 125 * z, x1: sxp + 75 * z, y1: syp + 25 * z });
+      wl.compose(ctx, { background: ASCII_SCREEN, warp });
+      pl.compose(ctx, { region: { x0: sxp - 80 * z, y0: syp - 130 * z, x1: sxp + 80 * z, y1: syp + 28 * z }, warp: warping ? warp : null });
       // 4. the words on signs stay sharp, on top
       this.dctx = ctx;
       this.worldTransform(ctx, this.dpr, this.dpr);
@@ -352,9 +439,10 @@ export class Game {
       this.worldTransform(ctx, this.dpr, this.dpr);
       this.drawWorld(th);
       this.drawSignText(th, false);
-      drawPlayer(ctx, p, px, py, this.visAngle, this.clock, th.look);
+      drawPlayer(ctx, p, px, py, this.visAngle, this.clock, th.look, extra);
     }
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    if (warping) this.drawBits(th);
     this.drawHud(W, H, th);
   }
 
@@ -365,6 +453,7 @@ export class Game {
     this.drawFinish(th);
     this.drawBoosters(th);
     this.drawSprings(th);
+    if (this.warpT >= 0) this.drawVortex(th);
   }
 
   // big soft swirls in the background (they drift slower than the world: a far-away layer)
@@ -398,12 +487,12 @@ export class Game {
       ctx.save();
       ctx.clip(this.groundFill[i]);
       ctx.strokeStyle = th.groundLip;
-      ctx.lineWidth = 26;
+      ctx.lineWidth = 30;
       ctx.lineJoin = "round";
       ctx.stroke(this.groundTop[i]);
       ctx.restore();
       ctx.strokeStyle = th.groundEdge;
-      ctx.lineWidth = 6;
+      ctx.lineWidth = 7;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       ctx.stroke(this.groundTop[i]);
@@ -416,7 +505,7 @@ export class Game {
       ctx.fillStyle = th.block;
       ctx.fillRect(b.x, b.y, b.w, b.h);
       ctx.strokeStyle = th.blockEdge;
-      ctx.lineWidth = 5;
+      ctx.lineWidth = 6;
       ctx.strokeRect(b.x, b.y, b.w, b.h);
     }
   }
@@ -430,15 +519,15 @@ export class Game {
       ctx.translate(s.x, s.y);
       ctx.rotate(a);
       ctx.strokeStyle = th.springBase;
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 3.5;
       ctx.beginPath();
       for (let k = 0; k <= 4; k++) ctx.lineTo(k % 2 === 0 ? -9 : 9, -4 - (k / 4) * h);
       ctx.stroke();
       ctx.fillStyle = th.springBase;
       ctx.fillRect(-14, -5, 28, 5);
       ctx.fillStyle = th.pink;
-      ctx.fillRect(-17, -h - 9, 34, 7);
-      ctx.strokeRect(-17, -h - 9, 34, 7);
+      ctx.fillRect(-18, -h - 10, 36, 9);
+      ctx.strokeRect(-18, -h - 10, 36, 9);
       ctx.restore();
     });
   }
@@ -447,18 +536,18 @@ export class Game {
     const ctx = this.dctx;
     for (const b of this.level.boosters) {
       ctx.fillStyle = th.boosterBase;
-      ctx.fillRect(b.x, b.y - 7, b.w, 7);
+      ctx.fillRect(b.x, b.y - 8, b.w, 8);
       ctx.save();
       ctx.beginPath();
-      ctx.rect(b.x, b.y - 7, b.w, 7);
+      ctx.rect(b.x, b.y - 8, b.w, 8);
       ctx.clip();
       ctx.fillStyle = th.pink;
       const move = (this.clock * 90 * b.dir) % 22;
       for (let x = b.x - 22; x < b.x + b.w + 22; x += 22) {
         const cx = x + move;
         ctx.beginPath();
-        ctx.moveTo(cx - 5 * b.dir, b.y - 6);
-        ctx.lineTo(cx + 5 * b.dir, b.y - 3.5);
+        ctx.moveTo(cx - 5 * b.dir, b.y - 7);
+        ctx.lineTo(cx + 5 * b.dir, b.y - 4);
         ctx.lineTo(cx - 5 * b.dir, b.y - 1);
         ctx.closePath();
         ctx.fill();
@@ -495,15 +584,19 @@ export class Game {
   private drawSignText(th: Theme, ascii: boolean) {
     const ctx = this.dctx;
     ctx.save();
-    ctx.font = this.signFont(ascii);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = th.signText;
-    for (const s of this.level.signs) ctx.fillText(s.text, s.x, s.y + 1);
-    const [fx, fy] = this.level.finish;
-    ctx.font = ascii ? `bold 22px ${MONO}` : `22px ${this.font}`;
-    ctx.fillStyle = th.pink;
-    ctx.fillText("FINISH", fx, fy - 130);
+    // (in the vortex the sharp words fade: the world is getting twisted under them)
+    ctx.globalAlpha = this.warpT >= 0 ? 1 - smooth(this.warpT / 0.5) : 1;
+    if (ctx.globalAlpha > 0.01) {
+      ctx.font = this.signFont(ascii);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = th.signText;
+      for (const s of this.level.signs) ctx.fillText(s.text, s.x, s.y + 1);
+      const [fx, fy] = this.level.finish;
+      ctx.font = ascii ? `bold 22px ${MONO}` : `22px ${this.font}`;
+      ctx.fillStyle = th.pink;
+      ctx.fillText("FINISH", fx, fy - 130);
+    }
     ctx.restore();
   }
 
@@ -515,6 +608,102 @@ export class Game {
     ctx.strokeStyle = th.pink;
     ctx.lineWidth = 7;
     ctx.strokeRect(fx - 30, fy - 110, 60, 110);
+  }
+
+  // the spinning arms of the vortex, around the door (in the ASCII look the whole picture also gets twisted)
+  private drawVortex(th: Theme) {
+    const ctx = this.dctx;
+    const [cx, cy] = this.doorCentre();
+    const t = this.warpT;
+    const grow = smooth(t / 0.6);
+    const arms = 6;
+    const reach = VORTEX.radius * 1.35 * grow;
+    ctx.save();
+    ctx.lineCap = "round";
+    for (let j = 0; j < arms; j++) {
+      ctx.strokeStyle = j % 2 === 0 ? th.pink : th.code[1];
+      let prev: [number, number] | null = null;
+      for (let s = 0; s <= 1.0001; s += 0.05) {
+        const r = 10 + s * reach;
+        const a = (j / arms) * Math.PI * 2 + s * 3.4 - t * 5.5;
+        const pt: [number, number] = [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
+        if (prev) {
+          ctx.globalAlpha = grow * (1 - s * 0.75);
+          ctx.lineWidth = 3 + 11 * (1 - s);
+          ctx.beginPath();
+          ctx.moveTo(prev[0], prev[1]);
+          ctx.lineTo(pt[0], pt[1]);
+          ctx.stroke();
+        }
+        prev = pt;
+      }
+    }
+    // the bright middle
+    ctx.globalAlpha = grow;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 34);
+    g.addColorStop(0, "#ffffff");
+    g.addColorStop(0.45, th.pink);
+    g.addColorStop(1, "rgba(255, 59, 208, 0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // the code characters: they appear around the door and spiral in, faster and faster
+  private updateBits(dt: number) {
+    const th = THEMES[this.lookName];
+    if (this.warpT < 1.3) {
+      const n = Math.round(150 * dt + Math.random());
+      for (let i = 0; i < n; i++)
+        this.bits.push({
+          a: Math.random() * Math.PI * 2,
+          r: 230 + Math.random() * 380,
+          c: CODE_CHARS[(Math.random() * CODE_CHARS.length) | 0],
+          col: th.code[(Math.random() * th.code.length) | 0],
+          age: 0,
+        });
+    }
+    for (const b of this.bits) {
+      b.age += dt;
+      const r = Math.max(1, b.r);
+      b.a += (1.4 + 190 / (r + 20)) * dt;
+      b.r -= (70 + 560 * (1 - Math.min(600, r) / 600) + 260 * smooth(this.warpT / 1.2)) * dt;
+      if (Math.random() < dt * 4) b.c = CODE_CHARS[(Math.random() * CODE_CHARS.length) | 0]; // (they flicker like code)
+    }
+    this.bits = this.bits.filter((b) => b.r > 8);
+  }
+
+  private drawBits(th: Theme) {
+    const ctx = this.ctx;
+    const [cx, cy] = this.doorCentre();
+    const z = this.cam.zoom;
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const b of this.bits) {
+      const [x, y] = this.toScreen(cx + Math.cos(b.a) * b.r, cy + Math.sin(b.a) * b.r);
+      const size = Math.max(7, (9 + 9 * Math.min(1, b.r / 300)) * Math.max(0.8, z));
+      ctx.globalAlpha = Math.min(1, b.r / 70) * Math.min(1, b.age * 5);
+      ctx.font = `bold ${Math.round(size)}px ${MONO}`;
+      ctx.fillStyle = b.col;
+      ctx.fillText(b.c, x, y);
+    }
+    // the flash when he's gone
+    const fl = this.warpT - VORTEX.suck;
+    if (fl > -0.1 && fl < 0.45) {
+      const [sx, sy] = this.toScreen(cx, cy);
+      const k = fl < 0 ? (fl + 0.1) / 0.1 : 1 - fl / 0.45;
+      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, Math.max(this.viewW, this.viewH) * 0.7);
+      g.addColorStop(0, `rgba(255,255,255,${0.75 * k})`);
+      g.addColorStop(0.25, `rgba(255,59,208,${0.35 * k})`);
+      g.addColorStop(1, "rgba(255,59,208,0)");
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, this.viewW, this.viewH);
+    }
+    ctx.restore();
   }
 
   private drawHud(W: number, H: number, th: Theme) {
@@ -530,7 +719,7 @@ export class Game {
     ctx.textAlign = "right";
     ctx.fillText(fmtTime(this.runTime), W - 20, 16);
     // the speed meter
-    const sp = Math.min(1, p.speed / P.maxSpeed);
+    const sp = this.finished ? 0 : Math.min(1, p.speed / P.maxSpeed);
     const over = sp * P.maxSpeed > P.topRunSpeed;
     ctx.textAlign = "left";
     if (ascii) {
@@ -599,23 +788,39 @@ export class Game {
       ctx.font = font(20);
       ctx.fillText("ESC = PLAY    R = RESTART    V = LOOK", W / 2, H / 2 + 16);
     }
-    // finished
-    if (this.finished) {
-      ctx.textAlign = "center";
+    // finished: the card types itself out, like code
+    if (this.finished && this.warpT >= VORTEX.card) {
+      const typed = Math.floor((this.warpT - VORTEX.card) * 40);
+      const lines: [string, number, string][] = [
+        [`${this.level.name} DONE!`, 40, th.pink],
+        [`TIME ${fmtTime(this.runTime)}`, 28, th.hudText],
+        ["R = RUN IT AGAIN", 18, th.hudText],
+      ];
       const cw = Math.min(480, W - 40);
-      ctx.fillStyle = ascii ? "#0a0812" : "#fffaf2";
+      const appear = smooth((this.warpT - VORTEX.card) / 0.2);
+      ctx.globalAlpha = appear;
+      ctx.fillStyle = ascii ? "rgba(10,8,18,0.92)" : "#fffaf2";
       ctx.fillRect(W / 2 - cw / 2, H / 2 - 90, cw, 170);
       ctx.strokeStyle = ascii ? th.pink : th.hudText;
       ctx.lineWidth = ascii ? 3 : 5;
       ctx.strokeRect(W / 2 - cw / 2, H / 2 - 90, cw, 170);
-      ctx.fillStyle = th.pink;
-      ctx.font = font(40);
-      ctx.fillText(`${this.level.name} DONE!`, W / 2, H / 2 - 70);
-      ctx.fillStyle = th.hudText;
-      ctx.font = font(28);
-      ctx.fillText(`TIME ${fmtTime(this.runTime)}`, W / 2, H / 2 - 12);
-      ctx.font = font(18);
-      ctx.fillText("R = RUN IT AGAIN", W / 2, H / 2 + 36);
+      ctx.globalAlpha = 1;
+      ctx.textAlign = "left";
+      let left = typed;
+      const ys = [H / 2 - 70, H / 2 - 12, H / 2 + 36];
+      lines.forEach(([text, size, col], i) => {
+        ctx.font = font(size);
+        const full = ctx.measureText(text).width;
+        const shown = text.slice(0, Math.max(0, Math.min(text.length, left)));
+        const x = W / 2 - full / 2;
+        ctx.fillStyle = col;
+        ctx.fillText(shown, x, ys[i]);
+        // the blinking cursor at the end of what's typed so far
+        const typing = left >= 0 && left < text.length;
+        const lastLine = i === lines.length - 1 && left >= text.length;
+        if ((typing || lastLine) && Math.floor(this.clock * 3) % 2 === 0) ctx.fillText("_", x + ctx.measureText(shown).width, ys[i]);
+        left -= text.length;
+      });
     }
     ctx.restore();
   }
