@@ -302,7 +302,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     name: "Pink Rush",
     id: "rush",
     preview: "/previews/pinkrush.gif",
-    blurb: "NEW · 15 LEVELS. A fast platformer drawn in glowing text characters: run loops upside down, stomp bugs, ride the wind, bounce on bubbles, get sucked into the vortex.",
+    blurb: "NEW · 26 LEVELS. A fast platformer drawn in glowing text characters: run loops upside down, stomp bugs, ride the wind, hop over the void, climb towers, get sucked into the vortex.",
     how: "left/right = run · space = jump · down = slide (stomp in the air) · V = paper look",
     psp: true,
   },
