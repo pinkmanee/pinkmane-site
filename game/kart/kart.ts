@@ -1,4 +1,4 @@
-// PINK KART (demo, track 1: WEEDLAND): a behind-the-kart racing game drawn on a pixel screen and blown up.
+// PINK KART (demo, track 1): a behind-the-kart racing game drawn on a pixel screen and blown up.
 // The ground is one big flat picture (public/kart/track1-ground.png) tilted into 3D, like old SNES racers.
 // Everything you see comes from the pictures in public/kart/ : swap a picture, the game changes.
 
@@ -13,25 +13,26 @@ type TrackData = {
   lap: number;
 };
 
-const BW = 960; // the pixel screen the race is drawn on (more pixels = a finer picture)
-const BH = 540;
+const BW = 480; // the small pixel screen the race is drawn on (the chunky arcade look)
+const BH = 270;
 const UW = 480; // the menus, numbers and buttons are laid out on a 480 x 270 grid, stretched over the same screen
 const UH = 270;
-const HORIZON = 200;
-const FOCAL = 520;
+const HORIZON = 100;
+const FOCAL = 260;
 const CAM_H = 34;
 const CAM_BACK = 65; // how far the camera sits behind your kart
 const LAPS = 3;
-// CARS: every car is 3 pictures (back, side, front) in public/kart/kart-<car>-<view>.png, each with 3 frames side by side:
+// KARTS: every kart is 3 pictures (back, side, front) in public/kart/kart-<kart>-<view>.png, each with 3 frames side by side:
 // no flame, flame, flame (the flames only show while boosting or revving at the start).
-// THE DRIVER is his own picture (driver-back / -side / -front.png) drawn behind the car, so his head and shoulders
-// stick out of the roof: back = 4 frames (straight, looking left, looking right, throwing), side + front = 2 (normal, throwing).
-// public/kart/cars.json says where on each car he sits. 8 picture pixels = 1 world unit, so with the camera 65 behind,
-// your own car is drawn at exactly its drawn size.
-const CAR_K = 1 / 8;
-const DRIVER_PX = 128; // one driver frame is 128 x 128
-type CarInfo = { back: { seat: [number, number] }; side: { seat: [number, number] }; front: { seat: [number, number] }; color: [number, number, number] };
+// k = world units per picture pixel. "mane" is PINKMANE's own drawn kart; for now every racer drives it in his own colour.
+// To add a new drawn kart: put its 3 pictures in public/kart/, add it here, and give it to a racer in BOTS.
+const CARS: Record<string, { k: number }> = {
+  mane: { k: 0.25 }, // with the camera 65 behind, your own kart is drawn at exactly its drawn size
+};
 const VIEWS = ["back", "side", "front"];
+// THE GRASS EDGE: how tall the grass along the road stands (in world units; a kart is about 19 tall), and its colours (0xAABBGGRR)
+const GRASS_TALL = 4.5;
+const GRASS_DARK = 0xff180612, GRASS_MID = 0xff96288c, GRASS_TIP = 0xffc846ff, GRASS_BANK = 0xff10040c;
 const SPIN_TIME = 1.0; // a spin-out: two full turns, always this long
 const GO_TIME = 3; // the countdown: 3 (0s) 2 (1s) 1 (2s) GO (3s)
 const REV_FROM = 1; // hold the gas from when the 2 shows = ROCKET START. Earlier = TOO EARLY, the engine chokes
@@ -48,15 +49,13 @@ const ITEM_LABEL: Record<ItemName, string> = {
   wall: "REVERB WALL",
 };
 // kart colours: the player keeps the drawn pink, the bots get these instead of pink
-// the other racers: their car, and their hair colour (also their dot on the map)
 const BOTS: { name: string; car: string; color: [number, number, number] }[] = [
-  { name: "808", car: "c1", color: [60, 200, 255] },
-  { name: "SERUM", car: "c2", color: [150, 255, 80] },
-  { name: "VOID", car: "c3", color: [190, 90, 255] },
-  { name: "HEX", car: "c4", color: [255, 255, 255] },
-  { name: "KONG", car: "c5", color: [255, 170, 40] },
+  { name: "808", car: "mane", color: [60, 220, 255] },
+  { name: "SERUM", car: "mane", color: [150, 255, 80] },
+  { name: "VOID", car: "mane", color: [255, 150, 40] },
+  { name: "HEX", car: "mane", color: [150, 100, 255] },
+  { name: "KONG", car: "mane", color: [255, 70, 90] },
 ];
-const CAR_IDS = ["mane", "c1", "c2", "c3", "c4", "c5"];
 
 type Kart = {
   name: string;
@@ -65,8 +64,6 @@ type Kart = {
   car: string;
   rev: number; // when the gas went down during the countdown (-1 = not held)
   stall: number; // the engine choked (pressed too early): seconds until it runs again
-  look: number; // where the driver looks: -1 left ... 1 right (he looks into the corners)
-  throwT: number; // seconds left of the driver's throwing arm
   x: number;
   y: number;
   a: number;
@@ -103,7 +100,7 @@ type Thing = {
   owner: Kart;
   idx: number;
 };
-type Sprite = { img: Img; sx: number; sw: number; sh: number; x: number; y: number; k: number; lift: number; flip: boolean; shadow: boolean; squash?: number; dx?: number };
+type Sprite = { img: Img; sx: number; sw: number; sh: number; x: number; y: number; k: number; lift: number; flip: boolean; shadow: boolean; squash?: number };
 
 const wrapAngle = (a: number) => {
   while (a > Math.PI) a -= Math.PI * 2;
@@ -139,16 +136,11 @@ export class KartGame {
   private ground!: Uint32Array;
   private gsize = 0; // the ground picture's size in pixels
   private gs = 1; // ground pixels per world unit
-  private grass!: Uint32Array; // a 512 x 512 piece of grass with leaves lying on it, repeated over the whole field
-  private sdf!: Float32Array; // how far every spot is from the road's edge (+ on the road), 1 value per 2 world units
-  private lapIdx!: Uint16Array; // which piece of the lap every spot is nearest to, 1 value per 4 world units
-  private cars: Record<string, CarInfo> = {};
-  private slow = false; // this computer can't keep up: the ground is drawn a little coarser
-  private drawMs = 0;
-  private drawN = -150; // (the first moments don't count: everything is still warming up)
-  private drivers: Record<string, HTMLCanvasElement>[] = [];
+  private mask = new Uint8Array(BW * (BH - HORIZON)); // this frame: which screen pixels are field (1) and which are road (0)
+  private seedMap = new Uint8Array(BW * (BH - HORIZON));
   private types!: Uint8Array;
   private img: Record<string, HTMLImageElement> = {};
+  private kartSkins: Record<string, HTMLCanvasElement>[] = [];
   private mini!: HTMLCanvasElement;
   private boom!: HTMLCanvasElement;
 
@@ -234,14 +226,9 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["track1-ground", "grass-tile", "track1-sdf", "track1-idx", "sky", "props", "itembox", ...CAR_IDS.flatMap((c) => VIEWS.map((v) => `kart-${c}-${v}`)), ...VIEWS.map((v) => `driver-${v}`), ...ITEMS.map((i) => `item-${i}`)];
-    const [data, cars] = await Promise.all([
-      fetch(`${this.base}track1.json`).then((r) => r.json()),
-      fetch(`${this.base}cars.json`).then((r) => r.json()),
-      ...names.map((n) => this.loadImg(n)),
-    ]);
+    const names = ["track1-ground", "track1-map", "sky", "props", "itembox", ...Object.keys(CARS).flatMap((c) => VIEWS.map((v) => `kart-${c}-${v}`)), ...ITEMS.map((i) => `item-${i}`)];
+    const [data] = await Promise.all([fetch(`${this.base}track1.json`).then((r) => r.json()), ...names.map((n) => this.loadImg(n))]);
     this.track = data as TrackData;
-    this.cars = cars as Record<string, CarInfo>;
     const S = this.track.size;
     // the ground picture as raw pixels
     const GZ = this.img["track1-ground"].width;
@@ -253,34 +240,15 @@ export class KartGame {
     const gc = g.getContext("2d", { willReadFrequently: true })!;
     gc.drawImage(this.img["track1-ground"], 0, 0);
     this.ground = new Uint32Array(gc.getImageData(0, 0, GZ, GZ).data.buffer);
-    const tc = document.createElement("canvas");
-    tc.width = 512;
-    tc.height = 512;
-    const tcx = tc.getContext("2d", { willReadFrequently: true })!;
-    tcx.drawImage(this.img["grass-tile"], 0, 0);
-    this.grass = new Uint32Array(tcx.getImageData(0, 0, 512, 512).data.buffer);
-    // the road maps (half the world's size): red + green = distance to the road's edge, blue = the surface
-    // (0 off-road, 1 road, 2 boost pad, 3 start line)
-    const H2 = S / 2;
+    // the surface map: 0 off-road, 1 road, 2 boost pad (half the size of the ground)
     const m = document.createElement("canvas");
-    m.width = H2;
-    m.height = H2;
+    m.width = S / 2;
+    m.height = S / 2;
     const mc = m.getContext("2d", { willReadFrequently: true })!;
-    mc.drawImage(this.img["track1-sdf"], 0, 0);
-    const md = mc.getImageData(0, 0, H2, H2).data;
-    this.types = new Uint8Array(H2 * H2);
-    this.sdf = new Float32Array(H2 * H2);
-    for (let i = 0; i < this.types.length; i++) {
-      this.types[i] = Math.round(md[i * 4 + 2] / 80);
-      this.sdf[i] = (md[i * 4] * 256 + md[i * 4 + 1]) / 128 - 64;
-    }
-    const Q = S / 4;
-    m.width = Q;
-    m.height = Q;
-    mc.drawImage(this.img["track1-idx"], 0, 0);
-    const qd = mc.getImageData(0, 0, Q, Q).data;
-    this.lapIdx = new Uint16Array(Q * Q);
-    for (let i = 0; i < this.lapIdx.length; i++) this.lapIdx[i] = qd[i * 4] + qd[i * 4 + 1] * 256;
+    mc.drawImage(this.img["track1-map"], 0, 0);
+    const md = mc.getImageData(0, 0, S / 2, S / 2).data;
+    this.types = new Uint8Array((S / 2) * (S / 2));
+    for (let i = 0; i < this.types.length; i++) this.types[i] = Math.round(md[i * 4] / 100);
     // minimap
     const MS = 96;
     this.mini = document.createElement("canvas");
@@ -301,26 +269,25 @@ export class KartGame {
       }
     nc.putImageData(nd, 0, 0);
     // kart colours
-    // every racer's driver: the same drawing, with the pink hair swapped for the racer's colour
-    this.drivers = [{ color: null }, ...BOTS].map((b) => {
+    this.kartSkins = [{ car: "mane", color: null }, ...BOTS].map((b) => {
       const set: Record<string, HTMLCanvasElement> = {};
-      for (const v of VIEWS) set[v] = this.tint(this.img[`driver-${v}`], b.color as [number, number, number] | null);
+      for (const v of VIEWS) set[v] = this.tint(this.img[`kart-${b.car}-${v}`], b.color as [number, number, number] | null);
       return set;
     });
     // the explosion: 6 clean frames side by side (a ball of fire that opens into a ring)
-    const BF = 128;
+    const BF = 64;
     this.boom = document.createElement("canvas");
     this.boom.width = BF * 6;
     this.boom.height = BF;
     const bc = this.boom.getContext("2d")!;
     const cols = ["#ffffff", "#ffe23c", "#ff9628", "#ff46c8"];
     for (let f = 0; f < 6; f++) {
-      const outer = 21 + f * 8;
-      const inner = f < 2 ? 0 : f < 4 ? (f - 1) * 12 : outer - (7 - f) * 4; // the last two frames: just a thin ring
+      const outer = 11 + f * 4;
+      const inner = f < 2 ? 0 : f < 4 ? (f - 1) * 6 : outer - (7 - f) * 2; // the last two frames: just a thin ring
       for (let y = 0; y < BF; y++)
         for (let x = 0; x < BF; x++) {
           const ex = x - BF / 2 + 0.5, ey = y - BF / 2 + 0.5;
-          const r = Math.hypot(ex, ey) + Math.sin(Math.atan2(ey, ex) * 8) * 3.3;
+          const r = Math.hypot(ex, ey) + Math.sin(Math.atan2(ey, ex) * 8) * 1.7;
           if (r >= outer || r < inner) continue;
           bc.fillStyle = cols[Math.min(3, Math.floor(((r - inner) / (outer - inner)) * 4))];
           bc.fillRect(x, y, 1, 1);
@@ -328,7 +295,7 @@ export class KartGame {
     }
   }
 
-  // swap the pink in a picture (the driver's hair) for another colour
+  // swap the pink in a kart picture for another colour (and tint the white body a little)
   private tint(src: HTMLImageElement, col: [number, number, number] | null) {
     const c = document.createElement("canvas");
     c.width = src.width;
@@ -345,6 +312,10 @@ export class KartGame {
         p[i] = col[0] * f;
         p[i + 1] = col[1] * f;
         p[i + 2] = col[2] * f;
+      } else if (r > 195 && g > 190 && b > 220) {
+        p[i] = r * 0.72 + col[0] * 0.28;
+        p[i + 1] = g * 0.72 + col[1] * 0.28;
+        p[i + 2] = b * 0.72 + col[2] * 0.28;
       }
     }
     x.putImageData(d, 0, 0);
@@ -451,8 +422,6 @@ export class KartGame {
         car: player ? "mane" : BOTS[i].car,
         rev: -1,
         stall: 0,
-        look: 0,
-        throwT: 0,
         x: cx - Math.sin(a) * side,
         y: cy + Math.cos(a) * side,
         a,
@@ -563,9 +532,6 @@ export class KartGame {
         gas = this.keys.has("ArrowUp") || this.keys.has("w") || (this.touch && !brake) ? 1 : 0;
       }
 
-      // the driver looks into the corner he's steering for
-      k.look += (steer - k.look) * Math.min(1, 10 * dt);
-      if (k.throwT > 0) k.throwT -= dt;
       // ---- timers
       if (k.stall > 0) {
         k.stall -= dt;
@@ -720,7 +686,6 @@ export class KartGame {
   private useItem(k: Kart) {
     const it = k.item!;
     k.item = null;
-    k.throwT = 0.4;
     const dx = Math.cos(k.a), dy = Math.sin(k.a);
     const add = (kind: Thing["kind"], x: number, y: number, vx: number, vy: number, life: number) =>
       this.things.push({ kind, x, y, vx, vy, z: 0, t: 0, life, owner: k, idx: k.idx });
@@ -844,15 +809,7 @@ export class KartGame {
       if (this.loadError) text(this.loadError.slice(0, 50), UW / 2, UH / 2 + 14, 6, "#fff", "center");
       return;
     }
-    const t0 = performance.now();
     this.drawWorld();
-    // keep an eye on how long the picture takes: if it's too slow for a smooth race, switch to the coarser ground
-    if (this.drawN >= 0) this.drawMs += performance.now() - t0;
-    if (++this.drawN >= 90) {
-      if (this.drawMs / this.drawN > 11) this.slow = true;
-      this.drawMs = 0;
-      this.drawN = 0;
-    }
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.buf, ox, oy, UW * u, UH * u);
     ctx.save();
@@ -897,16 +854,16 @@ export class KartGame {
       text(PLACE[me.place - 1], 8, UH - 34, 22, me.place === 1 ? "#ffe23c" : "#ff46c8");
       text(`/${this.karts.length}`, 8 + 22 * 3.1, UH - 20, 8, "#fff");
       // item slot
-      const bx = UW / 2 - 14, by = 6;
+      const bx = UW / 2 - 17, by = 6;
       ctx.fillStyle = "rgba(18,4,28,0.75)";
-      ctx.fillRect(ox + bx * u, oy + by * u, 28 * u, 28 * u);
+      ctx.fillRect(ox + bx * u, oy + by * u, 34 * u, 34 * u);
       ctx.strokeStyle = "#ff46c8";
       ctx.lineWidth = Math.max(1, u);
-      ctx.strokeRect(ox + bx * u, oy + by * u, 28 * u, 28 * u);
+      ctx.strokeRect(ox + bx * u, oy + by * u, 34 * u, 34 * u);
       const show: ItemName | null = me.roulette > 0 ? ITEMS[Math.floor(this.clock * 14) % ITEMS.length] : me.item;
       if (show) {
-        pic(this.img[`item-${show}`], bx + 2, by + 2, 0.5); // half size = exactly its drawn pixels on the race screen
-        if (me.item) text(ITEM_LABEL[me.item], UW / 2, by + 32, 6, "#ffe23c", "center");
+        pic(this.img[`item-${show}`], bx + 1, by + 1, 32 / 48);
+        if (me.item) text(ITEM_LABEL[me.item], UW / 2, by + 38, 6, "#ffe23c", "center");
       }
       // minimap
       const mx = UW - 78, my = UH - 78, ms = 70 / 96;
@@ -959,8 +916,8 @@ export class KartGame {
       ctx.fillStyle = "rgba(10,3,18,0.62)";
       ctx.fillRect(ox, oy, UW * u, UH * u);
       text("PINK KART", UW / 2, 44, 34, "#ff46c8", "center");
-      text("DEMO - WEEDLAND", UW / 2, 88, 10, "#ffe23c", "center");
-      ITEMS.forEach((it, i) => pic(this.img[`item-${it}`], UW / 2 - 7 * 17 + i * 34 + 5, 116, 0.5));
+      text("DEMO - TRACK 1", UW / 2, 88, 10, "#ffe23c", "center");
+      ITEMS.forEach((it, i) => pic(this.img[`item-${it}`], UW / 2 - 7 * 19 + i * 38 + 3, 112, 32 / 48));
       if (this.touch) {
         text("LEFT THUMB: STEER   RIGHT: ITEM / BRAKE", UW / 2, 160, 7, "#fff", "center");
         text("THE KART DRIVES BY ITSELF", UW / 2, 174, 7, "#fff", "center");
@@ -1010,97 +967,36 @@ export class KartGame {
     const sky = this.img["sky"];
     let off = (((ca / Math.PI) * sky.width) % sky.width + sky.width) % sky.width;
     off = Math.round(off);
-    const skyY = HORIZON + 3 - sky.height;
-    b.fillStyle = "#2e1654";
+    const skyY = HORIZON + 4 - sky.height;
+    b.fillStyle = "#100628";
     b.fillRect(0, 0, BW, HORIZON);
     b.drawImage(sky, -off, skyY);
     b.drawImage(sky, sky.width - off, skyY);
 
     // ---- ground
-    // Boost pads and the start line come from the ground picture, the leaves on the grass from grass-tile.png.
-    // The road (asphalt, kerbs, dashes) and the grass are worked out for every screen pixel from the distance-to-the-edge map, so it stays sharp right up close.
     const S = this.gsize;
     const gs = this.gs;
     const out = this.frame32;
     const G = this.ground;
-    const sdf = this.sdf, types = this.types, lapIdx = this.lapIdx, TILE = this.grass;
-    const C = this.track.center;
-    const NC = C.length;
-    const H2 = this.track.size / 2, Q = this.track.size / 4;
     const rows = BH - HORIZON;
-    const wide = this.slow;
-    const FOG_R = 150, FOG_G = 110, FOG_B = 150; // far away the ground fades into the haze
-    // colours are stored as 0xAABBGGRR
-    const ROAD = [0xff70465a, 0xff70465a, 0xff70465a, 0xff663e4c, 0xff7c5062, 0xff70465a, 0xff663e4c, 0xff7c5062];
-    const SPECK = 0xff8e6474, CRACK = 0xff56343e;
-    const KERB_A = 0xffc846ff, KERB_B = 0xfffcf0f4, EDGE = 0xff44202e, SOIL_A = 0xff161e0e, SOIL_B = 0xff0e1208, DASH = 0xffffd6e2;
-    const BLADE = 0xff3c7834;
-    // grass, worked out per pixel: the ground picture's soft patches, broken up into fine tufts and single light blades
-    const GA = 0xff223416, GB = 0xff28401c, GC = 0xff1c2a11;
-    const GRASS = [GA, GA, GB, GC, GB, GB, GA, GB, GC, GC, GA, GC];
-    const grassAt = (gx: number, gy: number, fine: number, base: number) => {
-      let h = Math.imul((gx * fine) | 0, 374761393) + Math.imul((gy * fine) | 0, 668265263);
-      h = Math.imul(h ^ (h >>> 13), 1274126177);
-      h ^= h >>> 16;
-      if (fine > 1 && ((h >>> 8) & 31) === 0) return BLADE;
-      return GRASS[(base === GB ? 4 : base === GC ? 8 : 0) + (h & 3)];
-    };
+    const types = this.types, TH = this.track.size / 2;
+    const mask = this.mask, seed = this.seedMap;
+    const FOG_R = 235, FOG_G = 50, FOG_B = 170; // far away the ground fades into the pink haze
     for (let r = 0; r < rows; r++) {
       const z = (CAM_H * FOCAL) / (r + 0.5);
       const stepX = (rx * z) / FOCAL, stepY = (ry * z) / FOCAL;
       let wx = camX + dx * z - stepX * (BW / 2), wy = camY + dy * z - stepY * (BW / 2);
-      const fog = z > 500 ? Math.min(0.8, (z - 500) / 2600) : 0;
+      const fog = z > 500 ? Math.min(0.85, (z - 500) / 2600) : 0;
       const f256 = (fog * 256) | 0, inv = 256 - f256;
-      const near = z < 420; // close enough to see single specks and cracks
-      const grain = z < 170 ? 4 : z < 420 ? 2 : 1; // grains (asphalt) and tufts (grass) per world unit
       let o = r * BW;
-      for (let x = 0; x < BW; x++, o++, wx += stepX, wy += stepY) {
-        if (wide && x & 1) {
-          out[o] = out[o - 1]; // slow computer: every second ground pixel is a copy of its neighbour
-          continue;
-        }
+      for (let x = 0; x < BW; x++, o++) {
+        const ix = (wx * gs) | 0, iy = (wy * gs) | 0;
         let c: number;
-        const fx = wx * 0.5, fy = wy * 0.5;
-        const x0 = fx | 0, y0 = fy | 0;
-        if (fx < 0 || fy < 0 || x0 >= H2 - 1 || y0 >= H2 - 1) c = grassAt(wx, wy, grain, GA); // past the edge of the map: more grass
-        else {
-          const i = y0 * H2 + x0;
-          let sd = sdf[i];
-          if (sd > -14 && sd < 14) {
-            // near an edge: read the distance smoothly, so the kerbs come out as clean curves
-            const tx = fx - x0, ty = fy - y0;
-            sd = (sd * (1 - tx) + sdf[i + 1] * tx) * (1 - ty) + (sdf[i + H2] * (1 - tx) + sdf[i + H2 + 1] * tx) * ty;
-          }
-          if (types[i] >= 2) c = G[((wy * gs) | 0) * S + ((wx * gs) | 0)]; // boost pads + the start line: from the ground picture
-          else if (sd <= -9) {
-            // grass: the leaves come from the grass tile, the grass itself is worked out per pixel
-            c = TILE[((((wy * 1.5) | 0) & 511) << 9) | (((wx * 1.5) | 0) & 511)];
-            if (c === GA || c === GB || c === GC || c === BLADE) c = grassAt(wx, wy, grain, c);
-          } else if (sd < 0) c = sd < -3 ? SOIL_A : SOIL_B;
-          else {
-            const li = lapIdx[((wy * 0.25) | 0) * Q + ((wx * 0.25) | 0)];
-            if (sd < 9) c = ((li / 3) | 0) % 2 === 0 ? KERB_A : KERB_B;
-            else if (sd < 10.5) c = EDGE;
-            else {
-              let h = Math.imul((wx * grain) | 0, 374761393) + Math.imul((wy * grain) | 0, 668265263);
-              h = Math.imul(h ^ (h >>> 13), 1274126177);
-              h ^= h >>> 16;
-              c = ROAD[h & 7];
-              if (near) {
-                const h2 = (h >>> 8) & 127;
-                if (h2 === 3) c = SPECK;
-                else if (h2 === 9) c = CRACK;
-              }
-              // the dashes down the middle
-              if (sd > 20 && li % 8 < 3) {
-                const p0 = C[li], p1 = C[(li + 1) % NC];
-                const tx2 = p1[0] - p0[0], ty2 = p1[1] - p0[1];
-                const d = Math.abs((wx - p0[0]) * ty2 - (wy - p0[1]) * tx2) / (Math.hypot(tx2, ty2) || 1);
-                if (d < 2.4) c = DASH;
-              }
-            }
-          }
-        }
+        let field = 1;
+        if (ix >= 0 && iy >= 0 && ix < S && iy < S) {
+          c = G[iy * S + ix];
+          if (types[(iy >> 1) * TH + (ix >> 1)]) field = 0;
+        } else c = ((ix % 96) + 96) % 96 < 3 || ((iy % 96) + 96) % 96 < 3 ? 0xff4a103a : 0xff200914; // past the map: more dark field
         if (f256) {
           const cr = ((c & 255) * inv + FOG_R * f256) >> 8;
           const cg = (((c >> 8) & 255) * inv + FOG_G * f256) >> 8;
@@ -1108,6 +1004,34 @@ export class KartGame {
           c = 0xff000000 | (cb << 16) | (cg << 8) | cr;
         }
         out[o] = c;
+        mask[o] = field;
+        seed[o] = ((ix >> 2) * 7 + (iy >> 2) * 13) & 255; // which clump of grass this spot belongs to
+        wx += stepX;
+        wy += stepY;
+      }
+    }
+    // ---- THE FIELD SITS HIGHER THAN THE ROAD: wherever field meets road, a fringe of dark grass with pink tips
+    // stands up along the edge and sways. (Far edges also get a little dark bank under the grass.)
+    const sway = performance.now() / 1000;
+    for (let r = 2; r < rows; r++) {
+      const z = (CAM_H * FOCAL) / (r + 0.5);
+      if (z > 620) continue; // too far away to see blades
+      const tall = (GRASS_TALL * FOCAL) / z; // how tall a blade is on screen at this distance
+      const row = r * BW;
+      for (let x = 0; x < BW; x++) {
+        const o = row + x;
+        const here = mask[o], above = mask[o - BW];
+        if (here === above) continue;
+        // the field pixel right at the edge decides how its clump looks
+        const sd = here ? seed[o] : seed[o - BW];
+        const wave = 0.75 + 0.25 * Math.sin(sway * 4 + sd * 0.7 + x * 0.05);
+        const h = Math.max(1, Math.round(tall * (0.45 + (sd & 7) / 9) * wave));
+        if (!here) {
+          // field behind the road: a dark bank facing you, grass on top of it
+          const bank = Math.max(1, Math.round(tall * 0.35));
+          for (let k = 0; k < bank && r + k < rows; k++) out[o + k * BW] = GRASS_BANK;
+        }
+        for (let k = 1; k <= h && r - k >= 0; k++) out[o - k * BW] = k >= h ? GRASS_TIP : k >= h - 1 && h > 3 ? GRASS_MID : GRASS_DARK;
       }
     }
     b.putImageData(this.frame, 0, HORIZON);
@@ -1123,7 +1047,7 @@ export class KartGame {
         const z = ex * dx + ey * dy;
         if (z < 12) continue;
         const sc = FOCAL / z;
-        const size = Math.max(1, Math.round(4 * sc * (1 - g * 0.5)));
+        const size = Math.max(1, Math.round(5 * sc * (1 - g * 0.5)));
         b.fillStyle = i % 2 ? "#ff46c8" : "#ffffff";
         b.fillRect(Math.round(BW / 2 + (ex * rx + ey * ry) * sc - size / 2), Math.round(HORIZON + CAM_H * sc - size), size, size);
       }
@@ -1138,7 +1062,7 @@ export class KartGame {
       // which side of the car we see: back, right side, front, left side
       const quarter = Math.round(rel / (Math.PI / 2));
       const view = quarter === 0 ? "back" : Math.abs(quarter) === 2 ? "front" : "side";
-      const im = this.img[`kart-${k.car}-${view}`];
+      const im = this.kartSkins[k.skin][view];
       const fw = im.width / 3;
       // flames only while boosting, or while revving on the start line
       const fire = k.boost > 0 || (this.state === "count" && k.rev >= 0);
@@ -1146,32 +1070,26 @@ export class KartGame {
       // spinning out: each side squeezes thin and opens into the next one, like a turning card, with a little hop
       const spinning = k.spin > 0;
       const squash = spinning ? Math.max(0.12, Math.cos((rel - (quarter * Math.PI) / 2) * 2)) : 1;
-      const hop = spinning ? Math.sin((1 - k.spin / SPIN_TIME) * Math.PI) * 5 : 0;
-      const shake = k.stall > 0 || (this.state === "count" && k.rev >= 0) ? (Math.floor(now / 40) % 2) * 0.4 : 0;
-      const flip = view === "side" && rel < 0;
-      // the driver first (so the car's roof and wing cover his lower half)
-      const seat = this.cars[k.car][view as "back" | "side" | "front"].seat;
-      const dimg = this.drivers[k.skin][view];
-      const throwing = k.throwT > 0;
-      const dframe = view === "back" ? (throwing ? 3 : k.look < -0.35 ? 1 : k.look > 0.35 ? 2 : 0) : throwing ? 1 : 0;
-      list.push({ img: dimg, sx: dframe * DRIVER_PX, sw: DRIVER_PX, sh: DRIVER_PX, x: k.x, y: k.y, k: CAR_K, lift: hop + shake + seat[1] * CAR_K, flip, shadow: false, squash, dx: seat[0] * CAR_K });
-      list.push({ img: im, sx: frame * fw, sw: fw, sh: im.height, x: k.x, y: k.y, k: CAR_K, lift: hop + shake, flip, shadow: true, squash });
+      const hop = spinning ? Math.sin((1 - k.spin / SPIN_TIME) * Math.PI) * 9 : 0;
+      const shake = k.stall > 0 || (this.state === "count" && k.rev >= 0) ? (Math.floor(now / 40) % 2) * 0.5 : 0;
+      list.push({ img: im, sx: frame * fw, sw: fw, sh: im.height, x: k.x, y: k.y, k: CARS[k.car].k, lift: hop + shake, flip: view === "side" && rel < 0, shadow: true, squash });
     }
     for (const bx of this.boxes)
       if (bx.back <= 0) {
         const im = this.img["itembox"];
-        list.push({ img: im, sx: (Math.floor(now / 250) % 2) * 56, sw: 56, sh: 56, x: bx.x, y: bx.y, k: 0.29, lift: 5 + Math.sin(now / 300 + bx.x) * 2, flip: false, shadow: true });
+        list.push({ img: im, sx: (Math.floor(now / 250) % 2) * 28, sw: 28, sh: 28, x: bx.x, y: bx.y, k: 0.55, lift: 5 + Math.sin(now / 300 + bx.x) * 2, flip: false, shadow: true });
       }
-    for (const p of this.track.props) list.push({ img: this.img["props"], sx: p[2] * 144, sw: 144, sh: 192, x: p[0], y: p[1], k: 0.3, lift: 0, flip: false, shadow: false });
+    // beside the track: the black sigil trees (pictures 0-2 in props.png) and black weed plants (3-5), about half and half
+    for (const p of this.track.props) list.push({ img: this.img["props"], sx: (p[2] + ((p[0] + p[1]) % 2) * 3) * 40, sw: 40, sh: 64, x: p[0], y: p[1], k: 1.1, lift: 0, flip: false, shadow: false });
     for (const t of this.things) {
       if (t.kind === "wave") continue;
       if (t.kind === "boom") {
         // the blast: 6 frames, always the same size, sitting on the ground
         const f = Math.min(5, Math.floor((t.t / t.life) * 6));
-        list.push({ img: this.boom, sx: f * 128, sw: 128, sh: 128, x: t.x, y: t.y, k: 0.54, lift: -12, flip: false, shadow: false });
+        list.push({ img: this.boom, sx: f * 64, sw: 64, sh: 64, x: t.x, y: t.y, k: 1.08, lift: -12, flip: false, shadow: false });
       } else {
         const name = t.kind === "bomb" ? "item-bomb" : t.kind === "mic" ? "item-mic" : t.kind === "vinyl" ? "item-vinyl" : "item-wall";
-        list.push({ img: this.img[name], sx: 0, sw: 48, sh: 48, x: t.x, y: t.y, k: t.kind === "wall" ? 0.8 : 0.3, lift: t.z + (t.kind === "mic" ? 4 : 0), flip: false, shadow: t.kind !== "wall" });
+        list.push({ img: this.img[name], sx: 0, sw: 48, sh: 48, x: t.x, y: t.y, k: t.kind === "wall" ? 0.95 : 0.42, lift: t.z + (t.kind === "mic" ? 4 : 0), flip: false, shadow: t.kind !== "wall" });
       }
     }
     const proj: { s: Sprite; z: number; px: number; py: number; sc: number }[] = [];
@@ -1181,8 +1099,8 @@ export class KartGame {
       if (z < 12 || z > 1500) continue;
       const side = ex * rx + ey * ry;
       const sc = FOCAL / z;
-      const px = BW / 2 + (side + (s.dx ?? 0) * (s.flip ? -1 : 1) * (s.squash ?? 1)) * sc;
-      if (px < -260 || px > BW + 260) continue;
+      const px = BW / 2 + side * sc;
+      if (px < -200 || px > BW + 200) continue;
       proj.push({ s, z, px, py: HORIZON + CAM_H * sc, sc });
     }
     proj.sort((a, c) => c.z - a.z);

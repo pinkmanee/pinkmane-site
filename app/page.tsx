@@ -312,7 +312,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     name: "Pink Kart",
     id: "kart",
     preview: "/previews/pinkkart.gif",
-    blurb: "NEW · DEMO. PINKMANE's own racing game: tuned cars, a wiggly track through Weedland, 808 bombs, vinyls and autotune mics. 3 laps against 5 racers.",
+    blurb: "NEW · DEMO. PINKMANE's own racing game: hand-drawn flaming karts, a wiggly night track, 808 bombs, vinyls and autotune mics. 3 laps against 5 racers.",
     how: "arrows = drive · space = use your item · hold gas when 2 shows = rocket start",
     psp: true,
     link: "/games/pink-kart",
