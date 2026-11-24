@@ -10,17 +10,18 @@ import { useHasMouse } from "./useHasMouse";
 //     overshoot), rolls over when you aim to the other side, and kicks back on every shot
 //   - every left click is a SHOT: the ammo flies from the gun to where you clicked, and the click happens when it lands
 //     (so whatever you shot still opens, blinks etc. like before, just a moment later)
-//   - AMMO from the games: WEED LEAF (you start with it), BULLET, FIREBALL, SPIKE SHOT (PINKMANE VOID), BOMB (Pink Bomber).
+//   - AMMO from the games: WEED LEAF (you start with it), BULLET, FIREBALL, SPIKE SHOT (PINKMANE VOID), ROCKET (a rocket launcher: flies straight, big blast).
 //     Each one makes a sound from the games (the shot sound is only for the BULLET; WEED LEAF + SPIKE SHOT share VOID's spike shot sound)
 //     RIGHT CLICK, the keys 1 - 5, or clicking a box in the ammo bar (under the iPod) = switch ammo
 //   - PINK HUNT: shoot the flying PINKMANEs in the background: far away (small) = 20, middle = 15, close (big) = 10.
-//     The BOMB gets everything near it, but only 5 points each.
+//     The ROCKET gets everything near where it blows up, but only 5 points each.
 //     The first kill starts a 60 second round; when it ends you can save your score (online Top 10, board "gun").
 //     Score + time + the TOP 3 are in the top right corner.
 //   - FX VOLUME: small - and + buttons in the bottom left corner, next to BASS QUAKE (like the PSP's). SHOOT them to turn
 //     the gun sounds down / up.
 //   - sliders (BASS QUAKE, VOL) and the handheld's D-pad still react instantly
 // It switches off inside the games (they use the mouse themselves) and on phones.
+// The SHOP page (app/shop/page.tsx) has the same gun: there the ammo bar sits under the shop's handheld.
 //
 // Files: public/sounds/shot.mp3, public/gun/gun-drawn.png
 // The flyers it can hit are marked with data-target in page.tsx. The iPod / handheld (data-solid) block shots.
@@ -40,16 +41,16 @@ const FX_DEFAULT = 6; // 0 = silent ... 10 = loudest (6 = how loud it was before
 const BOARD_ID = "gun"; // the Top 10 board (also in app/api/scores/shared.ts)
 const HUNT_TIME = 60; // seconds per round
 // points for a flyer: the page gives each one data-points (far away / small = 20, middle = 15, close / big = 10).
-// Anything the BOMB gets is only worth BOMB_POINTS (it hits so many at once).
+// Anything the ROCKET gets is only worth ROCKET_POINTS (it hits so many at once).
 const KILL_POINTS = 10;
-const BOMB_POINTS = 5;
-const BOMB_RADIUS = 60; // the bomb kills every flyer this close
+const ROCKET_POINTS = 5;
+const ROCKET_RADIUS = 60; // the rocket's blast kills every flyer this close
 // clicking these counts as a HIT (buttons, links, the iPod menu rows, the game list)
 const HIT_TARGETS = "button, a, [role=button], [data-shoot], .gp-row";
 // these get their click straight away (sliders you drag, the D-pad that holds a key down)
 const INSTANT = "input, textarea, select, label, [data-instant], [data-noshoot]";
 // shots that land on these can't hit the flyers behind them
-const SOLID = "[data-solid], .ipod-shell, .hh-device";
+const SOLID = "[data-solid], .ipod-shell, .hh-device, .psp-shell";
 // STREAK: every kill in a row (without a miss) counts up and pops up next to the kill.
 // TRIP MODE: every TRIP_KILLS in a row (10, 20, 30...) the screen trips out for a while, with double points
 const TRIP_KILLS = 10;
@@ -73,23 +74,32 @@ const MUZZLE = { x: 2, y: 40 }; // where the ammo comes out (the front of the ba
 const ARM_FROM = { x: 452, y: 238 }; // where the arm leaves the hand
 
 // ---------- the ammo ----------
-type AmmoId = "bullet" | "fire" | "spike" | "leaf" | "bomb";
+type AmmoId = "bullet" | "fire" | "spike" | "leaf" | "rocket";
 const AMMO: { id: AmmoId; name: string; speed: number; color: string[] }[] = [
   { id: "leaf", name: "WEED LEAF", speed: 1100, color: ["#3fc24a", "#8affc8", "#1b6b25", "#d8ff8a"] },
   { id: "bullet", name: "BULLET", speed: 2000, color: ["#ffd84a", "#ffffff", "#ffb02a"] },
   { id: "fire", name: "FIREBALL", speed: 1250, color: ["#ffd84a", "#ff7a00", "#ff3b1a", "#ffffff"] },
   { id: "spike", name: "SPIKE SHOT", speed: 1500, color: ["#ff3bd0", "#ff8ad8", "#ffffff", "#b0209a"] },
-  { id: "bomb", name: "BOMB", speed: 850, color: ["#ffd84a", "#ff7a00", "#ff3b1a", "#ffffff"] },
+  { id: "rocket", name: "ROCKET", speed: 1250, color: ["#ffd84a", "#ff7a00", "#ff3b1a", "#ffffff"] },
 ];
 const SPELL_VOLUME = 1; // the game sounds (1 = as loud as in the games)
 // the glow of each explosion (red, green, blue)
-const GLOW: Record<AmmoId, string> = { bullet: "255,216,74", fire: "255,122,0", spike: "255,59,208", leaf: "63,194,74", bomb: "255,140,40" };
+const GLOW: Record<AmmoId, string> = { bullet: "255,216,74", fire: "255,122,0", spike: "255,59,208", leaf: "63,194,74", rocket: "255,140,40" };
 
 const INK = "#1a0618";
 const MEDALS = ["#ffd700", "#c8ccd6", "#cd7f32"];
 const FIREBALL = ["..OOO..", ".OYYYO.", "OYWWWYO", "OYWWWYO", "OYWWWYO", ".OYYYO.", "..OOO.."];
 const SPIKE = ["....K....", "...KPK...", "...KPK...", ".KKPLPKK.", "KPPLWLPPK", ".KKPLPKK.", "...KPK...", "...KPK...", "....K...."];
-const BOMB = ["...OOOO...", ".OOKKKKOO.", ".OKHHKKKO.", "OKHHKKKKKO", "OKHKKKKKKO", "OKKKKKKKKO", "OKKKKKKKKO", ".OKKKKKKO.", ".OOKKKKOO.", "...OOOO..."];
+// the rocket, flying to the right: R = red nose + fins, W = white body, G = grey band, K = outline
+const ROCKET = [
+  "RR..........",
+  "KRRKKKKKK...",
+  ".KWWWGWWRRK.",
+  ".KWWWGWWRRRK",
+  ".KWWWGWWRRK.",
+  "KRRKKKKKK...",
+  "RR..........",
+];
 
 // fx = this shot was aimed at the FX - (-1) or + (1) button
 type Shot = { ammo: AmmoId; x0: number; y0: number; x1: number; y1: number; t: number; dur: number; spin: number; target: Element | null; hit: boolean; solid: boolean; lastX: number; lastY: number; fx?: number };
@@ -172,16 +182,15 @@ function drawAmmo(ctx: CanvasRenderingContext2D, id: AmmoId, x: number, y: numbe
     ctx.fillStyle = "#1b6b25";
     ctx.fillRect(-1, 0, 2, s * 0.35);
   } else {
-    ctx.rotate(spin);
+    // the rocket: points the way it flies, with a flickering flame out the back
+    ctx.rotate(ang);
     ctx.scale(size * 0.8, size * 0.8);
-    drawPixels(ctx, BOMB, -5, -5, { O: INK, K: "#2a2a36", H: "#9a9ab0" });
-    ctx.fillStyle = "#8a8aa0";
-    ctx.fillRect(-1, -6, 3, 1);
-    ctx.fillStyle = "#c08a4a";
-    ctx.fillRect(1, -7, 1, 1);
-    ctx.fillRect(2, -8, 1, 1);
-    ctx.fillStyle = Math.floor(t * 20) % 2 ? "#ffd84a" : "#ff7a00";
-    ctx.fillRect(2, -10, 2, 2);
+    drawPixels(ctx, ROCKET, -6, -3.5, { K: INK, W: "#ece6ff", G: "#8a8aa0", R: "#ff3b1a" });
+    const f = Math.floor(t * 24) % 2;
+    ctx.fillStyle = f ? "#ffd84a" : "#ff7a00";
+    ctx.fillRect(-9 - f, -1.5, 4 + f, 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(-7, -1, 2, 1);
   }
   ctx.restore();
 }
@@ -287,9 +296,13 @@ export default function GunCursor({ active, muted, font }: Props) {
       if (id === "bullet") bang(1);
       else if (id === "fire") blip(900, 300, 0.07, 0.035 * v, 0, "sawtooth"); // PINKMANE VOID's fireball
       else if (id === "spike" || id === "leaf") [1300, 1000, 760].forEach((f, i) => blip(f, f * 0.45, 0.06, 0.035 * v, i * 0.025, "sawtooth")); // VOID's spike shot (the weed leaf uses it too)
-      else blip(220, 330, 0.06, 0.05 * v); // Pink Bomber: dropping a bomb
+      else {
+        // the rocket launcher: a deep thump, then the rocket whooshing off
+        blip(110, 50, 0.12, 0.09 * v, 0, "sawtooth");
+        blip(160, 620, 0.28, 0.035 * v, 0.03, "sawtooth");
+      }
     };
-    // impact: a short burst of noise (deep + long for the bomb)
+    // impact: a short burst of noise (deep + long for the rocket)
     const thud = (big: boolean) => {
       if (mutedRef.current || !ac || !noise || fx() <= 0) return;
       const src = ac.createBufferSource();
@@ -423,9 +436,9 @@ export default function GunCursor({ active, muted, font }: Props) {
     const explode = (x: number, y: number, id: AmmoId, big: boolean) => {
       const c = AMMO.find((q) => q.id === id)!.color;
       const k = big ? 1.5 : 1;
-      glows.push({ x, y, life: 0.18, max: 0.18, r: (id === "bomb" ? 70 : 38) * k, rgb: GLOW[id] });
-      rings.push({ x, y, life: 0.35, max: 0.35, r: (id === "bomb" ? 70 : 34) * k, color: c[0], star: id === "spike" });
-      if (id === "bomb") {
+      glows.push({ x, y, life: 0.18, max: 0.18, r: (id === "rocket" ? 70 : 38) * k, rgb: GLOW[id] });
+      rings.push({ x, y, life: 0.35, max: 0.35, r: (id === "rocket" ? 70 : 34) * k, color: c[0], star: id === "spike" });
+      if (id === "rocket") {
         crosses.push({ x, y, life: 0.45 });
         burst(x, y, 26, c, 260, 4);
         burst(x, y, 10, ["#9a9aa8", "#c8c8d4"], 60, 6, -40);
@@ -518,7 +531,7 @@ export default function GunCursor({ active, muted, font }: Props) {
         hunt.streak = 0;
         hunt.bestStreak = 0;
       }
-      const pts = (ammo === "bomb" ? BOMB_POINTS : Number(el.dataset.points) || KILL_POINTS) * (hunt.trip > 0 ? 2 : 1);
+      const pts = (ammo === "rocket" ? ROCKET_POINTS : Number(el.dataset.points) || KILL_POINTS) * (hunt.trip > 0 ? 2 : 1);
       hunt.score += pts;
       hunt.kills += 1;
       // every kill counts toward the streak (also during TRIP MODE)
@@ -565,8 +578,8 @@ export default function GunCursor({ active, muted, font }: Props) {
 
     // the shot lands
     const land = (s: Shot) => {
-      if (s.ammo === "bomb") {
-        // Pink Bomber's explosion
+      if (s.ammo === "rocket") {
+        // the rocket blows up
         blip(160, 40, 0.45, 0.12 * SPELL_VOLUME, 0, "sawtooth");
         blip(90, 30, 0.5, 0.1 * SPELL_VOLUME, 0.02);
       } else thud(false);
@@ -585,7 +598,7 @@ export default function GunCursor({ active, muted, font }: Props) {
       // did it get the hype man? (he answers himself, see HypeMan.tsx)
       let hype = false;
       if (!s.hit && !s.solid) {
-        hype = !window.dispatchEvent(new CustomEvent("pinkmane-shot", { cancelable: true, detail: { x: s.x1, y: s.y1, pad: s.ammo === "bomb" ? 40 : 8 } }));
+        hype = !window.dispatchEvent(new CustomEvent("pinkmane-shot", { cancelable: true, detail: { x: s.x1, y: s.y1, pad: s.ammo === "rocket" ? 40 : 8 } }));
         if (hype) {
           coughSound();
           if (hunt.on && hunt.lock <= 0 && hypeWait <= 0) {
@@ -598,8 +611,8 @@ export default function GunCursor({ active, muted, font }: Props) {
       }
       // did it get a flyer? (not through the iPod / handheld, and not when you shot a button)
       let killed = 0;
-      if (!s.hit && !s.solid && (!hype || s.ammo === "bomb")) {
-        const padPx = s.ammo === "bomb" ? BOMB_RADIUS : 14;
+      if (!s.hit && !s.solid && (!hype || s.ammo === "rocket")) {
+        const padPx = s.ammo === "rocket" ? ROCKET_RADIUS : 14;
         let best: { el: HTMLElement; r: DOMRect; d: number } | null = null;
         for (const el of flyers()) {
           const r = alive(el);
@@ -608,7 +621,7 @@ export default function GunCursor({ active, muted, font }: Props) {
           const ny = Math.max(r.top, Math.min(s.y1, r.bottom));
           const d = Math.hypot(s.x1 - nx, s.y1 - ny);
           if (d > padPx) continue;
-          if (s.ammo === "bomb") {
+          if (s.ammo === "rocket") {
             kill(el, r, s.ammo);
             killed++;
           } else if (!best || d < best.d) best = { el, r, d };
@@ -686,7 +699,7 @@ export default function GunCursor({ active, muted, font }: Props) {
     };
     let fxAt = fxSpot();
     const barRect = () => {
-      const dev = document.querySelector(".ipod-shell") ?? document.querySelector(".hh-device");
+      const dev = document.querySelector(".ipod-shell") ?? document.querySelector(".hh-device") ?? document.querySelector(".shop-col"); // .shop-col = the shop's handheld + the key legend under it
       const r = dev?.getBoundingClientRect();
       const cx = r && r.width > 0 ? r.left + r.width / 2 : vw / 2;
       const w = AMMO_W;
@@ -977,7 +990,7 @@ export default function GunCursor({ active, muted, font }: Props) {
         y += 13;
         put("FAR = 20 · MID = 15 · CLOSE = 10", x, y, 9, "#7fd0ff", "right");
         y += 13;
-        put(`BOMB = ${BOMB_POINTS} · ${HUNT_TIME} SECONDS`, x, y, 9, "#7fd0ff", "right");
+        put(`ROCKET = ${ROCKET_POINTS} · ${HUNT_TIME} SECONDS`, x, y, 9, "#7fd0ff", "right");
         y += 13;
         put(`${TRIP_KILLS} IN A ROW = TRIP MODE x2`, x, y, 9, "#ff3bd0", "right");
         y += 17;
@@ -1142,7 +1155,7 @@ export default function GunCursor({ active, muted, font }: Props) {
           for (let i = 0; i < 6; i++) ctx.fillRect(m.x + Math.cos(m.rot + i) * 7 - 2, m.y + Math.sin(m.rot + i) * 7 - 2, 4, 4);
           ctx.fillRect(m.x - 4, m.y - 4, 8, 8);
         } else {
-          const r = m.kind === "bomb" ? 22 : 12;
+          const r = m.kind === "rocket" ? 22 : 12;
           const g = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, r);
           g.addColorStop(0, "rgba(0,0,0,0.8)");
           g.addColorStop(1, "rgba(0,0,0,0)");
@@ -1159,22 +1172,22 @@ export default function GunCursor({ active, muted, font }: Props) {
         ctx.fillRect(f.x, f.y, f.w, f.h);
       }
       for (let i = flashes.length - 1; i >= 0; i--) if (flashes[i].life <= 0) flashes.splice(i, 1);
-      // bomb blasts: a cross of fire like in Pink Bomber
+      // rocket blasts: a round ball of fire that shrinks away
       for (const c of crosses) {
         c.life -= dt;
         const k = Math.max(0, c.life / 0.45);
         ctx.globalAlpha = Math.min(1, k * 2);
-        const len = 46;
-        for (const [col, th] of [
-          ["#ff3b1a", 22],
-          ["#ff7a00", 16],
-          ["#ffd84a", 10],
-          ["#ffffff", 4],
+        for (const [col, rad] of [
+          ["#ff3b1a", 58],
+          ["#ff7a00", 44],
+          ["#ffd84a", 30],
+          ["#ffffff", 14],
         ] as [string, number][]) {
-          const t = th * (0.5 + k * 0.5);
+          const r = rad * (0.35 + (1 - k) * 0.65) * (0.6 + k * 0.4);
           ctx.fillStyle = col;
-          ctx.fillRect(c.x - len, c.y - t / 2, len * 2, t);
-          ctx.fillRect(c.x - t / 2, c.y - len, t, len * 2);
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+          ctx.fill();
         }
       }
       ctx.globalAlpha = 1;
@@ -1218,16 +1231,20 @@ export default function GunCursor({ active, muted, font }: Props) {
         s.t += dt;
         const k = Math.min(1, s.t / s.dur);
         const x = s.x0 + (s.x1 - s.x0) * k;
-        let y = s.y0 + (s.y1 - s.y0) * k;
-        if (s.ammo === "bomb") y -= Math.sin(Math.PI * k) * Math.min(90, Math.hypot(s.x1 - s.x0, s.y1 - s.y0) * 0.3); // the bomb is thrown in an arc
-        s.spin += dt * (s.ammo === "leaf" ? 14 : s.ammo === "bomb" ? 9 : 18);
+        const y = s.y0 + (s.y1 - s.y0) * k;
+        s.spin += dt * (s.ammo === "leaf" ? 14 : 18);
         const a = Math.atan2(y - s.lastY, x - s.lastX);
         const c = AMMO.find((q) => q.id === s.ammo)!.color;
         if (s.ammo !== "bullet") {
           const life = 0.25 + Math.random() * 0.2;
           parts.push({ x: x + (Math.random() - 0.5) * 6, y: y + (Math.random() - 0.5) * 6, vx: (Math.random() - 0.5) * 30, vy: (Math.random() - 0.5) * 30, life, max: life, color: c[Math.floor(Math.random() * c.length)], size: s.ammo === "fire" ? 4 : 3, grav: 0 });
         }
-        drawAmmo(ctx, s.ammo, x, y, a, s.spin, clock);
+        if (s.ammo === "rocket") {
+          // a puff of grey smoke behind the rocket
+          const life = 0.4 + Math.random() * 0.3;
+          parts.push({ x: x - Math.cos(a) * 16, y: y - Math.sin(a) * 16, vx: (Math.random() - 0.5) * 24, vy: -18 - Math.random() * 20, life, max: life, color: Math.random() < 0.5 ? "#9a9aa8" : "#c8c8d4", size: 5, grav: 0 });
+        }
+        drawAmmo(ctx, s.ammo, x, y, s.ammo === "rocket" ? Math.atan2(s.y1 - s.y0, s.x1 - s.x0) : a, s.spin, clock, s.ammo === "rocket" ? 3.6 : 3);
         s.lastX = x;
         s.lastY = y;
         if (k >= 1) land(s);

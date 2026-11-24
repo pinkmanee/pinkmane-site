@@ -188,6 +188,7 @@ const ITEM_ICONS: Record<string, string> = {
   "Pink Bomber": "/icons/pinkbomber.gif",
   "Pink Hell": "/icons/pinkhell.gif",
   "Pink Rush": "/icons/pinkrush.gif",
+  "Pink Kart": "/icons/pinkkart.gif",
   Back: "/icons/arrow.gif",
 };
 
@@ -295,23 +296,33 @@ const STRUCTURED_DATA = {
 // Clicking "Games" on the iPod turns on the PSP with this list. The highlighted game shows a little moving preview
 // (public/previews/<file>.gif, a few seconds recorded from the real game) with what it is and how to play.
 // The order here = the order on the PSP. Rename / reorder freely; "name" must match ITEM_ICONS for the icon.
-// link = the game has its own page: picking it opens that page (PINK RUSH: pinkmane.site/games/pink-rush)
-type GameId = "pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle" | "hell" | "jet" | "ninja" | "kong" | "bomber" | "rush";
-const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; how: string; psp: boolean; link?: string }[] = [
-  {
-    name: "Pink Rush",
-    id: "rush",
-    preview: "/previews/pinkrush.gif",
-    blurb: "NEW · 26 LEVELS. A fast platformer drawn in glowing text characters: run loops upside down, stomp bugs, ride the wind, hop over the void, climb towers, get sucked into the vortex.",
-    how: "left/right = run · space = jump · down = slide (stomp in the air) · V = paper look",
-    psp: true,
-  },
+// link = the game has its own page: picking it opens that page (PINK KART: pinkmane.site/games/pink-kart)
+type GameId = "pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle" | "hell" | "jet" | "ninja" | "kong" | "bomber" | "rush" | "kart";
+// mini: true = the game lives one step deeper, in MINI GAMES (the last row of the game list)
+const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; how: string; psp: boolean; link?: string; mini?: boolean }[] = [
   {
     name: "Pinkmane Void",
     id: "super",
     preview: "/previews/void-zones.gif", // a trip through every zone + your best plays
     blurb: "The main game. Run, jump and shoot through the Void, beat the bosses, stack your gold.",
     how: "left/right = walk · up = jump · down = shoot",
+    psp: true,
+  },
+  {
+    name: "Pink Kart",
+    id: "kart",
+    preview: "/previews/pinkkart.gif",
+    blurb: "NEW · DEMO. PINKMANE's own racing game, drawn by hand: flaming karts, a wiggly track, 808 bombs, vinyls and autotune mics. 3 laps against 5 racers.",
+    how: "arrows = drive · space = use your item · R = back on the road",
+    psp: true,
+    link: "/games/pink-kart",
+  },
+  {
+    name: "Pink Rush",
+    id: "rush",
+    preview: "/previews/pinkrush.gif",
+    blurb: "26 LEVELS. A fast platformer drawn in glowing text characters: run loops upside down, stomp bugs, ride the wind, hop over the void, climb towers, get sucked into the vortex.",
+    how: "left/right = run · space = jump · down = slide (stomp in the air) · V = paper look",
     psp: true,
   },
   {
@@ -328,14 +339,6 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     preview: "/previews/hell-maps.gif",
     blurb: "Demons pour out of the portals in waves. Grab the shotgun and blast them all, BEARMANPIG waits every 5th wave!",
     how: "WASD = move · mouse = aim · click = shoot · phone: joystick + FIRE",
-    psp: true,
-  },
-  {
-    name: "Pink Jetpack",
-    id: "jet",
-    preview: "/previews/jet.gif",
-    blurb: "DEMO. Fly through the night city on a jetpack that shoots weed leaves. Dodge the zappers and the rockets!",
-    how: "hold space / hold the screen = fly up · let go = fall",
     psp: true,
   },
   {
@@ -370,12 +373,23 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     how: "left/right = spin",
     psp: false,
   },
+  // ---------- MINI GAMES ----------
+  {
+    name: "Pink Jetpack",
+    id: "jet",
+    preview: "/previews/jet.gif",
+    blurb: "DEMO. Fly through the night city on a jetpack that shoots weed leaves. Dodge the zappers and the rockets!",
+    how: "hold space / hold the screen = fly up · let go = fall",
+    mini: true,
+    psp: true,
+  },
   {
     name: "Pink Maze",
     id: "maze",
     preview: "/previews/maze.gif",
     blurb: "Eat every dot in the maze and don't let the skulls catch you.",
     how: "arrows steer",
+    mini: true,
     psp: true,
   },
   {
@@ -384,6 +398,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     preview: "/previews/vortex.gif",
     blurb: "Spin the paddle around the vortex, keep the ball in and break the rings.",
     how: "mouse wheel / up / down = spin",
+    mini: true,
     psp: true,
   },
   {
@@ -392,6 +407,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     preview: "/previews/snake.gif",
     blurb: "Eat, grow longer, don't bite yourself.",
     how: "arrows steer",
+    mini: true,
     psp: true,
   },
   {
@@ -400,6 +416,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     preview: "/previews/bird.gif",
     blurb: "Flap through the gaps between the pipes. One touch and you're out.",
     how: "space / tap = flap",
+    mini: true,
     psp: true,
   },
   {
@@ -408,19 +425,28 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     preview: "/previews/pinkrun.gif",
     blurb: "Jump over everything in your way. How far can you get?",
     how: "space / tap = jump",
+    mini: true,
     psp: false,
   },
 ];
+// The big games (the first list you see) and the mini games (behind the MINI GAMES row)
+const MAIN_GAMES = PICKER_GAMES.filter((g) => !g.mini);
+const MINI_GAMES = PICKER_GAMES.filter((g) => g.mini);
+const MINI_ROW = "Mini Games";
 
 // The game list on the PSP screen: rows on the left, the highlighted game's preview on the right.
 // Keys / D-pad / wheel move the highlight (the page does that), OK / A plays.
 // Mouse + touch: tap a row = highlight it (see its preview), tap it again or tap the preview = play. Swipe up / down = scroll.
 function GamePicker({
+  games,
+  miniRow,
   selected,
   onHighlight,
   onOpen,
   onStep,
 }: {
+  games: typeof PICKER_GAMES; // the games in this list
+  miniRow: boolean; // add the MINI GAMES row at the end (the first list has it)
   selected: number;
   onHighlight: (i: number) => void;
   onOpen: (i: number) => void;
@@ -428,8 +454,17 @@ function GamePicker({
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const drag = useRef({ y: 0, acc: 0, moved: false, on: false });
-  const rows = [...PICKER_GAMES.map((g) => g.name), "Back"];
-  const game = PICKER_GAMES[selected];
+  const rows = [...games.map((g) => g.name), ...(miniRow ? [MINI_ROW] : []), "Back"];
+  const game = games[selected];
+  const onMini = miniRow && selected === games.length; // the MINI GAMES row is highlighted
+  // the MINI GAMES row shows the mini games' previews one after another
+  const [miniTick, setMiniTick] = useState(0);
+  useEffect(() => {
+    if (!onMini) return;
+    const t = setInterval(() => setMiniTick((n) => n + 1), 2200);
+    return () => clearInterval(t);
+  }, [onMini]);
+  const miniShow = MINI_GAMES[miniTick % Math.max(1, MINI_GAMES.length)];
 
   // keep the highlighted row in view
   useEffect(() => {
@@ -512,16 +547,35 @@ function GamePicker({
             </button>
             <div className="gp-title">
               {game.name.toUpperCase()}
-              <span className="gp-tag">{game.psp ? "PSP" : "IPOD"}</span>
+              <span className="gp-tag">{game.link ? "FULL SCREEN" : game.psp ? "PSP" : "IPOD"}</span>
             </div>
             <div className="gp-blurb">{game.blurb}</div>
             <div className="gp-how">{game.how}</div>
             <div className="gp-play">▶ A / ENTER / TAP = PLAY</div>
           </>
+        ) : onMini && miniShow ? (
+          <>
+            <button className="gp-preview" onClick={() => onOpen(selected)} onMouseDown={(e) => e.preventDefault()} aria-label="Open Mini Games">
+              <img
+                key={miniShow.id}
+                src={miniShow.preview}
+                alt="Mini Games preview"
+                draggable={false}
+                onError={(e) => (e.currentTarget.style.visibility = "hidden")}
+              />
+            </button>
+            <div className="gp-title">
+              MINI GAMES
+              <span className="gp-tag">{MINI_GAMES.length} GAMES</span>
+            </div>
+            <div className="gp-blurb">The small arcade ones: {MINI_GAMES.map((g) => g.name).join(", ")}.</div>
+            <div className="gp-how">now showing: {miniShow.name}</div>
+            <div className="gp-play">▶ A / ENTER / TAP = OPEN</div>
+          </>
         ) : (
           <div className="gp-back">
             <div className="gp-title">BACK</div>
-            <div className="gp-blurb">Turn off the PSP and go back to the iPod menu.</div>
+            <div className="gp-blurb">{miniRow ? "Turn off the PSP and go back to the iPod menu." : "Back to the big games."}</div>
           </div>
         )}
       </div>
@@ -1033,7 +1087,7 @@ export default function Home() {
   // On a phone / tablet those two go full screen like every other game.
   const hhGame = playing && (isTouch || (activeGame !== "hex" && activeGame !== "pinkrun"));
   // Games menu: the PSP turns on and shows the game list with previews
-  const gamePicker = !playing && menu === "games";
+  const gamePicker = !playing && (menu === "games" || menu === "minigames");
   // The PSP is on: playing one of its games, or picking a game
   const handheld = hhGame || gamePicker;
   // The song list. In PINKMANE VOID on the handheld the VOID_BEATS are added after your songs (your songs keep their places in the list).
@@ -1212,7 +1266,9 @@ export default function Home() {
     releases: [...RELEASES.map((r) => r.name), "Back"],
     // Games: the main game first, the rest live one step deeper in Mini Games
     // Games: shown on the PSP as a list with previews (see PICKER_GAMES)
-    games: [...PICKER_GAMES.map((g) => g.name), "Back"],
+    games: [...MAIN_GAMES.map((g) => g.name), MINI_ROW, "Back"],
+    // Mini Games: the same kind of list, one step deeper
+    minigames: [...MINI_GAMES.map((g) => g.name), "Back"],
   };
 
   const items = menus[menu as keyof typeof menus];
@@ -1393,6 +1449,18 @@ export default function Home() {
     setSelected((prev) => (prev + 1) % items.length);
   };
 
+  // After a game: back to the list it came from (the big games or MINI GAMES), on the game you just played
+  const backToGameList = () => {
+    const mini = MINI_GAMES.findIndex((g) => g.id === activeGame);
+    if (mini >= 0) {
+      setMenu("minigames");
+      setSelected(mini);
+    } else {
+      setMenu("games");
+      setSelected(Math.max(0, MAIN_GAMES.findIndex((g) => g.id === activeGame)));
+    }
+  };
+
   const goBack = () => {
     if (exiting) return; // already powering off
     playSelectSound();
@@ -1400,14 +1468,19 @@ export default function Home() {
     if (playing) {
       setPlaying(false);
       // back to the PSP game list, on the game you just played
-      setMenu("games");
-      setSelected(Math.max(0, PICKER_GAMES.findIndex((g) => g.id === activeGame)));
+      backToGameList();
       return;
     }
     // Games lives on the main menu; Releases lives inside Socials
     if (menu === "games") {
       setMenu("main");
       setSelected(3);
+      return;
+    }
+    // Mini Games lives inside Games, on its own row
+    if (menu === "minigames") {
+      setMenu("games");
+      setSelected(MAIN_GAMES.length);
       return;
     }
     if (menu === "releases") {
@@ -1507,9 +1580,14 @@ export default function Home() {
       if (item === "Back") goBack();
     }
 
-    if (menu === "games") {
+    if (menu === "games" || menu === "minigames") {
+      if (item === MINI_ROW) {
+        setMenu("minigames");
+        setSelected(0);
+        return;
+      }
       const game = PICKER_GAMES.find((g) => g.name === item);
-      // a game with its own page (PINK RUSH): go there
+      // a game with its own page (PINK KART): go there
       if (game?.link) {
         window.location.href = game.link;
         return;
@@ -2269,6 +2347,8 @@ activeGame === "rush" ? (
   // What the PSP screen shows: the game list, or the game
   const screenElement = gamePicker ? (
     <GamePicker
+      games={menu === "minigames" ? MINI_GAMES : MAIN_GAMES}
+      miniRow={menu !== "minigames"}
       selected={selected}
       onHighlight={(i) => {
         playSelectSound();
@@ -2341,8 +2421,7 @@ activeGame === "rush" ? (
     trace("goHome", `playing=${playing}`);
     if (playing) {
       setPlaying(false);
-      setMenu("games");
-      setSelected(Math.max(0, PICKER_GAMES.findIndex((g) => g.id === activeGame)));
+      backToGameList();
       return;
     }
     setMenu("main");

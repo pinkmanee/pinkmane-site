@@ -21,9 +21,14 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "#07060c", overflow: "hidden", touchAction: "none", userSelect: "none" }}>
       <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%", imageRendering: "pixelated" }} aria-label="PINK KART" />
-      {/* back to the main site */}
+      {/* back to the main site, straight into its game list */}
       <Link
         href="/"
+        onClick={() => {
+          try {
+            sessionStorage.setItem("pinkmane-open-games", "1");
+          } catch {}
+        }}
         style={{
           position: "absolute",
           left: 12,
@@ -39,7 +44,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
           opacity: 0.7,
         }}
       >
-        ← PINKMANE
+        ← GAMES
       </Link>
     </div>
   );

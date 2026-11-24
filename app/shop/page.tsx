@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Press_Start_2P, Silkscreen } from "next/font/google";
+import GunCursor from "../components/GunCursor";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -740,6 +741,7 @@ export default function Shop() {
 
           <div
             className={`${pixelFont.className} psp-screen`}
+            data-gun-screen
             style={{
               background: "#0d0d10",
               borderRadius: "8px",
@@ -919,6 +921,10 @@ export default function Shop() {
           ))}
         </div>
       </div>
+
+      {/* THE GUN (computers only), the same one as on the main page: the mouse is an aim, clicks are shots,
+          RIGHT CLICK / keys 1 - 5 switch ammo. Off on phones and while the shop powers off. */}
+      <GunCursor active={!isTouch && !exiting} muted={isMuted} font={pixelFont.style.fontFamily} />
 
       <style jsx global>{`
         /* PHONES: holding a finger on a button used to pop up "Copy" and select its text.
