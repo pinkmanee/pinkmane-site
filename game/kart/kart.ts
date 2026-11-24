@@ -963,9 +963,9 @@ export class KartGame {
     const rx = -dy, ry = dx;
     const camX = me.x - dx * CAM_BACK, camY = me.y - dy * CAM_BACK;
 
-    // ---- sky (the strip wraps around twice per full turn)
+    // ---- sky: sky.png is one full turn, so it wraps around exactly once (one sun)
     const sky = this.img["sky"];
-    let off = (((ca / Math.PI) * sky.width) % sky.width + sky.width) % sky.width;
+    let off = (((ca / (Math.PI * 2)) * sky.width) % sky.width + sky.width) % sky.width;
     off = Math.round(off);
     const skyY = HORIZON + 4 - sky.height;
     b.fillStyle = "#100628";
