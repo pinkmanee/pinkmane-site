@@ -358,8 +358,8 @@ export default function Shop() {
   const [volTip, setVolTip] = useState(false);
   const [volTipFade, setVolTipFade] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  // PHONES + TABLETS: on a touch screen you can tap a row on the screen to open it (same as on the iPod page).
-  // On a computer the screen doesn't react to clicks. To try it on your computer: http://localhost:3000/shop?touch=1
+  // The rows on the screen open when you tap them (phones) or shoot them with the gun (computers).
+  // isTouch = a phone or tablet: no gun there. To try the phone version on your computer: http://localhost:3000/shop?touch=1
   const [isTouch, setIsTouch] = useState(false);
   useEffect(() => {
     const forced = new URLSearchParams(window.location.search).get("touch") !== null;
@@ -790,14 +790,11 @@ export default function Shop() {
                     className={`psp-item ${
                       confirmSel === index ? "psp-item-active" : ""
                     }`}
-                    onClick={
-                      isTouch
-                        ? () => {
-                            setConfirmSel(index);
-                            selectItem(index);
-                          }
-                        : undefined
-                    }
+                    data-shoot
+                    onClick={() => {
+                      setConfirmSel(index);
+                      selectItem(index);
+                    }}
                   >
                     {confirmSel === index ? "> " : ""}
                     {option}
@@ -829,14 +826,11 @@ export default function Shop() {
                     className={`psp-item ${
                       selected === index ? "psp-item-active" : ""
                     }`}
-                    onClick={
-                      isTouch
-                        ? () => {
-                            setSelected(index);
-                            selectItem(index);
-                          }
-                        : undefined
-                    }
+                    data-shoot
+                    onClick={() => {
+                      setSelected(index);
+                      selectItem(index);
+                    }}
                   >
                     {selected === index ? "> " : ""}
                     {item}
@@ -1217,6 +1211,7 @@ export default function Shop() {
           line-height: 1.3;
           white-space: nowrap;
           overflow: hidden;
+          cursor: pointer;
           color: #cfcfd4;
           border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         }

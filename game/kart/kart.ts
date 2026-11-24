@@ -1,4 +1,4 @@
-// PINK KART (demo): a behind-the-kart racing game drawn on a small pixel screen and blown up.
+// PINK KART (demo, track 1: WEEDLAND): a behind-the-kart racing game drawn on a pixel screen and blown up.
 // The ground is one big flat picture (public/kart/track1-ground.png) tilted into 3D, like old SNES racers.
 // Everything you see comes from the pictures in public/kart/ : swap a picture, the game changes.
 
@@ -13,14 +13,28 @@ type TrackData = {
   lap: number;
 };
 
-const BW = 480; // the small pixel screen
-const BH = 270;
-const HORIZON = 100;
-const FOCAL = 260;
+const BW = 720; // the pixel screen the race is drawn on (more pixels = a finer picture)
+const BH = 405;
+const UW = 480; // the menus, numbers and buttons are laid out on a 480 x 270 grid, stretched over the same screen
+const UH = 270;
+const HORIZON = 150;
+const FOCAL = 390;
 const CAM_H = 34;
-const CAM_BACK = 65; // with KART_SCALE 0.25 your own kart is drawn at exactly its drawn size
+const CAM_BACK = 65; // how far the camera sits behind your kart
 const LAPS = 3;
-const KART_SCALE = 0.25; // world units per sprite pixel
+// CARS: every car is 3 pictures (back, side, front) in public/kart/, each with 3 frames side by side:
+// no flame, flame, flame (the flames only show while boosting or revving at the start).
+// k = world units per picture pixel (bigger = a bigger car). "mane" is PINKMANE's own drawn kart.
+const CARS: Record<string, { k: number }> = {
+  mane: { k: 1 / 6 }, // with the camera 65 behind, your own kart is drawn at exactly its drawn size
+  buggy: { k: 0.138 },
+  wedge: { k: 0.13 },
+  truck: { k: 0.148 },
+};
+const VIEWS = ["back", "side", "front"];
+const SPIN_TIME = 1.0; // a spin-out: two full turns, always this long
+const GO_TIME = 3; // the countdown: 3 (0s) 2 (1s) 1 (2s) GO (3s)
+const REV_FROM = 1; // hold the gas from when the 2 shows = ROCKET START. Earlier = TOO EARLY, the engine chokes
 const MAX_SPEED = 235;
 const ITEMS = ["bolt", "bomb", "vinyl", "mic", "bass", "mute", "wall"] as const;
 type ItemName = (typeof ITEMS)[number];
@@ -34,19 +48,21 @@ const ITEM_LABEL: Record<ItemName, string> = {
   wall: "REVERB WALL",
 };
 // kart colours: the player keeps the drawn pink, the bots get these instead of pink
-const BOT_COLORS: [number, number, number][] = [
-  [60, 220, 255],
-  [150, 255, 80],
-  [255, 150, 40],
-  [150, 100, 255],
-  [255, 70, 90],
+const BOTS: { name: string; car: string; color: [number, number, number] }[] = [
+  { name: "808", car: "buggy", color: [60, 220, 255] },
+  { name: "SERUM", car: "wedge", color: [150, 255, 80] },
+  { name: "VOID", car: "truck", color: [255, 150, 40] },
+  { name: "HEX", car: "wedge", color: [150, 100, 255] },
+  { name: "KONG", car: "buggy", color: [255, 70, 90] },
 ];
-const BOT_NAMES = ["808", "SERUM", "VOID", "HEX", "KONG"];
 
 type Kart = {
   name: string;
   player: boolean;
   skin: number;
+  car: string;
+  rev: number; // when the gas went down during the countdown (-1 = not held)
+  stall: number; // the engine choked (pressed too early): seconds until it runs again
   x: number;
   y: number;
   a: number;
@@ -83,7 +99,7 @@ type Thing = {
   owner: Kart;
   idx: number;
 };
-type Sprite = { img: Img; sx: number; sw: number; sh: number; x: number; y: number; k: number; lift: number; flip: boolean; shadow: boolean };
+type Sprite = { img: Img; sx: number; sw: number; sh: number; x: number; y: number; k: number; lift: number; flip: boolean; shadow: boolean; squash?: number };
 
 const wrapAngle = (a: number) => {
   while (a > Math.PI) a -= Math.PI * 2;
@@ -117,6 +133,8 @@ export class KartGame {
 
   private track!: TrackData;
   private ground!: Uint32Array;
+  private gsize = 0; // the ground picture's size in pixels
+  private gs = 1; // ground pixels per world unit
   private types!: Uint8Array;
   private img: Record<string, HTMLImageElement> = {};
   private kartSkins: Record<string, HTMLCanvasElement>[] = [];
@@ -205,17 +223,20 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["track1-ground", "track1-map", "sky", "props", "itembox", "kart-back", "kart-side", "kart-front", "kart-top", ...ITEMS.map((i) => `item-${i}`)];
+    const names = ["track1-ground", "track1-map", "sky", "props", "itembox", ...Object.keys(CARS).flatMap((c) => VIEWS.map((v) => `kart-${c}-${v}`)), ...ITEMS.map((i) => `item-${i}`)];
     const [data] = await Promise.all([fetch(`${this.base}track1.json`).then((r) => r.json()), ...names.map((n) => this.loadImg(n))]);
     this.track = data as TrackData;
     const S = this.track.size;
     // the ground picture as raw pixels
+    const GZ = this.img["track1-ground"].width;
+    this.gsize = GZ;
+    this.gs = GZ / S;
     const g = document.createElement("canvas");
-    g.width = S;
-    g.height = S;
+    g.width = GZ;
+    g.height = GZ;
     const gc = g.getContext("2d", { willReadFrequently: true })!;
     gc.drawImage(this.img["track1-ground"], 0, 0);
-    this.ground = new Uint32Array(gc.getImageData(0, 0, S, S).data.buffer);
+    this.ground = new Uint32Array(gc.getImageData(0, 0, GZ, GZ).data.buffer);
     // the surface map: 0 off-road, 1 road, 2 boost pad (half the size of the ground)
     const m = document.createElement("canvas");
     m.width = S / 2;
@@ -245,24 +266,28 @@ export class KartGame {
       }
     nc.putImageData(nd, 0, 0);
     // kart colours
-    const views = ["back", "side", "front", "top"];
-    this.kartSkins = [null, ...BOT_COLORS].map((col) => {
+    this.kartSkins = [{ car: "mane", color: null }, ...BOTS].map((b) => {
       const set: Record<string, HTMLCanvasElement> = {};
-      for (const v of views) set[v] = this.tint(this.img[`kart-${v}`], col as [number, number, number] | null);
+      for (const v of VIEWS) set[v] = this.tint(this.img[`kart-${b.car}-${v}`], b.color as [number, number, number] | null);
       return set;
     });
-    // explosion picture
+    // the explosion: 6 clean frames side by side (a ball of fire that opens into a ring)
+    const BF = 96;
     this.boom = document.createElement("canvas");
-    this.boom.width = 64;
-    this.boom.height = 64;
+    this.boom.width = BF * 6;
+    this.boom.height = BF;
     const bc = this.boom.getContext("2d")!;
-    const cols = ["#ff46c8", "#ff9628", "#ffe23c", "#ffffff"];
-    for (let i = 0; i < 4; i++) {
-      bc.fillStyle = cols[i];
-      for (let y = 0; y < 64; y++)
-        for (let x = 0; x < 64; x++) {
-          const r = Math.hypot(x - 31.5, y - 31.5) + Math.sin(Math.atan2(y - 31.5, x - 31.5) * 9) * 3;
-          if (r < 30 - i * 7) bc.fillRect(x, y, 1, 1);
+    const cols = ["#ffffff", "#ffe23c", "#ff9628", "#ff46c8"];
+    for (let f = 0; f < 6; f++) {
+      const outer = 16 + f * 6;
+      const inner = f < 2 ? 0 : f < 4 ? (f - 1) * 9 : outer - (7 - f) * 3; // the last two frames: just a thin ring
+      for (let y = 0; y < BF; y++)
+        for (let x = 0; x < BF; x++) {
+          const ex = x - BF / 2 + 0.5, ey = y - BF / 2 + 0.5;
+          const r = Math.hypot(ex, ey) + Math.sin(Math.atan2(ey, ex) * 8) * 2.5;
+          if (r >= outer || r < inner) continue;
+          bc.fillStyle = cols[Math.min(3, Math.floor(((r - inner) / (outer - inner)) * 4))];
+          bc.fillRect(x, y, 1, 1);
         }
     }
   }
@@ -320,7 +345,7 @@ export class KartGame {
       const p = pos(e);
       this.pointers.set(e.pointerId, p);
       if (this.state !== "race") this.confirm();
-      else if (this.touch && p.x > BW / 2 && (p.y < 165 || p.x >= 350)) this.tapItem = true;
+      else if (this.touch && p.x > UW / 2 && (p.y < 165 || p.x >= 350)) this.tapItem = true;
     };
     const pm = (e: PointerEvent) => {
       if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, pos(e));
@@ -367,7 +392,7 @@ export class KartGame {
     let brake = false;
     for (const p of this.pointers.values()) {
       if (p.x < 200 && p.y > 90) s += p.x < 79 ? -1 : 1;
-      if (p.x >= BW / 2 && p.x < 350 && p.y >= 165) brake = true;
+      if (p.x >= UW / 2 && p.x < 350 && p.y >= 165) brake = true;
     }
     return { s: clamp(s, -1, 1), brake };
   }
@@ -388,9 +413,12 @@ export class KartGame {
       const side = (i % 2 ? 1 : -1) * 16;
       const player = i === 5;
       this.karts.push({
-        name: player ? "YOU" : BOT_NAMES[i],
+        name: player ? "YOU" : BOTS[i].name,
         player,
         skin: player ? 0 : i + 1,
+        car: player ? "mane" : BOTS[i].car,
+        rev: -1,
+        stall: 0,
         x: cx - Math.sin(a) * side,
         y: cy + Math.cos(a) * side,
         a,
@@ -451,10 +479,24 @@ export class KartGame {
     if (this.flashT > 0) this.flashT -= dt;
     if (this.state === "title") return;
     if (this.state === "count") {
-      if (this.stateT >= 3.2) {
+      // revving: hold the gas during the countdown. From the 2 on = ROCKET START, earlier = TOO EARLY
+      const me = this.me;
+      const held = this.keys.has("ArrowUp") || this.keys.has("w") || (this.touch && this.pointers.size > 0);
+      if (!held) me.rev = -1;
+      else if (me.rev < 0) me.rev = this.stateT;
+      if (this.stateT >= GO_TIME) {
         this.state = "race";
         this.stateT = 0;
-        this.say("GO!", 1);
+        for (const k of this.karts) {
+          if (!k.player) {
+            const r = Math.random();
+            k.rev = r < 0.3 ? 2 : r < 0.38 ? 0 : -1; // some bots get it right, a few choke
+          }
+          if (k.rev >= REV_FROM) k.boost = 1.3;
+          else if (k.rev >= 0) k.stall = 1.2;
+        }
+        this.say(me.rev >= REV_FROM ? "ROCKET START!" : me.rev >= 0 ? "TOO EARLY!" : "GO!", 1.2);
+        for (const k of this.karts) k.rev = -1;
       }
       return;
     }
@@ -488,6 +530,11 @@ export class KartGame {
       }
 
       // ---- timers
+      if (k.stall > 0) {
+        k.stall -= dt;
+        gas = 0;
+        brake = false;
+      }
       if (k.boost > 0) k.boost -= dt;
       if (k.blind > 0) k.blind -= dt;
       if (k.safe > 0) k.safe -= dt;
@@ -505,9 +552,11 @@ export class KartGame {
       if (type === 0) top *= 0.42;
       if (k.boost > 0) top = MAX_SPEED * 1.5;
       if (k.spin > 0) {
+        // a spin-out: exactly two full turns, fast at first and easing out, so it always ends facing forward
         k.spin -= dt;
-        k.spinA += dt * 14;
-        k.speed *= 0.955;
+        const p = 1 - Math.max(0, k.spin) / SPIN_TIME;
+        k.spinA = Math.PI * 4 * (1 - (1 - p) * (1 - p));
+        k.speed *= 0.96;
         if (k.spin <= 0) k.spinA = 0;
       } else {
         if (brake) k.speed -= (k.speed > 0 ? 330 : 120) * dt;
@@ -624,9 +673,10 @@ export class KartGame {
 
   private hit(k: Kart, secs: number) {
     if (k.safe > 0 || k.finished) return;
-    k.spin = secs;
+    k.spin = SPIN_TIME;
+    k.spinA = 0;
     k.boost = 0;
-    k.safe = secs + 1;
+    k.safe = SPIN_TIME + secs;
     if (k.player) this.say("OUCH", 0.8);
   }
 
@@ -642,7 +692,7 @@ export class KartGame {
     if (it === "wall") add("wall", k.x - dx * 24, k.y - dy * 24, 0, 0, 10);
     if (it === "mic") add("mic", k.x + dx * 14, k.y + dy * 14, dx, dy, 7);
     if (it === "bass") {
-      add("wave", k.x, k.y, 0, 0, 0.6);
+      add("wave", k.x, k.y, 0, 0, 0.5);
       for (const o of this.karts) if (o !== k && Math.hypot(o.x - k.x, o.y - k.y) < 150) this.hit(o, 1.1);
     }
     if (it === "mute") {
@@ -663,9 +713,9 @@ export class KartGame {
         if (t.t >= t.life) {
           t.kind = "boom";
           t.t = 0;
-          t.life = 0.5;
+          t.life = 0.42;
           t.z = 0;
-          for (const k of this.karts) if (Math.hypot(k.x - t.x, k.y - t.y) < 62) this.hit(k, 1.3);
+          for (const k of this.karts) if (Math.hypot(k.x - t.x, k.y - t.y) < 46) this.hit(k, 1.3);
         }
       } else if (t.kind === "mic") {
         // chase the kart in front, along the road
@@ -739,8 +789,8 @@ export class KartGame {
     const ctx = this.ctx;
     ctx.fillStyle = "#07060c";
     ctx.fillRect(0, 0, w, h);
-    const u = Math.min(w / BW, h / BH);
-    const ox = Math.round((w - BW * u) / 2), oy = Math.round((h - BH * u) / 2);
+    const u = Math.min(w / UW, h / UH);
+    const ox = Math.round((w - UW * u) / 2), oy = Math.round((h - UH * u) / 2);
     this.lay = { ox, oy, u };
     const text = (s: string, x: number, y: number, size: number, col = "#fff", align: CanvasTextAlign = "left") => {
       ctx.font = `${Math.round(size * u)}px ${this.font}, monospace`;
@@ -752,16 +802,16 @@ export class KartGame {
       ctx.fillText(s, ox + x * u, oy + y * u);
     };
     if (!this.ready) {
-      text(this.loadError ? "COULD NOT LOAD THE GAME" : "LOADING...", BW / 2, BH / 2 - 6, 12, "#ff46c8", "center");
-      if (this.loadError) text(this.loadError.slice(0, 50), BW / 2, BH / 2 + 14, 6, "#fff", "center");
+      text(this.loadError ? "COULD NOT LOAD THE GAME" : "LOADING...", UW / 2, UH / 2 - 6, 12, "#ff46c8", "center");
+      if (this.loadError) text(this.loadError.slice(0, 50), UW / 2, UH / 2 + 14, 6, "#fff", "center");
       return;
     }
     this.drawWorld();
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(this.buf, ox, oy, BW * u, BH * u);
+    ctx.drawImage(this.buf, ox, oy, UW * u, UH * u);
     ctx.save();
     ctx.beginPath();
-    ctx.rect(ox, oy, BW * u, BH * u);
+    ctx.rect(ox, oy, UW * u, UH * u);
     ctx.clip();
     const me = this.me;
     const pic = (im: Img, x: number, y: number, s: number, sx = 0, sw = im.width) => ctx.drawImage(im, sx, 0, sw, im.height, ox + x * u, oy + y * u, sw * s * u, im.height * s * u);
@@ -769,7 +819,7 @@ export class KartGame {
     // blinded by MUTE
     if (me.blind > 0 && this.state === "race") {
       ctx.fillStyle = `rgba(18,4,28,${Math.min(0.5, me.blind)})`;
-      ctx.fillRect(ox, oy, BW * u, BH * u);
+      ctx.fillRect(ox, oy, UW * u, UH * u);
       const eye = this.img["item-mute"];
       ctx.globalAlpha = 0.85;
       for (let i = 0; i < 4; i++) {
@@ -784,7 +834,7 @@ export class KartGame {
       for (let i = 0; i < 18; i++) {
         const a = (i / 18) * Math.PI * 2 + this.clock * 9;
         const r1 = 150 + ((i * 37 + this.clock * 400) % 60), r2 = r1 + 40;
-        const cx = BW / 2, cy = BH * 0.62;
+        const cx = UW / 2, cy = UH * 0.62;
         ctx.beginPath();
         ctx.moveTo(ox + (cx + Math.cos(a) * r1) * u, oy + (cy + Math.sin(a) * r1 * 0.6) * u);
         ctx.lineTo(ox + (cx + Math.cos(a) * r2) * u, oy + (cy + Math.sin(a) * r2 * 0.6) * u);
@@ -797,11 +847,11 @@ export class KartGame {
       const N = this.track.center.length;
       const lap = clamp(Math.floor(me.total / N) + 1, 1, LAPS);
       text(`LAP ${lap}/${LAPS}`, 8, 8, 9, "#fff");
-      text(fmtTime(this.clock), BW - 8, 8, 9, "#fff", "right");
-      text(PLACE[me.place - 1], 8, BH - 34, 22, me.place === 1 ? "#ffe23c" : "#ff46c8");
-      text(`/${this.karts.length}`, 8 + 22 * 3.1, BH - 20, 8, "#fff");
+      text(fmtTime(this.clock), UW - 8, 8, 9, "#fff", "right");
+      text(PLACE[me.place - 1], 8, UH - 34, 22, me.place === 1 ? "#ffe23c" : "#ff46c8");
+      text(`/${this.karts.length}`, 8 + 22 * 3.1, UH - 20, 8, "#fff");
       // item slot
-      const bx = BW / 2 - 17, by = 6;
+      const bx = UW / 2 - 17, by = 6;
       ctx.fillStyle = "rgba(18,4,28,0.75)";
       ctx.fillRect(ox + bx * u, oy + by * u, 34 * u, 34 * u);
       ctx.strokeStyle = "#ff46c8";
@@ -810,16 +860,16 @@ export class KartGame {
       const show: ItemName | null = me.roulette > 0 ? ITEMS[Math.floor(this.clock * 14) % ITEMS.length] : me.item;
       if (show) {
         pic(this.img[`item-${show}`], bx + 1, by + 1, 32 / 48);
-        if (me.item) text(ITEM_LABEL[me.item], BW / 2, by + 38, 6, "#ffe23c", "center");
+        if (me.item) text(ITEM_LABEL[me.item], UW / 2, by + 38, 6, "#ffe23c", "center");
       }
       // minimap
-      const mx = BW - 78, my = BH - 78, ms = 70 / 96;
+      const mx = UW - 78, my = UH - 78, ms = 70 / 96;
       ctx.globalAlpha = 0.85;
       pic(this.mini, mx, my, ms);
       ctx.globalAlpha = 1;
       const S = this.track.size;
       for (const k of [...this.karts].sort((a) => (a.player ? 1 : -1))) {
-        const c = k.player ? [255, 70, 200] : BOT_COLORS[k.skin - 1];
+        const c = k.player ? [255, 70, 200] : BOTS[k.skin - 1].color;
         const r = k.player ? 3 : 2;
         ctx.fillStyle = "#12041c";
         ctx.fillRect(ox + (mx + (k.x / S) * 70 - r - 0.6) * u, oy + (my + (k.y / S) * 70 - r - 0.6) * u, (r * 2 + 1.2) * u, (r * 2 + 1.2) * u);
@@ -836,53 +886,65 @@ export class KartGame {
           text(label, x + bw / 2, y + bh / 2 - 5, 10, "#fff", "center");
         };
         const t = this.touchSteer();
-        btn("<", 6, BH - 96, 70, 50, t.s < 0);
-        btn(">", 82, BH - 96, 70, 50, t.s > 0);
-        btn("BRAKE", BW - 196, BH - 92, 62, 40, t.brake);
-        btn("ITEM", BW - 128, BH - 132, 46, 40, false);
+        btn("<", 6, UH - 96, 70, 50, t.s < 0);
+        btn(">", 82, UH - 96, 70, 50, t.s > 0);
+        btn("BRAKE", UW - 196, UH - 92, 62, 40, t.brake);
+        btn("ITEM", UW - 128, UH - 132, 46, 40, false);
       }
     }
     if (this.state === "count") {
       const n = 3 - Math.floor(this.stateT);
-      if (n >= 1) text(String(n), BW / 2, 70, 48, "#ffe23c", "center");
+      if (n >= 1) text(String(n), UW / 2, 62, 48, "#ffe23c", "center");
+      // the rev bar: fills up while you hold the gas (red = pressed too early)
+      const bw = 90, bx2 = UW / 2 - bw / 2, by2 = 122;
+      ctx.fillStyle = "rgba(18,4,28,0.75)";
+      ctx.fillRect(ox + (bx2 - 2) * u, oy + (by2 - 2) * u, (bw + 4) * u, 12 * u);
+      if (me.rev >= 0) {
+        const fill = clamp((this.stateT - me.rev) / Math.max(0.2, GO_TIME - me.rev), 0, 1);
+        ctx.fillStyle = me.rev < REV_FROM ? "#ff3b3b" : "#ffe23c";
+        ctx.fillRect(ox + bx2 * u, oy + by2 * u, bw * fill * u, 8 * u);
+      }
+      text(this.touch ? "HOLD THE SCREEN ON 2" : "HOLD W / UP ON 2", UW / 2, by2 + 14, 6, "#fff", "center");
     }
-    if (this.flashT > 0 && this.state === "race") text(this.flash, BW / 2, 74, 22, "#ffe23c", "center");
-    if (this.state === "race" && me.lost > 1) text("WRONG WAY? PRESS R", BW / 2, 120, 8, "#fff", "center");
+    if (this.flashT > 0 && this.state === "race") text(this.flash, UW / 2, 74, 22, "#ffe23c", "center");
+    if (this.state === "race" && me.lost > 1) text("WRONG WAY? PRESS R", UW / 2, 120, 8, "#fff", "center");
 
     if (this.state === "title") {
       ctx.fillStyle = "rgba(10,3,18,0.62)";
-      ctx.fillRect(ox, oy, BW * u, BH * u);
-      text("PINK KART", BW / 2, 44, 34, "#ff46c8", "center");
-      text("DEMO - TRACK 1", BW / 2, 88, 10, "#ffe23c", "center");
-      ITEMS.forEach((it, i) => pic(this.img[`item-${it}`], BW / 2 - 7 * 19 + i * 38 + 3, 112, 32 / 48));
+      ctx.fillRect(ox, oy, UW * u, UH * u);
+      text("PINK KART", UW / 2, 44, 34, "#ff46c8", "center");
+      text("DEMO - WEEDLAND", UW / 2, 88, 10, "#ffe23c", "center");
+      ITEMS.forEach((it, i) => pic(this.img[`item-${it}`], UW / 2 - 7 * 19 + i * 38 + 3, 112, 32 / 48));
       if (this.touch) {
-        text("LEFT THUMB: STEER   RIGHT: ITEM / BRAKE", BW / 2, 166, 7, "#fff", "center");
-        text("THE KART DRIVES BY ITSELF", BW / 2, 182, 7, "#fff", "center");
-        if (Math.floor(this.stateT * 2) % 2 === 0) text("TAP TO RACE", BW / 2, 214, 14, "#fff", "center");
+        text("LEFT THUMB: STEER   RIGHT: ITEM / BRAKE", UW / 2, 160, 7, "#fff", "center");
+        text("THE KART DRIVES BY ITSELF", UW / 2, 174, 7, "#fff", "center");
+        text("HOLD THE SCREEN WHEN 2 SHOWS = ROCKET START", UW / 2, 188, 7, "#ffe23c", "center");
+        if (Math.floor(this.stateT * 2) % 2 === 0) text("TAP TO RACE", UW / 2, 214, 14, "#fff", "center");
       } else {
-        text("ARROWS OR WASD: DRIVE     SPACE: USE ITEM", BW / 2, 166, 7, "#fff", "center");
-        text("R: BACK ON THE ROAD     ESC: PAUSE", BW / 2, 182, 7, "#fff", "center");
-        if (Math.floor(this.stateT * 2) % 2 === 0) text("PRESS ENTER", BW / 2, 214, 14, "#fff", "center");
+        text("ARROWS OR WASD: DRIVE     SPACE: USE ITEM", UW / 2, 160, 7, "#fff", "center");
+        text("R: BACK ON THE ROAD     ESC: PAUSE", UW / 2, 174, 7, "#fff", "center");
+        text("HOLD W / UP WHEN 2 SHOWS = ROCKET START", UW / 2, 188, 7, "#ffe23c", "center");
+        if (Math.floor(this.stateT * 2) % 2 === 0) text("PRESS ENTER", UW / 2, 214, 14, "#fff", "center");
       }
     }
     if (this.state === "done") {
       ctx.fillStyle = `rgba(10,3,18,${Math.min(0.72, this.stateT)})`;
-      ctx.fillRect(ox, oy, BW * u, BH * u);
+      ctx.fillRect(ox, oy, UW * u, UH * u);
       const order = [...this.karts].sort((a, b) => a.place - b.place);
-      text(me.place === 1 ? "YOU WIN!" : `YOU FINISHED ${PLACE[me.place - 1]}`, BW / 2, 30, 20, "#ffe23c", "center");
+      text(me.place === 1 ? "YOU WIN!" : `YOU FINISHED ${PLACE[me.place - 1]}`, UW / 2, 30, 20, "#ffe23c", "center");
       order.forEach((k, i) => {
         const col = k.player ? "#ff46c8" : "#fff";
         text(PLACE[i], 130, 74 + i * 22, 10, col);
         text(k.name, 190, 74 + i * 22, 10, col);
         text(k.finished ? fmtTime(k.time) : "...", 350, 74 + i * 22, 10, col, "right");
       });
-      if (this.stateT > 1.5 && Math.floor(this.stateT * 2) % 2 === 0) text(this.touch ? "TAP TO RACE AGAIN" : "ENTER: RACE AGAIN", BW / 2, 226, 10, "#fff", "center");
+      if (this.stateT > 1.5 && Math.floor(this.stateT * 2) % 2 === 0) text(this.touch ? "TAP TO RACE AGAIN" : "ENTER: RACE AGAIN", UW / 2, 226, 10, "#fff", "center");
     }
     if (this.paused) {
       ctx.fillStyle = "rgba(10,3,18,0.7)";
-      ctx.fillRect(ox, oy, BW * u, BH * u);
-      text("PAUSED", BW / 2, 110, 22, "#ff46c8", "center");
-      text("ESC OR ENTER TO GO ON", BW / 2, 146, 8, "#fff", "center");
+      ctx.fillRect(ox, oy, UW * u, UH * u);
+      text("PAUSED", UW / 2, 110, 22, "#ff46c8", "center");
+      text("ESC OR ENTER TO GO ON", UW / 2, 146, 8, "#fff", "center");
     }
     ctx.restore();
   }
@@ -902,30 +964,31 @@ export class KartGame {
     const sky = this.img["sky"];
     let off = (((ca / Math.PI) * sky.width) % sky.width + sky.width) % sky.width;
     off = Math.round(off);
-    const skyY = HORIZON + 4 - sky.height;
-    b.fillStyle = "#100628";
+    const skyY = HORIZON + 3 - sky.height;
+    b.fillStyle = "#2e1654";
     b.fillRect(0, 0, BW, HORIZON);
     b.drawImage(sky, -off, skyY);
     b.drawImage(sky, sky.width - off, skyY);
 
     // ---- ground
-    const S = this.track.size;
+    const S = this.gsize;
+    const gs = this.gs;
     const out = this.frame32;
     const G = this.ground;
     const rows = BH - HORIZON;
-    const FOG_R = 235, FOG_G = 50, FOG_B = 170;
+    const FOG_R = 150, FOG_G = 110, FOG_B = 150; // far away the ground fades into the haze
     for (let r = 0; r < rows; r++) {
       const z = (CAM_H * FOCAL) / (r + 0.5);
       const stepX = (rx * z) / FOCAL, stepY = (ry * z) / FOCAL;
       let wx = camX + dx * z - stepX * (BW / 2), wy = camY + dy * z - stepY * (BW / 2);
-      const fog = z > 500 ? Math.min(0.85, (z - 500) / 2600) : 0;
+      const fog = z > 500 ? Math.min(0.8, (z - 500) / 2600) : 0;
       const f256 = (fog * 256) | 0, inv = 256 - f256;
       let o = r * BW;
       for (let x = 0; x < BW; x++, o++) {
-        const ix = wx | 0, iy = wy | 0;
+        const ix = (wx * gs) | 0, iy = (wy * gs) | 0;
         let c: number;
         if (ix >= 0 && iy >= 0 && ix < S && iy < S) c = G[iy * S + ix];
-        else c = ((ix % 96) + 96) % 96 < 3 || ((iy % 96) + 96) % 96 < 3 ? 0xff4a103a : 0xff200914;
+        else c = 0xff223416; // past the edge of the map: plain grass
         if (f256) {
           const cr = ((c & 255) * inv + FOG_R * f256) >> 8;
           const cg = (((c >> 8) & 255) * inv + FOG_G * f256) >> 8;
@@ -939,28 +1002,56 @@ export class KartGame {
     }
     b.putImageData(this.frame, 0, HORIZON);
 
+    // ---- BASS DROP: a ring of dots racing outwards over the ground
+    for (const t of this.things) {
+      if (t.kind !== "wave") continue;
+      const g = t.t / t.life;
+      const rad = 150 * (1 - (1 - g) * (1 - g));
+      for (let i = 0; i < 72; i++) {
+        const a = (i / 72) * Math.PI * 2;
+        const ex = t.x + Math.cos(a) * rad - camX, ey = t.y + Math.sin(a) * rad - camY;
+        const z = ex * dx + ey * dy;
+        if (z < 12) continue;
+        const sc = FOCAL / z;
+        const size = Math.max(1, Math.round(5 * sc * (1 - g * 0.5)));
+        b.fillStyle = i % 2 ? "#ff46c8" : "#ffffff";
+        b.fillRect(Math.round(BW / 2 + (ex * rx + ey * ry) * sc - size / 2), Math.round(HORIZON + CAM_H * sc - size), size, size);
+      }
+    }
+
     // ---- everything standing on the ground
     const list: Sprite[] = [];
-    const flame = Math.floor(performance.now() / 90) % 2;
+    const now = performance.now();
     for (const k of this.karts) {
       let rel = wrapAngle(k.a + k.spinA - ca);
       if (k === me && k.spin <= 0) rel = 0;
-      const ar = Math.abs(rel);
-      const view = ar < Math.PI / 4 ? "back" : ar > (Math.PI * 3) / 4 ? "front" : "side";
+      // which side of the car we see: back, right side, front, left side
+      const quarter = Math.round(rel / (Math.PI / 2));
+      const view = quarter === 0 ? "back" : Math.abs(quarter) === 2 ? "front" : "side";
       const im = this.kartSkins[k.skin][view];
-      const fw = im.width / 2;
-      list.push({ img: im, sx: (k.boost > 0 ? Math.floor(performance.now() / 45) % 2 : flame) * fw, sw: fw, sh: im.height, x: k.x, y: k.y, k: KART_SCALE, lift: 0, flip: view === "side" && rel < 0, shadow: true });
+      const fw = im.width / 3;
+      // flames only while boosting, or while revving on the start line
+      const fire = k.boost > 0 || (this.state === "count" && k.rev >= 0);
+      const frame = fire ? 1 + (Math.floor(now / 50) % 2) : 0;
+      // spinning out: each side squeezes thin and opens into the next one, like a turning card, with a little hop
+      const spinning = k.spin > 0;
+      const squash = spinning ? Math.max(0.12, Math.cos((rel - (quarter * Math.PI) / 2) * 2)) : 1;
+      const hop = spinning ? Math.sin((1 - k.spin / SPIN_TIME) * Math.PI) * 9 : 0;
+      const shake = k.stall > 0 || (this.state === "count" && k.rev >= 0) ? (Math.floor(now / 40) % 2) * 0.5 : 0;
+      list.push({ img: im, sx: frame * fw, sw: fw, sh: im.height, x: k.x, y: k.y, k: CARS[k.car].k, lift: hop + shake, flip: view === "side" && rel < 0, shadow: true, squash });
     }
     for (const bx of this.boxes)
       if (bx.back <= 0) {
         const im = this.img["itembox"];
-        list.push({ img: im, sx: (Math.floor(performance.now() / 250) % 2) * 28, sw: 28, sh: 28, x: bx.x, y: bx.y, k: 0.55, lift: 5 + Math.sin(performance.now() / 300 + bx.x) * 2, flip: false, shadow: true });
+        list.push({ img: im, sx: (Math.floor(now / 250) % 2) * 40, sw: 40, sh: 40, x: bx.x, y: bx.y, k: 0.4, lift: 5 + Math.sin(now / 300 + bx.x) * 2, flip: false, shadow: true });
       }
-    for (const p of this.track.props) list.push({ img: this.img["props"], sx: p[2] * 40, sw: 40, sh: 64, x: p[0], y: p[1], k: 1.1, lift: 0, flip: false, shadow: false });
+    for (const p of this.track.props) list.push({ img: this.img["props"], sx: p[2] * 96, sw: 96, sh: 128, x: p[0], y: p[1], k: 0.44, lift: 0, flip: false, shadow: false });
     for (const t of this.things) {
-      if (t.kind === "boom" || t.kind === "wave") {
-        const g = t.t / t.life;
-        list.push({ img: this.boom, sx: 0, sw: 64, sh: 64, x: t.x, y: t.y, k: t.kind === "wave" ? 0.6 + g * 4 : 0.5 + g * 1.8, lift: 0, flip: false, shadow: false });
+      if (t.kind === "wave") continue;
+      if (t.kind === "boom") {
+        // the blast: 6 frames, always the same size, sitting on the ground
+        const f = Math.min(5, Math.floor((t.t / t.life) * 6));
+        list.push({ img: this.boom, sx: f * 96, sw: 96, sh: 96, x: t.x, y: t.y, k: 0.72, lift: -12, flip: false, shadow: false });
       } else {
         const name = t.kind === "bomb" ? "item-bomb" : t.kind === "mic" ? "item-mic" : t.kind === "vinyl" ? "item-vinyl" : "item-wall";
         list.push({ img: this.img[name], sx: 0, sw: 48, sh: 48, x: t.x, y: t.y, k: t.kind === "wall" ? 0.95 : 0.42, lift: t.z + (t.kind === "mic" ? 4 : 0), flip: false, shadow: t.kind !== "wall" });
@@ -974,18 +1065,19 @@ export class KartGame {
       const side = ex * rx + ey * ry;
       const sc = FOCAL / z;
       const px = BW / 2 + side * sc;
-      if (px < -120 || px > BW + 120) continue;
+      if (px < -200 || px > BW + 200) continue;
       proj.push({ s, z, px, py: HORIZON + CAM_H * sc, sc });
     }
     proj.sort((a, c) => c.z - a.z);
     for (const p of proj) {
       const s = p.s;
-      const w = s.sw * s.k * p.sc, h = s.sh * s.k * p.sc;
-      if (w < 1.5) continue;
+      const fullW = s.sw * s.k * p.sc;
+      const w = fullW * (s.squash ?? 1), h = s.sh * s.k * p.sc;
+      if (fullW < 1.5) continue;
       const x = Math.round(p.px - w / 2), y = Math.round(p.py - h - s.lift * p.sc);
       if (s.shadow) {
         b.fillStyle = "rgba(10,2,16,0.4)";
-        b.fillRect(Math.round(p.px - w * 0.42), Math.round(p.py - Math.max(1, h * 0.05)), Math.round(w * 0.84), Math.max(1, Math.round(h * 0.1)));
+        b.fillRect(Math.round(p.px - fullW * 0.42), Math.round(p.py - Math.max(1, h * 0.05)), Math.round(fullW * 0.84), Math.max(1, Math.round(h * 0.1)));
       }
       if (p.z > 500) b.globalAlpha = Math.max(0.25, 1 - (p.z - 500) / 1300);
       if (s.flip) {
