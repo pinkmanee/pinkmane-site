@@ -55,11 +55,37 @@ const BOTS: { name: string; car: string; color: [number, number, number] }[] = [
   { name: "VOID", car: "mane", color: [255, 150, 40] },
   { name: "HEX", car: "mane", color: [150, 100, 255] },
   { name: "KONG", car: "mane", color: [255, 70, 90] },
+  { name: "JUNGLE", car: "mane", color: [80, 255, 200] },
+  { name: "BOMBER", car: "mane", color: [255, 230, 60] },
 ];
+// a racer's colour (skin 0 = the pink of the drawing)
+const skinColor = (skin: number): [number, number, number] => (skin === 0 ? [255, 70, 200] : BOTS[(skin - 1) % BOTS.length].color);
+
+// ---------------- ONLINE: what the game and the lobby (game/kart/online.ts) say to each other
+export type Seat = { id: string; name: string; skin: number; bot: boolean };
+export type ResultRow = { id: string; name: string; time: number | null; bot: boolean };
+export type ItemEvent = { id: string; k: number; kind: ItemName; x: number; y: number; vx: number; vy: number };
+export interface OnlineLink {
+  myId: string;
+  isHost: boolean;
+  sendState(rows: number[][]): void; // where my kart is (and the bots, from the host), 5 times a second
+  sendItem(ev: ItemEvent): void;
+  sendGone(id: string): void; // a vinyl / mic hit one of my karts and is gone
+  sendFinish(time: number): void;
+  hostResults(rows: ResultRow[]): void; // the host decides the race is over
+}
+const SEND_EVERY = 0.2; // seconds between position updates (5 a second)
+const REMOTE_DELAY = 220; // other karts are shown this many ms in the past, so their movement is smooth
+const LAST_CALL = 25; // seconds after the first player finishes before the race ends for everyone
 
 type Kart = {
   name: string;
-  player: boolean;
+  player: boolean; // the kart this screen drives
+  id: string; // online: the player's id ("" in solo)
+  ctl: "me" | "bot" | "remote"; // who moves it: this screen's driver, this screen's computer, or another player's screen
+  isBot: boolean;
+  left: boolean; // online: the player left in the middle of the race
+  buf: { t: number; s: number[] }[]; // online: the last positions that came in for this kart
   skin: number;
   car: string;
   rev: number; // when the gas went down during the countdown (-1 = not held)
@@ -99,8 +125,9 @@ type Thing = {
   life: number;
   owner: Kart;
   idx: number;
+  id: string; // online: the same item has the same id on every screen
 };
-type Sprite = { img: Img; sx: number; sw: number; sh: number; x: number; y: number; k: number; lift: number; flip: boolean; shadow: boolean; squash?: number };
+type Sprite = { img: Img; sx: number; sw: number; sh: number; x: number; y: number; k: number; lift: number; flip: boolean; shadow: boolean; squash?: number; kart?: boolean };
 
 const wrapAngle = (a: number) => {
   while (a > Math.PI) a -= Math.PI * 2;
@@ -155,6 +182,21 @@ export class KartGame {
   private flash = "";
   private flashT = 0;
   private camA = 0;
+
+  // ---- online
+  private online: OnlineLink | null = null;
+  private sendT = 0;
+  private itemN = 0;
+  private firstFin = -1; // (host) when the first player crossed the line
+  private resultsSent = false;
+  private results: ResultRow[] | null = null;
+  private tags: { x: number; y: number; name: string; col: [number, number, number] }[] = [];
+  /** set by the page: the player wants the menu (solo) or pressed Esc (online) */
+  onMenu: () => void = () => {};
+  /** the page shows its own menu over the game, so the canvas doesn't draw a title screen */
+  overlay = true;
+  /** online: the name this player raced under (for the host's results) */
+  myName = "YOU";
 
   private keys = new Set<string>();
   private touch = false;
@@ -269,6 +311,7 @@ export class KartGame {
       }
     nc.putImageData(nd, 0, 0);
     // kart colours
+    // skin 0 = the drawing as it is, skins 1 - 7 = the same kart in another colour
     this.kartSkins = [{ car: "mane", color: null }, ...BOTS].map((b) => {
       const set: Record<string, HTMLCanvasElement> = {};
       for (const v of VIEWS) set[v] = this.tint(this.img[`kart-${b.car}-${v}`], b.color as [number, number, number] | null);
@@ -324,17 +367,27 @@ export class KartGame {
 
   // ------------------------------------------------------------ input
   private listen() {
+    // typing in the page's boxes (name, code, link) doesn't drive the kart
+    const typing = (e: Event) => !!(e.target as HTMLElement | null)?.closest?.("input, textarea, select");
     const down = (e: KeyboardEvent) => {
+      if (typing(e)) return;
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(k)) e.preventDefault();
       if (e.repeat) return;
       this.keys.add(k);
       if (k === "Enter") this.confirm();
-      if (k === "Escape" || k === "p") if (this.state === "race" || this.state === "count") this.paused = !this.paused;
+      if (k === "Escape" || k === "p") {
+        if (this.online) {
+          if (k === "Escape") this.onMenu(); // online there's no pausing: the others keep racing
+        } else if (this.state === "race" || this.state === "count") this.paused = !this.paused;
+        else if (this.state === "done" && k === "Escape") this.onMenu();
+      }
       if (k === " " || k === "x") this.tapItem = true;
       if (k === "r" && this.state === "race") this.rescue(this.me);
     };
-    const up = (e: KeyboardEvent) => this.keys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key);
+    const up = (e: KeyboardEvent) => {
+      if (!typing(e)) this.keys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key);
+    };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     const pos = (e: PointerEvent) => {
@@ -347,7 +400,7 @@ export class KartGame {
       if (e.pointerType === "touch") this.touch = true;
       const p = pos(e);
       this.pointers.set(e.pointerId, p);
-      if (this.state !== "race") this.confirm();
+      if (this.state === "done" || this.paused || (this.state === "title" && !this.overlay)) this.confirm();
       else if (this.touch && p.x > UW / 2 && (p.y < 165 || p.x >= 350)) this.tapItem = true;
     };
     const pm = (e: PointerEvent) => {
@@ -380,7 +433,9 @@ export class KartGame {
       this.paused = false;
       return;
     }
+    if (this.online) return; // online the host starts races (on the page's buttons)
     if (this.state === "title") {
+      if (this.overlay) return; // the page's menu starts the race
       this.state = "count";
       this.stateT = 0;
     } else if (this.state === "done" && this.stateT > 1.5) {
@@ -418,6 +473,11 @@ export class KartGame {
       this.karts.push({
         name: player ? "YOU" : BOTS[i].name,
         player,
+        id: "",
+        ctl: player ? "me" : "bot",
+        isBot: !player,
+        left: false,
+        buf: [],
         skin: player ? 0 : i + 1,
         car: player ? "mane" : BOTS[i].car,
         rev: -1,
@@ -448,6 +508,8 @@ export class KartGame {
       });
     }
     this.me = this.karts[5];
+    this.online = null;
+    this.results = null;
     this.camA = this.me.a;
     this.clock = 0;
     this.stateT = 0;
@@ -491,7 +553,8 @@ export class KartGame {
         this.state = "race";
         this.stateT = 0;
         for (const k of this.karts) {
-          if (!k.player) {
+          if (k.ctl === "remote") continue; // other players start their own karts
+          if (k.ctl === "bot") {
             const r = Math.random();
             k.rev = r < 0.3 ? 2 : r < 0.38 ? 0 : -1; // some bots get it right, a few choke
           }
@@ -499,8 +562,10 @@ export class KartGame {
           else if (k.rev >= 0) k.stall = 1.2;
         }
         this.say(me.rev >= REV_FROM ? "ROCKET START!" : me.rev >= 0 ? "TOO EARLY!" : "GO!", 1.2);
-        for (const k of this.karts) k.rev = -1;
+        for (const k of this.karts) if (k.ctl !== "remote") k.rev = -1;
       }
+      for (const k of this.karts) if (k.ctl === "remote") this.stepRemote(k);
+      this.stepOnline(1 / 60);
       return;
     }
     if (this.state === "race") this.clock += dt;
@@ -508,6 +573,10 @@ export class KartGame {
     const N = C.length;
 
     for (const k of this.karts) {
+      if (k.ctl === "remote") {
+        this.stepRemote(k);
+        continue;
+      }
       // ---- what the driver wants
       let steer = 0, gas = 0, brake = false;
       if (k.finished || !k.player) {
@@ -612,7 +681,9 @@ export class KartGame {
         if (k.player) {
           this.state = "done";
           this.stateT = 0;
+          this.online?.sendFinish(k.time);
         }
+        if (!k.isBot && this.firstFin < 0) this.firstFin = this.clock;
       } else if (k.player && !k.finished && delta > 0 && k.total >= N * (LAPS - 1) && k.total - delta < N * (LAPS - 1)) this.say("FINAL LAP", 2);
 
       // ---- item boxes
@@ -647,26 +718,35 @@ export class KartGame {
     for (let i = 0; i < this.karts.length; i++)
       for (let j = i + 1; j < this.karts.length; j++) {
         const a = this.karts[i], b = this.karts[j];
+        if (a.left || b.left) continue;
+        const ra = a.ctl === "remote", rb = b.ctl === "remote";
+        if (ra && rb) continue; // two other players' karts: their own screens sort that out
         const dx = b.x - a.x, dy = b.y - a.y;
         const d = Math.hypot(dx, dy);
         if (d < 15 && d > 0.01) {
-          const push = (15 - d) / 2;
-          a.x -= (dx / d) * push;
-          a.y -= (dy / d) * push;
-          b.x += (dx / d) * push;
-          b.y += (dy / d) * push;
+          // only karts this screen drives get pushed (a kart from another screen is a wall here)
+          const push = ra || rb ? 15 - d : (15 - d) / 2;
+          if (!ra) {
+            a.x -= (dx / d) * push;
+            a.y -= (dy / d) * push;
+          }
+          if (!rb) {
+            b.x += (dx / d) * push;
+            b.y += (dy / d) * push;
+          }
         }
       }
 
     this.stepThings(dt);
+    this.stepOnline(dt);
 
     // places
-    const order = [...this.karts].sort((a, b) => (a.finished !== b.finished ? (a.finished ? -1 : 1) : a.finished ? a.time - b.time : b.total - a.total));
+    const order = [...this.karts].filter((k) => !k.left).sort((a, b) => (a.finished !== b.finished ? (a.finished ? -1 : 1) : a.finished ? a.time - b.time : b.total - a.total));
     order.forEach((k, i) => (k.place = i + 1));
   }
 
   private rank(k: Kart) {
-    return this.karts.filter((o) => o.total > k.total).length + 1;
+    return this.karts.filter((o) => !o.left && o.total > k.total).length + 1;
   }
 
   private say(text: string, secs: number) {
@@ -674,8 +754,13 @@ export class KartGame {
     this.flashT = secs;
   }
 
+  // does this screen decide what happens to this kart? (solo: every kart; online: mine, and the bots on the host's screen)
+  private mine(k: Kart) {
+    return k.ctl !== "remote";
+  }
+
   private hit(k: Kart, secs: number) {
-    if (k.safe > 0 || k.finished) return;
+    if (!this.mine(k) || k.left || k.safe > 0 || k.finished) return;
     k.spin = SPIN_TIME;
     k.spinA = 0;
     k.boost = 0;
@@ -687,21 +772,39 @@ export class KartGame {
     const it = k.item!;
     k.item = null;
     const dx = Math.cos(k.a), dy = Math.sin(k.a);
-    const add = (kind: Thing["kind"], x: number, y: number, vx: number, vy: number, life: number) =>
-      this.things.push({ kind, x, y, vx, vy, z: 0, t: 0, life, owner: k, idx: k.idx });
+    const fast = Math.max(0, k.speed) + 230;
+    const ev: ItemEvent = { id: `${this.online?.myId ?? "s"}-${++this.itemN}`, k: k.skin, kind: it, x: k.x, y: k.y, vx: 0, vy: 0 };
+    if (it === "bomb") Object.assign(ev, { x: k.x + dx * 12, y: k.y + dy * 12, vx: dx * fast, vy: dy * fast });
+    if (it === "vinyl") Object.assign(ev, { x: k.x - dx * 20, y: k.y - dy * 20 });
+    if (it === "wall") Object.assign(ev, { x: k.x - dx * 24, y: k.y - dy * 24 });
+    if (it === "mic") Object.assign(ev, { x: k.x + dx * 14, y: k.y + dy * 14, vx: dx, vy: dy });
     if (it === "bolt") k.boost = 1.7;
-    if (it === "bomb") add("bomb", k.x + dx * 12, k.y + dy * 12, dx * (Math.max(0, k.speed) + 230), dy * (Math.max(0, k.speed) + 230), 0.8);
-    if (it === "vinyl") add("vinyl", k.x - dx * 20, k.y - dy * 20, 0, 0, 30);
-    if (it === "wall") add("wall", k.x - dx * 24, k.y - dy * 24, 0, 0, 10);
-    if (it === "mic") add("mic", k.x + dx * 14, k.y + dy * 14, dx, dy, 7);
-    if (it === "bass") {
-      add("wave", k.x, k.y, 0, 0, 0.5);
-      for (const o of this.karts) if (o !== k && Math.hypot(o.x - k.x, o.y - k.y) < 150) this.hit(o, 1.1);
+    this.applyItem(k, ev);
+    if (this.online && it !== "bolt") this.online.sendItem(ev);
+  }
+
+  // an item goes off (one of mine, or one that came in from another player's screen)
+  private applyItem(k: Kart, ev: ItemEvent) {
+    const add = (kind: Thing["kind"], life: number) =>
+      this.things.push({ kind, x: ev.x, y: ev.y, vx: ev.vx, vy: ev.vy, z: 0, t: 0, life, owner: k, idx: k.idx, id: ev.id });
+    if (ev.kind === "bomb") add("bomb", 0.8);
+    if (ev.kind === "vinyl") add("vinyl", 30);
+    if (ev.kind === "wall") add("wall", 10);
+    if (ev.kind === "mic") add("mic", 7);
+    if (ev.kind === "bass") {
+      add("wave", 0.5);
+      for (const o of this.karts) if (o !== k && Math.hypot(o.x - ev.x, o.y - ev.y) < 150) this.hit(o, 1.1);
     }
-    if (it === "mute") {
-      for (const o of this.karts) if (o !== k && !o.finished) o.blind = 3.5;
-      if (!k.player) this.say("MUTED!", 1.2);
+    if (ev.kind === "mute") {
+      for (const o of this.karts) if (o !== k && !o.finished && this.mine(o)) o.blind = 3.5;
+      if (!k.player) this.say(this.online ? `${k.name} MUTED YOU!` : "MUTED!", 1.2);
     }
+  }
+
+  // a vinyl or mic is used up: gone here, and on every other screen too
+  private used(t: Thing) {
+    t.t = t.life;
+    this.online?.sendGone(t.id);
   }
 
   private stepThings(dt: number) {
@@ -748,22 +851,23 @@ export class KartGame {
         t.x += t.vx * 430 * dt;
         t.y += t.vy * 430 * dt;
         for (const k of this.karts)
-          if (k !== t.owner && Math.hypot(k.x - t.x, k.y - t.y) < 15) {
+          if (k !== t.owner && this.mine(k) && !k.left && Math.hypot(k.x - t.x, k.y - t.y) < 15) {
             this.hit(k, 1.2);
-            t.t = t.life;
+            this.used(t);
             break;
           }
       } else if (t.kind === "vinyl") {
         for (const k of this.karts)
-          if ((k !== t.owner || t.t > 1) && Math.hypot(k.x - t.x, k.y - t.y) < 14) {
+          if ((k !== t.owner || t.t > 1) && this.mine(k) && !k.left && Math.hypot(k.x - t.x, k.y - t.y) < 14) {
             if (k.safe <= 0) {
               this.hit(k, 1.2);
-              t.t = t.life;
+              this.used(t);
             }
             break;
           }
       } else if (t.kind === "wall") {
         for (const k of this.karts) {
+          if (!this.mine(k)) continue;
           const dx = k.x - t.x, dy = k.y - t.y;
           const d = Math.hypot(dx, dy);
           if ((k !== t.owner || t.t > 1) && d < 22 && d > 0.01) {
@@ -778,6 +882,239 @@ export class KartGame {
       }
     }
     this.things = this.things.filter((t) => t.t < t.life);
+  }
+
+  // ------------------------------------------------------------ the page's menu buttons
+  /** SOLO: a race against 5 bots */
+  startSolo() {
+    if (!this.ready) return;
+    this.reset();
+    this.state = "count";
+    this.stateT = 0;
+  }
+
+  /** back to the menu / lobby: the camera circles your kart */
+  toLobby() {
+    if (!this.ready) return;
+    this.online = null;
+    this.things = [];
+    this.paused = false;
+    this.state = "title";
+    this.stateT = 0;
+  }
+
+  get isReady() {
+    return this.ready;
+  }
+
+  /** what the game is doing right now (the page shows its menu on "title") */
+  get mode() {
+    return this.state;
+  }
+
+  get isOnline() {
+    return !!this.online;
+  }
+
+  // ------------------------------------------------------------ ONLINE
+  /** the host pressed START: everybody's grid is built from the same seats */
+  onlineGo(seats: Seat[], link: OnlineLink) {
+    if (!this.ready) return;
+    const C = this.track.center;
+    const N = C.length;
+    this.karts = [];
+    this.things = [];
+    this.boxes = this.track.boxes.map(([x, y]) => ({ x, y, back: 0 }));
+    seats.forEach((st, i) => {
+      // the grid: two by two, the first seat at the front
+      const row = Math.floor(i / 2);
+      const idx = (N - 5 - row * 4 + N) % N;
+      const [cx, cy] = C[idx];
+      const [nx, ny] = C[(idx + 1) % N];
+      const a = Math.atan2(ny - cy, nx - cx);
+      const side = (i % 2 ? 1 : -1) * 16;
+      const mine = st.id === link.myId;
+      const ctl: Kart["ctl"] = mine ? "me" : st.bot && link.isHost ? "bot" : "remote";
+      this.karts.push({
+        name: mine ? "YOU" : st.name,
+        player: mine,
+        id: st.id,
+        ctl,
+        isBot: st.bot,
+        left: false,
+        buf: [],
+        skin: st.skin,
+        car: "mane",
+        rev: -1,
+        stall: 0,
+        x: cx - Math.sin(a) * side,
+        y: cy + Math.cos(a) * side,
+        a,
+        vx: 0,
+        vy: 0,
+        speed: 0,
+        idx,
+        total: idx - N,
+        item: null,
+        roulette: 0,
+        useIn: 0,
+        spin: 0,
+        spinA: 0,
+        boost: 0,
+        blind: 0,
+        safe: 0,
+        off: 0,
+        lane: (Math.random() * 2 - 1) * 0.45,
+        skill: 0.88 + Math.random() * 0.08,
+        finished: false,
+        time: 0,
+        place: i + 1,
+        lost: 0,
+      });
+    });
+    this.me = this.karts.find((k) => k.player) ?? this.karts[0];
+    this.online = link;
+    this.results = null;
+    this.resultsSent = false;
+    this.firstFin = -1;
+    this.sendT = 0;
+    this.camA = this.me.a;
+    this.clock = 0;
+    this.paused = false;
+    this.flash = "";
+    this.state = "count";
+    this.stateT = 0;
+  }
+
+  /** where another screen's karts are: [skin, x, y, angle, speed, lap progress, flags, spin left] */
+  remoteState(from: string, rows: unknown) {
+    if (!this.online || !Array.isArray(rows)) return;
+    const t = performance.now();
+    for (const r of rows) {
+      if (!Array.isArray(r) || r.length < 8 || !r.every((v) => typeof v === "number" && isFinite(v))) continue;
+      const k = this.karts.find((o) => o.skin === r[0]);
+      // only the player who drives a kart may move it (bots: only the host, who is the one sending them)
+      if (!k || k.ctl !== "remote" || (!k.isBot && k.id !== from)) continue;
+      k.buf.push({ t, s: r as number[] });
+      if (k.buf.length > 12) k.buf.shift();
+    }
+  }
+
+  remoteItem(from: string, ev: ItemEvent) {
+    if (!this.online || !ev || typeof ev.kind !== "string" || !ITEMS.includes(ev.kind)) return;
+    const k = this.karts.find((o) => o.skin === ev.k && o.ctl === "remote");
+    if (!k || (!k.isBot && k.id !== from)) return;
+    if (![ev.x, ev.y, ev.vx, ev.vy].every((v) => typeof v === "number" && isFinite(v))) return;
+    this.applyItem(k, { ...ev, id: String(ev.id).slice(0, 40) });
+  }
+
+  remoteGone(id: string) {
+    for (const t of this.things) if (t.id === id) t.t = t.life;
+  }
+
+  remoteFinish(from: string, time: number) {
+    const k = this.karts.find((o) => o.id === from && o.ctl === "remote");
+    if (!k || k.finished || typeof time !== "number" || !isFinite(time)) return;
+    k.finished = true;
+    k.time = time;
+    if (this.firstFin < 0) this.firstFin = this.clock;
+  }
+
+  /** a player left the race (closed the tab, lost the internet, or got kicked) */
+  remoteLeft(id: string) {
+    for (const k of this.karts) if (k.id === id && k.ctl === "remote") k.left = true;
+  }
+
+  /** the host says the race is over: this is the final order */
+  onlineResults(rows: ResultRow[]) {
+    if (!this.online) return;
+    this.results = rows;
+    if (this.state !== "done") {
+      this.state = "done";
+      this.stateT = 0;
+    }
+  }
+
+  // smooth another screen's kart: show it a little in the past, between two updates that came in
+  private stepRemote(k: Kart) {
+    if (k.left) return;
+    const buf = k.buf;
+    if (!buf.length) return;
+    const t = performance.now() - REMOTE_DELAY;
+    while (buf.length > 2 && buf[1].t <= t) buf.shift();
+    const A = buf[0].s, B = buf.length > 1 ? buf[1].s : null;
+    let x = A[1], y = A[2], a = A[3], total = A[5];
+    const last = buf[buf.length - 1].s;
+    if (B && t >= buf[0].t) {
+      const f = clamp((t - buf[0].t) / Math.max(1, buf[1].t - buf[0].t), 0, 1);
+      x = A[1] + (B[1] - A[1]) * f;
+      y = A[2] + (B[2] - A[2]) * f;
+      a = A[3] + wrapAngle(B[3] - A[3]) * f;
+      total = f < 0.5 ? A[5] : B[5];
+    } else if (!B) {
+      // nothing newer yet: keep it rolling for a moment
+      const e = clamp((t - buf[0].t) / 1000, 0, 0.25);
+      x += Math.cos(a) * A[4] * e;
+      y += Math.sin(a) * A[4] * e;
+    }
+    const N = this.track.center.length;
+    k.x = x;
+    k.y = y;
+    k.a = a;
+    k.speed = last[4];
+    k.total = total;
+    k.idx = ((Math.round(total) % N) + N) % N;
+    const flags = last[6];
+    k.boost = flags & 1 ? 0.1 : 0;
+    k.rev = flags & 8 ? 0 : -1;
+    if (flags & 2 && !k.finished) k.finished = true;
+    // the spin-out plays here too (it starts when an update says the kart is spinning)
+    const spin = last[7];
+    if (spin > 0 && k.spin <= 0) k.spin = Math.min(SPIN_TIME, spin);
+    if (k.spin > 0) {
+      k.spin = Math.max(0, k.spin - 1 / 60);
+      const p = 1 - k.spin / SPIN_TIME;
+      k.spinA = k.spin > 0 ? Math.PI * 4 * (1 - (1 - p) * (1 - p)) : 0;
+    }
+  }
+
+  // send my kart (and the host's bots) 5 times a second; the host ends the race when everybody's in
+  private stepOnline(dt: number) {
+    const on = this.online;
+    if (!on) return;
+    this.sendT += dt;
+    if (this.sendT >= SEND_EVERY) {
+      this.sendT = 0;
+      const rows: number[][] = [];
+      for (const k of this.karts) {
+        if (k.ctl === "remote" || k.left) continue;
+        const flags = (k.boost > 0 ? 1 : 0) | (k.finished ? 2 : 0) | (this.state === "count" && k.rev >= 0 ? 8 : 0);
+        rows.push([
+          k.skin,
+          Math.round(k.x * 10) / 10,
+          Math.round(k.y * 10) / 10,
+          Math.round(k.a * 1000) / 1000,
+          Math.round(k.speed),
+          Math.round(k.total),
+          flags,
+          Math.round(Math.max(0, k.spin) * 100) / 100,
+        ]);
+      }
+      on.sendState(rows);
+    }
+    if (on.isHost && !this.resultsSent && this.state !== "count") {
+      const humans = this.karts.filter((k) => !k.isBot && !k.left);
+      const done = humans.filter((k) => k.finished).length;
+      if (done > 0 && (done === humans.length || this.clock - this.firstFin > LAST_CALL)) {
+        this.resultsSent = true;
+        const order = [...this.karts]
+          .filter((k) => !k.left)
+          .sort((a, b) => (a.finished !== b.finished ? (a.finished ? -1 : 1) : a.finished ? a.time - b.time : b.total - a.total));
+        on.hostResults(
+          order.map((k) => ({ id: k.id, name: k.player ? this.myName : k.name, time: k.finished ? Math.round(k.time * 100) / 100 : null, bot: k.isBot })),
+        );
+      }
+    }
   }
 
   // ------------------------------------------------------------ drawing
@@ -852,7 +1189,9 @@ export class KartGame {
       text(`LAP ${lap}/${LAPS}`, 8, 8, 9, "#fff");
       text(fmtTime(this.clock), UW - 8, 8, 9, "#fff", "right");
       text(PLACE[me.place - 1], 8, UH - 34, 22, me.place === 1 ? "#ffe23c" : "#ff46c8");
-      text(`/${this.karts.length}`, 8 + 22 * 3.1, UH - 20, 8, "#fff");
+      text(`/${this.karts.filter((k) => !k.left).length}`, 8 + 22 * 3.1, UH - 20, 8, "#fff");
+      // online: the other players' names over their karts
+      for (const tg of this.tags) text(tg.name, tg.x, tg.y, 5, `rgb(${tg.col[0]},${tg.col[1]},${tg.col[2]})`, "center");
       // item slot
       const bx = UW / 2 - 17, by = 6;
       ctx.fillStyle = "rgba(18,4,28,0.75)";
@@ -872,7 +1211,8 @@ export class KartGame {
       ctx.globalAlpha = 1;
       const S = this.track.size;
       for (const k of [...this.karts].sort((a) => (a.player ? 1 : -1))) {
-        const c = k.player ? [255, 70, 200] : BOTS[k.skin - 1].color;
+        if (k.left) continue;
+        const c = skinColor(k.skin);
         const r = k.player ? 3 : 2;
         ctx.fillStyle = "#12041c";
         ctx.fillRect(ox + (mx + (k.x / S) * 70 - r - 0.6) * u, oy + (my + (k.y / S) * 70 - r - 0.6) * u, (r * 2 + 1.2) * u, (r * 2 + 1.2) * u);
@@ -912,7 +1252,7 @@ export class KartGame {
     if (this.flashT > 0 && this.state === "race") text(this.flash, UW / 2, 74, 22, "#ffe23c", "center");
     if (this.state === "race" && me.lost > 1) text("WRONG WAY? PRESS R", UW / 2, 120, 8, "#fff", "center");
 
-    if (this.state === "title") {
+    if (this.state === "title" && !this.overlay) {
       ctx.fillStyle = "rgba(10,3,18,0.62)";
       ctx.fillRect(ox, oy, UW * u, UH * u);
       text("PINK KART", UW / 2, 44, 34, "#ff46c8", "center");
@@ -933,15 +1273,32 @@ export class KartGame {
     if (this.state === "done") {
       ctx.fillStyle = `rgba(10,3,18,${Math.min(0.72, this.stateT)})`;
       ctx.fillRect(ox, oy, UW * u, UH * u);
-      const order = [...this.karts].sort((a, b) => a.place - b.place);
-      text(me.place === 1 ? "YOU WIN!" : `YOU FINISHED ${PLACE[me.place - 1]}`, UW / 2, 30, 20, "#ffe23c", "center");
-      order.forEach((k, i) => {
-        const col = k.player ? "#ff46c8" : "#fff";
-        text(PLACE[i], 130, 74 + i * 22, 10, col);
-        text(k.name, 190, 74 + i * 22, 10, col);
-        text(k.finished ? fmtTime(k.time) : "...", 350, 74 + i * 22, 10, col, "right");
-      });
-      if (this.stateT > 1.5 && Math.floor(this.stateT * 2) % 2 === 0) text(this.touch ? "TAP TO RACE AGAIN" : "ENTER: RACE AGAIN", UW / 2, 226, 10, "#fff", "center");
+      if (this.online && !this.results) {
+        // online, crossed the line: the others are still racing
+        text(`YOU FINISHED ${PLACE[me.place - 1]}`, UW / 2, 30, 20, "#ffe23c", "center");
+        text(fmtTime(me.time), UW / 2, 58, 10, "#fff", "center");
+        const still = this.karts.filter((k) => !k.left && !k.finished && !k.isBot).length;
+        text(still ? `WAITING FOR ${still} MORE...` : "WAITING FOR THE RESULTS...", UW / 2, 90, 9, "#ff46c8", "center");
+      } else {
+        const myId = this.online?.myId ?? "";
+        const rows: { name: string; time: number | null; me: boolean }[] = this.results
+          ? this.results.map((r) => ({ name: myId && r.id === myId ? "YOU" : r.name, time: r.time, me: !!myId && r.id === myId }))
+          : [...this.karts]
+              .filter((k) => !k.left)
+              .sort((a, b) => a.place - b.place)
+              .map((k) => ({ name: k.name, time: k.finished ? k.time : null, me: k.player }));
+        const mine = rows.findIndex((r) => r.me);
+        text(mine === 0 ? "YOU WIN!" : mine > 0 ? `YOU FINISHED ${PLACE[mine]}` : "RESULTS", UW / 2, 22, 20, "#ffe23c", "center");
+        const gap = rows.length > 6 ? 19 : 22;
+        rows.forEach((r, i) => {
+          const col = r.me ? "#ff46c8" : "#fff";
+          text(PLACE[i] ?? `${i + 1}TH`, 116, 60 + i * gap, 10, col);
+          text(r.name, 176, 60 + i * gap, 10, col);
+          text(r.time !== null ? fmtTime(r.time) : "DNF", 372, 60 + i * gap, 10, col, "right");
+        });
+        if (!this.online && this.stateT > 1.5 && Math.floor(this.stateT * 2) % 2 === 0)
+          text(this.touch ? "TAP TO RACE AGAIN" : "ENTER: RACE AGAIN   ESC: MENU", UW / 2, 236, 9, "#fff", "center");
+      }
     }
     if (this.paused) {
       ctx.fillStyle = "rgba(10,3,18,0.7)";
@@ -1056,7 +1413,21 @@ export class KartGame {
     // ---- everything standing on the ground
     const list: Sprite[] = [];
     const now = performance.now();
+    this.tags = [];
     for (const k of this.karts) {
+      if (k.left) continue;
+      if (this.online && k !== me) {
+        // a name tag over every other kart that's close enough to read
+        const ex = k.x - camX, ey = k.y - camY;
+        const z = ex * dx + ey * dy;
+        if (z > 30 && z < 420) {
+          const sc = FOCAL / z;
+          const px = BW / 2 + (ex * rx + ey * ry) * sc;
+          const top = HORIZON + CAM_H * sc - 78 * CARS[k.car].k * sc;
+          // drawn on the menu grid (480 x 270), which matches the race screen here
+          this.tags.push({ x: (px * UW) / BW, y: ((top - 8) * UH) / BH, name: k.name, col: skinColor(k.skin) });
+        }
+      }
       let rel = wrapAngle(k.a + k.spinA - ca);
       if (k === me && k.spin <= 0) rel = 0;
       // which side of the car we see: back, right side, front, left side
@@ -1072,7 +1443,7 @@ export class KartGame {
       const squash = spinning ? Math.max(0.12, Math.cos((rel - (quarter * Math.PI) / 2) * 2)) : 1;
       const hop = spinning ? Math.sin((1 - k.spin / SPIN_TIME) * Math.PI) * 9 : 0;
       const shake = k.stall > 0 || (this.state === "count" && k.rev >= 0) ? (Math.floor(now / 40) % 2) * 0.5 : 0;
-      list.push({ img: im, sx: frame * fw, sw: fw, sh: im.height, x: k.x, y: k.y, k: CARS[k.car].k, lift: hop + shake, flip: view === "side" && rel < 0, shadow: true, squash });
+      list.push({ img: im, sx: frame * fw, sw: fw, sh: im.height, x: k.x, y: k.y, k: CARS[k.car].k, lift: hop + shake, flip: view === "side" && rel < 0, shadow: true, squash, kart: true });
     }
     for (const bx of this.boxes)
       if (bx.back <= 0) {
@@ -1097,6 +1468,7 @@ export class KartGame {
       const ex = s.x - camX, ey = s.y - camY;
       const z = ex * dx + ey * dy;
       if (z < 12 || z > 1500) continue;
+      if (!s.kart && z < 58) continue; // things right in front of the camera (behind your own kart) would fill the screen
       const side = ex * rx + ey * ry;
       const sc = FOCAL / z;
       const px = BW / 2 + side * sc;
