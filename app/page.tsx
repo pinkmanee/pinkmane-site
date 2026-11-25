@@ -171,7 +171,7 @@ const ITEM_ICONS: Record<string, string> = {
   Bandcamp: "/icons/bandcamp.webp",
   Instagram: "/icons/instagram.webp",
   Twitch: "/icons/twitch.webp",
-  TOPSHELF: "/icons/topshelf.gif",
+  TOPSHELF: "/icons/topshelf.webp", // a small copy of the TOPSHELF cover
   Extras: "/icons/extras.webp",
   Games: "/icons/games.webp",
   "Mini Games": "/icons/games.webp",
@@ -223,7 +223,8 @@ const TRACKS: { title: string; file: string; bpm?: number; offset?: number; link
   { title: "hurricane of blades", file: "/music/07.mp3", bpm: 77, offset: 0, link: "https://soundcloud.com/pinkmanee/hurricane-of-blades" },
   { title: "cat piss kenny", file: "/music/10.mp3", bpm: 142, offset: 0, link: "https://soundcloud.com/pinkmanee/cat-piss-kenny" },
   { title: "gaf (ft. TOMBFELL)", file: "/music/05.mp3", bpm: 138, offset: 0, link: "https://soundcloud.com/pinkmanee/gaf" },
-  { title: "snehulienka", file: "/music/03.mp3", bpm: 140, offset: 0, link: "" },
+  // (taken out until its file is in public/music: put 03.mp3 there and remove the // in front of the next line)
+  // { title: "snehulienka", file: "/music/03.mp3", bpm: 140, offset: 0, link: "" },
   { title: "small pretty titties", file: "/music/01.mp3", bpm: 140, offset: 0, link: "" },
   { title: "vomit trap", file: "/music/08.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee/vomit-trap" },
   { title: "gods psp (ft. TOMBFELL)", file: "/music/09.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee/gods-psp" },
@@ -237,7 +238,8 @@ const VOID_BEATS: typeof TRACKS = [
   { title: "pinkmane's random ass beat 3", file: "/music/beat-3.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
   { title: "pinkmane's random ass beat 4", file: "/music/beat-4.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
   { title: "pinkmane's random ass beat 5", file: "/music/beat-5.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
-  { title: "pinkmane's random ass beat 6", file: "/music/beat-6.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
+  // (taken out until its file is in public/music: put beat-6.mp3 there and remove the // in front of the next line)
+  // { title: "pinkmane's random ass beat 6", file: "/music/beat-6.mp3", bpm: 140, offset: 0, link: "https://soundcloud.com/pinkmanee" },
 ];
 
 // MUSIC WHILE A GAME IS OPEN: the first GAME_KEEP entries of TRACKS (ender pearls + pinkmane's random ass beat), then the beats.
@@ -2152,6 +2154,34 @@ export default function Home() {
     audio.addEventListener("error", onError);
     songRef.current = audio;
 
+    // REMEMBER WHERE YOU WERE: the song you were on and how far in. Coming back continues from there (after CLICK TO START).
+    try {
+      const saved = JSON.parse(localStorage.getItem("pinkmane-song") || "null") as { file?: string; time?: number } | null;
+      const i = saved?.file ? TRACKS.findIndex((t) => t.file === saved.file) : -1;
+      const at = Math.max(0, Number(saved?.time) || 0);
+      if (i > 0 || (i === 0 && at > 5)) {
+        trackRef.current = i;
+        setTrackIndex(i);
+        audio.src = TRACKS[i].file;
+        if (at > 3) {
+          // jump to where you were once the song file knows its length (not if that was right at the end)
+          const seek = () => {
+            if (audio.duration && at < audio.duration - 5) audio.currentTime = at;
+          };
+          audio.addEventListener("loadedmetadata", seek, { once: true });
+        }
+      }
+    } catch {}
+    const saveSong = () => {
+      try {
+        const t = tracksRef.current[trackRef.current];
+        if (!t || !songRef.current || !hasStartedSong.current) return;
+        localStorage.setItem("pinkmane-song", JSON.stringify({ file: t.file, time: Math.floor(songRef.current.currentTime) }));
+      } catch {}
+    };
+    const saveTimer = window.setInterval(saveSong, 5000);
+    window.addEventListener("pagehide", saveSong);
+
     scrollSoundRef.current = new Audio("/sounds/scroll.mp3");
     selectSoundRef.current = new Audio("/sounds/select.mp3");
 
@@ -2192,6 +2222,9 @@ export default function Home() {
       audio.removeEventListener("pause", onPause);
       audio.removeEventListener("playing", onPlaying);
       audio.removeEventListener("error", onError);
+      window.clearInterval(saveTimer);
+      window.removeEventListener("pagehide", saveSong);
+      saveSong();
       audio.pause();
     };
   }, []);
@@ -3019,6 +3052,10 @@ activeGame === "rush" ? (
             </div>
           ) : (
             <div
+              // for screen readers: this is a list to pick from, and they hear which row is highlighted
+              role="listbox"
+              aria-label={`${menu === "main" ? "PINKMANE" : menu} menu`}
+              aria-activedescendant={`ipod-row-${selected}`}
               onPointerDown={isTouch ? swipeStart : undefined}
               onPointerMove={isTouch ? swipeMove : undefined}
               onPointerUp={isTouch ? swipeEnd : undefined}
@@ -3041,6 +3078,9 @@ activeGame === "rush" ? (
                 return (
                 <div
                   key={`${menu}-${index}`}
+                  id={`ipod-row-${index}`}
+                  role="option"
+                  aria-selected={selected === index}
                   className={isMane ? "mane-highlight" : undefined}
                   data-shoot
                   onClick={() => tapRow(index)}
