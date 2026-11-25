@@ -28,6 +28,7 @@ export type View = {
   isHost: boolean;
   stream: boolean;
   bots: boolean;
+  track: number; // which track the next race is on (the host picks)
   live: boolean; // connected right now
   players: LobbyPlayer[]; // in line order: the host first, then who races next
   racing: string[]; // who is in the current (or last) race
@@ -119,7 +120,7 @@ export class Session {
   ) {
     this.pass = pass;
     this.hostId = hostId;
-    this.view = { phase: "lobby", code, me: myId, isHost, stream, bots: isHost ? bots && !stream : false, live: false, players: [], racing: [], results: null, winner: null };
+    this.view = { phase: "lobby", code, me: myId, isHost, stream, bots: isHost ? bots && !stream : false, track: 0, live: false, players: [], racing: [], results: null, winner: null };
     this.lobbyWire = this.wire(`kart:${code}`);
     this.lobbyWire.onPacket = (p) => this.packet(p);
     this.lobbyWire.onStatus = (live) => this.set({ live });
@@ -186,6 +187,12 @@ export class Session {
     this.lDirty = true;
   }
 
+  setTrack(i: number) {
+    if (!this.view.isHost) return;
+    this.set({ track: i });
+    this.lDirty = true;
+  }
+
   start() {
     if (!this.view.isHost || this.view.phase !== "lobby" || !this.game?.isReady) return;
     this.dropQuiet();
@@ -195,8 +202,8 @@ export class Session {
     const seats: Seat[] = order.map((id, i) => ({ id, name: this.info.get(id)!.name, skin: i, bot: false }));
     if (this.view.bots)
       for (let i = seats.length, b = 0; i < MIN_GRID; i++, b++) seats.push({ id: `bot${b}`, name: BOT_NAMES[b % BOT_NAMES.length], skin: i, bot: true });
-    this.lobbyWire.send("go", { s: seats });
-    this.go(seats);
+    this.lobbyWire.send("go", { s: seats, t: this.view.track });
+    this.go(seats, this.view.track);
     this.lDirty = true;
   }
 
@@ -216,7 +223,7 @@ export class Session {
   }
 
   // ---------------------------------------------------------------- the race
-  private go(seats: Seat[]) {
+  private go(seats: Seat[], track: number) {
     const racing = seats.filter((s) => !s.bot).map((s) => s.id);
     this.set({ phase: "race", racing, results: null, winner: null });
     if (!racing.includes(this.myId) || !this.game) return; // waiting in line: just watch the lobby
@@ -233,7 +240,7 @@ export class Session {
       sendFinish: (t) => rw.send("f", { t }),
       hostResults: (rows) => this.hostResults(rows),
     };
-    this.game.onlineGo(seats, link);
+    this.game.onlineGo(seats, link, track);
   }
 
   private racePacket(p: Packet) {
@@ -301,7 +308,7 @@ export class Session {
     }
     if (!fromHost) return; // only the host runs the lobby
     if (p.n === "L") this.lobbyList(d);
-    else if (p.n === "go" && Array.isArray(d.s)) this.go(this.cleanSeats(d.s));
+    else if (p.n === "go" && Array.isArray(d.s)) this.go(this.cleanSeats(d.s), Number(d.t) || 0);
     else if (p.n === "r" && Array.isArray(d.r)) this.showResults(d.r as ResultRow[], (d.w as Winner) ?? null);
     else if (p.n === "n") this.backToLobby();
     else if (p.n === "k" && d.id === this.myId) {
@@ -330,7 +337,7 @@ export class Session {
       const players: LobbyPlayer[] = d.p
         .filter((r: unknown) => Array.isArray(r) && typeof r[0] === "string")
         .map((r: [string, string]) => ({ id: r[0], name: cleanRacerName(r[1]) || "?", host: r[0] === this.hostId }));
-      this.set({ players, stream: !!d.s, bots: !!d.b, racing: Array.isArray(d.r) ? d.r : this.view.racing });
+      this.set({ players, stream: !!d.s, bots: !!d.b, track: Number(d.tr) || 0, racing: Array.isArray(d.r) ? d.r : this.view.racing });
       // the host hasn't heard from us yet: say hi again
       if (!players.some((pl) => pl.id === this.myId) && this.view.phase === "lobby") this.hi();
     }
@@ -416,6 +423,7 @@ export class Session {
           p: this.line.filter((id) => this.info.has(id)).map((id) => [id, this.info.get(id)!.name]),
           s: this.view.stream,
           b: this.view.bots,
+          tr: this.view.track,
           ph: this.view.phase,
           r: this.view.racing,
           hb: this.hb,

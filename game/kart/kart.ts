@@ -11,7 +11,23 @@ type TrackData = {
   boxes: [number, number][];
   props: [number, number, number][];
   lap: number;
+  // only on tracks that need them:
+  name?: string;
+  zone?: number[]; // for every centre point: 0 = the field, 1 = the void
+  spawnIdx?: number[]; // where a kart is put back after falling (before the jump if it fell into the gap)
+  spawnOff?: number[]; // ...and how far to the side (the split has a hole in the middle)
+  outside?: number; // what's past the edge of the map (3 = void)
 };
+type TrackPack = { track: TrackData; ground: Uint32Array; gsize: number; gs: number; types: Uint8Array; mini: HTMLCanvasElement };
+// THE TRACKS: each is trackN.json + trackN-ground.png + trackN-map.png in public/kart/
+export const TRACKS = [
+  { id: "track1", name: "NIGHT FIELD" },
+  { id: "track2", name: "VOID HIGHWAY" },
+];
+const AIR_TIME = 0.9; // seconds in the air after a jump
+const FALL_TIME = 0.9; // seconds a kart falls into the void before it's put back
+const SLAB_THICK = 7; // how thick the floating road looks from the side (world units)
+const SLAB_LIP = 0xffc846ff, SLAB_SIDE = 0xff2a0a1e, SLAB_RIB = 0xff48143a;
 
 const BW = 480; // the small pixel screen the race is drawn on (the chunky arcade look)
 const BH = 270;
@@ -33,6 +49,7 @@ const VIEWS = ["back", "side", "front"];
 // THE GRASS EDGE: how tall the grass along the road stands (in world units; a kart is about 19 tall), and its colours (0xAABBGGRR)
 const GRASS_TALL = 4.5;
 const GRASS_DARK = 0xff180612, GRASS_MID = 0xff96288c, GRASS_TIP = 0xffc846ff, GRASS_BANK = 0xff10040c;
+const MENU_TOP = (UH - 160) / 2; // the pause menu sits in a 160-tall block in the middle of the screen
 const SPIN_TIME = 1.0; // a spin-out: two full turns, always this long
 const GO_TIME = 3; // the countdown: 3 (0s) 2 (1s) 1 (2s) GO (3s)
 const REV_FROM = 1; // hold the gas from when the 2 shows = ROCKET START. Earlier = TOO EARLY, the engine chokes
@@ -113,6 +130,8 @@ type Kart = {
   time: number;
   place: number;
   lost: number;
+  air: number; // seconds left in the air (after a jump)
+  fall: number; // seconds left of falling into the void
 };
 type Thing = {
   kind: "vinyl" | "wall" | "bomb" | "mic" | "boom" | "wave";
@@ -159,6 +178,9 @@ export class KartGame {
   private ready = false;
   private loadError = "";
 
+  private packs: TrackPack[] = [];
+  private trackNo = 0;
+  private zoneF = 0; // 0 = the field's sky and haze, 1 = the void's (it fades between them)
   private track!: TrackData;
   private ground!: Uint32Array;
   private gsize = 0; // the ground picture's size in pixels
@@ -193,6 +215,12 @@ export class KartGame {
   private tags: { x: number; y: number; name: string; col: [number, number, number] }[] = [];
   /** set by the page: the player wants the menu (solo) or pressed Esc (online) */
   onMenu: () => void = () => {};
+  /** set by the page: LEAVE LOBBY / CLOSE LOBBY in the pause menu (online) */
+  onLeave: () => void = () => {};
+  /** set by the page: GAME MENU in the pause menu (back to the site's game list) */
+  onGameMenu: () => void = () => {};
+  private menuOpen = false;
+  private menuRow = 0;
   /** the page shows its own menu over the game, so the canvas doesn't draw a title screen */
   overlay = true;
   /** online: the name this player raced under (for the host's results) */
@@ -268,48 +296,10 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["track1-ground", "track1-map", "sky", "props", "itembox", ...Object.keys(CARS).flatMap((c) => VIEWS.map((v) => `kart-${c}-${v}`)), ...ITEMS.map((i) => `item-${i}`)];
-    const [data] = await Promise.all([fetch(`${this.base}track1.json`).then((r) => r.json()), ...names.map((n) => this.loadImg(n))]);
-    this.track = data as TrackData;
-    const S = this.track.size;
-    // the ground picture as raw pixels
-    const GZ = this.img["track1-ground"].width;
-    this.gsize = GZ;
-    this.gs = GZ / S;
-    const g = document.createElement("canvas");
-    g.width = GZ;
-    g.height = GZ;
-    const gc = g.getContext("2d", { willReadFrequently: true })!;
-    gc.drawImage(this.img["track1-ground"], 0, 0);
-    this.ground = new Uint32Array(gc.getImageData(0, 0, GZ, GZ).data.buffer);
-    // the surface map: 0 off-road, 1 road, 2 boost pad (half the size of the ground)
-    const m = document.createElement("canvas");
-    m.width = S / 2;
-    m.height = S / 2;
-    const mc = m.getContext("2d", { willReadFrequently: true })!;
-    mc.drawImage(this.img["track1-map"], 0, 0);
-    const md = mc.getImageData(0, 0, S / 2, S / 2).data;
-    this.types = new Uint8Array((S / 2) * (S / 2));
-    for (let i = 0; i < this.types.length; i++) this.types[i] = Math.round(md[i * 4] / 100);
-    // minimap
-    const MS = 96;
-    this.mini = document.createElement("canvas");
-    this.mini.width = MS;
-    this.mini.height = MS;
-    const nc = this.mini.getContext("2d")!;
-    const nd = nc.createImageData(MS, MS);
-    for (let y = 0; y < MS; y++)
-      for (let x = 0; x < MS; x++) {
-        const t = this.types[Math.floor(((y + 0.5) / MS) * (S / 2)) * (S / 2) + Math.floor(((x + 0.5) / MS) * (S / 2))];
-        const o = (y * MS + x) * 4;
-        if (t) {
-          nd.data[o] = 236;
-          nd.data[o + 1] = 230;
-          nd.data[o + 2] = 255;
-          nd.data[o + 3] = 230;
-        }
-      }
-    nc.putImageData(nd, 0, 0);
+    const names = ["sky", "sky-void", "props", "itembox", ...Object.keys(CARS).flatMap((c) => VIEWS.map((v) => `kart-${c}-${v}`)), ...ITEMS.map((i) => `item-${i}`)];
+    const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n))]);
+    this.packs = packs;
+    this.useTrack(0);
     // kart colours
     // skin 0 = the drawing as it is, skins 1 - 7 = the same kart in another colour
     this.kartSkins = [{ car: "mane", color: null }, ...BOTS].map((b) => {
@@ -374,12 +364,19 @@ export class KartGame {
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(k)) e.preventDefault();
       if (e.repeat) return;
+      // the pause menu is open: up / down pick a row, Enter or Space choose, Esc closes it
+      if (this.menuOpen) {
+        const rows = this.menuRows();
+        if (k === "ArrowUp" || k === "w") this.menuRow = (this.menuRow + rows.length - 1) % rows.length;
+        else if (k === "ArrowDown" || k === "s") this.menuRow = (this.menuRow + 1) % rows.length;
+        else if (k === "Enter" || k === " ") this.menuChoose();
+        else if (k === "Escape" || k === "p") this.closeMenu();
+        return;
+      }
       this.keys.add(k);
       if (k === "Enter") this.confirm();
       if (k === "Escape" || k === "p") {
-        if (this.online) {
-          if (k === "Escape") this.onMenu(); // online there's no pausing: the others keep racing
-        } else if (this.state === "race" || this.state === "count") this.paused = !this.paused;
+        if (this.state === "race" || this.state === "count" || (this.online && this.state === "done")) this.openMenu();
         else if (this.state === "done" && k === "Escape") this.onMenu();
       }
       if (k === " " || k === "x") this.tapItem = true;
@@ -400,7 +397,15 @@ export class KartGame {
       if (e.pointerType === "touch") this.touch = true;
       const p = pos(e);
       this.pointers.set(e.pointerId, p);
-      if (this.state === "done" || this.paused || (this.state === "title" && !this.overlay)) this.confirm();
+      if (this.menuOpen) {
+        // tap a row of the pause menu
+        const r = Math.floor((p.y - MENU_TOP - 40) / 14);
+        if (r >= 0 && r < this.menuRows().length) {
+          this.menuRow = r;
+          this.menuChoose();
+        }
+        this.pointers.delete(e.pointerId);
+      } else if (this.state === "done" || (this.state === "title" && !this.overlay)) this.confirm();
       else if (this.touch && p.x > UW / 2 && (p.y < 165 || p.x >= 350)) this.tapItem = true;
     };
     const pm = (e: PointerEvent) => {
@@ -427,12 +432,40 @@ export class KartGame {
     });
   }
 
+  // ---- THE PAUSE MENU (the same one as every game). Solo: the race stops. Online: the others keep racing.
+  private menuRows(): string[] {
+    return this.online ? ["RESUME", this.online.isHost ? "CLOSE LOBBY" : "LEAVE LOBBY", "GAME MENU"] : ["RESUME", "RESTART", "KART MENU", "GAME MENU"];
+  }
+
+  /** Esc, P, or the page's little MENU button */
+  openMenu() {
+    if (!this.ready || this.state === "title") return;
+    if (this.menuOpen) return this.closeMenu();
+    if (this.state === "done" && !this.online) return this.onMenu();
+    this.menuOpen = true;
+    this.menuRow = 0;
+    this.paused = !this.online;
+    this.keys.clear();
+  }
+
+  private closeMenu() {
+    this.menuOpen = false;
+    this.paused = false;
+    this.keys.clear();
+    this.tapItem = false;
+  }
+
+  private menuChoose() {
+    const pick = this.menuRows()[this.menuRow];
+    this.closeMenu();
+    if (pick === "RESTART") this.startSolo();
+    else if (pick === "KART MENU") this.onMenu();
+    else if (pick === "LEAVE LOBBY" || pick === "CLOSE LOBBY") this.onLeave();
+    else if (pick === "GAME MENU") this.onGameMenu();
+  }
+
   private confirm() {
     if (!this.ready) return;
-    if (this.paused) {
-      this.paused = false;
-      return;
-    }
     if (this.online) return; // online the host starts races (on the page's buttons)
     if (this.state === "title") {
       if (this.overlay) return; // the page's menu starts the race
@@ -505,6 +538,8 @@ export class KartGame {
         time: 0,
         place: i + 1,
         lost: 0,
+        air: 0,
+        fall: 0,
       });
     }
     this.me = this.karts[5];
@@ -517,24 +552,102 @@ export class KartGame {
     this.flash = "";
   }
 
+  // one track: its numbers (trackN.json), its ground picture, its surface map and its little map
+  private async loadTrack(id: string): Promise<TrackPack> {
+    const [data] = await Promise.all([fetch(`${this.base}${id}.json`).then((r) => r.json()), this.loadImg(`${id}-ground`), this.loadImg(`${id}-map`)]);
+    const track = data as TrackData;
+    const S = track.size;
+    // the ground picture as raw pixels
+    const gimg = this.img[`${id}-ground`];
+    const GZ = gimg.width;
+    const g = document.createElement("canvas");
+    g.width = GZ;
+    g.height = GZ;
+    const gc = g.getContext("2d", { willReadFrequently: true })!;
+    gc.drawImage(gimg, 0, 0);
+    const ground = new Uint32Array(gc.getImageData(0, 0, GZ, GZ).data.buffer);
+    // the surface map (half the size of the ground): 0 field (slow), 1 road, 2 boost pad, 3 void (you fall), 4 jump
+    const m = document.createElement("canvas");
+    m.width = S / 2;
+    m.height = S / 2;
+    const mc = m.getContext("2d", { willReadFrequently: true })!;
+    mc.drawImage(this.img[`${id}-map`], 0, 0);
+    const md = mc.getImageData(0, 0, S / 2, S / 2).data;
+    const types = new Uint8Array((S / 2) * (S / 2));
+    for (let i = 0; i < types.length; i++) types[i] = Math.round(md[i * 4] / 40);
+    // minimap: the road
+    const MS = 96;
+    const mini = document.createElement("canvas");
+    mini.width = MS;
+    mini.height = MS;
+    const nc = mini.getContext("2d")!;
+    const nd = nc.createImageData(MS, MS);
+    for (let y = 0; y < MS; y++)
+      for (let x = 0; x < MS; x++) {
+        const t = types[Math.floor(((y + 0.5) / MS) * (S / 2)) * (S / 2) + Math.floor(((x + 0.5) / MS) * (S / 2))];
+        const o = (y * MS + x) * 4;
+        if (t === 1 || t === 2 || t === 4) {
+          nd.data[o] = 236;
+          nd.data[o + 1] = 230;
+          nd.data[o + 2] = 255;
+          nd.data[o + 3] = 230;
+        }
+      }
+    nc.putImageData(nd, 0, 0);
+    return { track, ground, gsize: GZ, gs: GZ / S, types, mini };
+  }
+
+  private useTrack(i: number) {
+    const p = this.packs[clamp(Math.floor(i) || 0, 0, this.packs.length - 1)];
+    this.trackNo = this.packs.indexOf(p);
+    this.track = p.track;
+    this.ground = p.ground;
+    this.gsize = p.gsize;
+    this.gs = p.gs;
+    this.types = p.types;
+    this.mini = p.mini;
+    this.zoneF = 0;
+  }
+
+  /** the menu picked a track: show it behind the menu */
+  setTrack(i: number) {
+    if (!this.ready || this.state !== "title") return;
+    this.useTrack(i);
+    this.reset();
+  }
+
+  get trackIndex() {
+    return this.trackNo;
+  }
+
   private typeAt(x: number, y: number) {
     const h = this.track.size / 2;
     const ix = x >> 1, iy = y >> 1;
-    if (ix < 0 || iy < 0 || ix >= h || iy >= h) return 0;
+    if (ix < 0 || iy < 0 || ix >= h || iy >= h) return this.track.outside ?? 0;
     return this.types[iy * h + ix];
   }
 
   private rescue(k: Kart) {
     const C = this.track.center;
     const N = C.length;
-    const [cx, cy] = C[k.idx];
-    const [nx, ny] = C[(k.idx + 1) % N];
-    k.x = cx;
-    k.y = cy;
+    // back on the road: usually right where it is on the lap; before the jump if it fell into the gap
+    const j = this.track.spawnIdx ? this.track.spawnIdx[k.idx] ?? k.idx : k.idx;
+    let back = k.idx - j;
+    if (back > N / 2) back -= N;
+    if (back < -N / 2) back += N;
+    k.total -= back;
+    k.idx = j;
+    const [cx, cy] = C[j];
+    const [nx, ny] = C[(j + 1) % N];
     k.a = Math.atan2(ny - cy, nx - cx);
+    const side = this.track.spawnOff ? this.track.spawnOff[j] ?? 0 : 0;
+    k.x = cx - Math.sin(k.a) * side;
+    k.y = cy + Math.cos(k.a) * side;
     k.vx = k.vy = k.speed = 0;
     k.spin = 0;
     k.lost = 0;
+    k.air = 0;
+    k.fall = 0;
     k.safe = 1.5;
   }
 
@@ -546,7 +659,7 @@ export class KartGame {
     if (this.state === "count") {
       // revving: hold the gas during the countdown. From the 2 on = ROCKET START, earlier = TOO EARLY
       const me = this.me;
-      const held = this.keys.has("ArrowUp") || this.keys.has("w") || (this.touch && this.pointers.size > 0);
+      const held = !this.menuOpen && (this.keys.has("ArrowUp") || this.keys.has("w") || (this.touch && this.pointers.size > 0));
       if (!held) me.rev = -1;
       else if (me.rev < 0) me.rev = this.stateT;
       if (this.stateT >= GO_TIME) {
@@ -577,21 +690,40 @@ export class KartGame {
         this.stepRemote(k);
         continue;
       }
+      // ---- falling into the void: down it goes, then it's put back on the road
+      if (k.fall > 0) {
+        k.fall -= dt;
+        k.speed = k.vx = k.vy = 0;
+        if (k.fall <= 0) this.rescue(k);
+        continue;
+      }
       // ---- what the driver wants
       let steer = 0, gas = 0, brake = false;
       if (k.finished || !k.player) {
-        const look = 9 + Math.floor(Math.abs(k.speed) / 22);
+        // (on the floating road the bots look less far ahead, so they don't cut a corner into the void)
+        const look = Math.round((9 + Math.floor(Math.abs(k.speed) / 22)) * (this.track.zone?.[k.idx] ? 0.55 : 1));
         const ti = (k.idx + look) % N;
         const [tx, ty] = C[ti];
         const [ux, uy] = C[(ti + 1) % N];
         const ta = Math.atan2(uy - ty, ux - tx);
-        const w = Math.max(0, this.track.halfw[ti] - 20) * k.lane;
+        // their lane; where the road splits around a hole they pick a side and stay on it
+        const hole = this.track.spawnOff?.[ti] ?? 0;
+        const w = hole ? (k.lane < 0 ? -hole : hole) : Math.max(0, this.track.halfw[ti] - 20) * k.lane;
         const px = tx - Math.sin(ta) * w, py = ty + Math.cos(ta) * w;
         let want = wrapAngle(Math.atan2(py - k.y, px - k.x) - k.a);
         if (k.blind > 0) want += Math.sin(this.clock * 7 + k.skin) * 0.5;
         steer = clamp(want * 3, -1, 1);
         gas = Math.abs(want) > 0.7 ? 0.55 : 1;
         if (Math.random() < 0.004) k.lane = (Math.random() * 2 - 1) * 0.45;
+        // on the floating road they lift off the gas before a sharp corner
+        if (this.track.zone?.[k.idx] && k.air <= 0) {
+          const [ax, ay] = C[(k.idx + 16) % N], [bx, by] = C[(k.idx + 18) % N];
+          const turn = Math.abs(wrapAngle(Math.atan2(by - ay, bx - ax) - k.a));
+          if (turn > 0.55 && k.speed > 150) {
+            gas = 0;
+            brake = k.speed > 185;
+          }
+        }
       } else {
         const t = this.touchSteer();
         if (this.keys.has("ArrowLeft") || this.keys.has("a")) steer -= 1;
@@ -599,6 +731,12 @@ export class KartGame {
         steer = clamp(steer + t.s, -1, 1);
         brake = this.keys.has("ArrowDown") || this.keys.has("s") || t.brake;
         gas = this.keys.has("ArrowUp") || this.keys.has("w") || (this.touch && !brake) ? 1 : 0;
+        if (this.menuOpen) {
+          // online with the menu open: hands off, the kart rolls out
+          steer = 0;
+          gas = 0;
+          brake = false;
+        }
       }
 
       // ---- timers
@@ -610,8 +748,26 @@ export class KartGame {
       if (k.boost > 0) k.boost -= dt;
       if (k.blind > 0) k.blind -= dt;
       if (k.safe > 0) k.safe -= dt;
-      const type = this.typeAt(k.x, k.y);
+      if (k.air > 0) {
+        k.air -= dt;
+        steer *= 0.3; // not much steering in the air
+      }
+      const type = k.air > 0 ? 1 : this.typeAt(k.x, k.y);
       if (type === 2 && k.boost < 0.9) k.boost = 1.1;
+      if (type === 4) {
+        // the jump: everybody gets launched fast enough to make it across
+        k.air = AIR_TIME;
+        k.speed = Math.max(k.speed, 250);
+        if (k.player) this.say("JUMP!", 0.8);
+      }
+      if (type === 3) {
+        k.fall = FALL_TIME;
+        k.boost = 0;
+        k.spin = 0;
+        k.spinA = 0;
+        if (k.player) this.say("INTO THE VOID", 1);
+        continue;
+      }
 
       // ---- speed
       let top = MAX_SPEED * (k.player ? 1 : k.skill);
@@ -886,8 +1042,9 @@ export class KartGame {
 
   // ------------------------------------------------------------ the page's menu buttons
   /** SOLO: a race against 5 bots */
-  startSolo() {
+  startSolo(track = this.trackNo) {
     if (!this.ready) return;
+    this.useTrack(track);
     this.reset();
     this.state = "count";
     this.stateT = 0;
@@ -898,6 +1055,7 @@ export class KartGame {
     if (!this.ready) return;
     this.online = null;
     this.things = [];
+    this.menuOpen = false;
     this.paused = false;
     this.state = "title";
     this.stateT = 0;
@@ -918,8 +1076,9 @@ export class KartGame {
 
   // ------------------------------------------------------------ ONLINE
   /** the host pressed START: everybody's grid is built from the same seats */
-  onlineGo(seats: Seat[], link: OnlineLink) {
+  onlineGo(seats: Seat[], link: OnlineLink, track = 0) {
     if (!this.ready) return;
+    this.useTrack(track);
     const C = this.track.center;
     const N = C.length;
     this.karts = [];
@@ -970,11 +1129,14 @@ export class KartGame {
         time: 0,
         place: i + 1,
         lost: 0,
+        air: 0,
+        fall: 0,
       });
     });
     this.me = this.karts.find((k) => k.player) ?? this.karts[0];
     this.online = link;
     this.results = null;
+    this.menuOpen = false;
     this.resultsSent = false;
     this.firstFin = -1;
     this.sendT = 0;
@@ -986,7 +1148,7 @@ export class KartGame {
     this.stateT = 0;
   }
 
-  /** where another screen's karts are: [skin, x, y, angle, speed, lap progress, flags, spin left] */
+  /** where another screen's karts are: [skin, x, y, angle, speed, lap progress, flags, spin left, fall left, air left] */
   remoteState(from: string, rows: unknown) {
     if (!this.online || !Array.isArray(rows)) return;
     const t = performance.now();
@@ -1068,6 +1230,11 @@ export class KartGame {
     k.boost = flags & 1 ? 0.1 : 0;
     k.rev = flags & 8 ? 0 : -1;
     if (flags & 2 && !k.finished) k.finished = true;
+    // falling and jumping play here too
+    if ((last[8] ?? 0) > 0 && k.fall <= 0) k.fall = Math.min(FALL_TIME, last[8]);
+    if (k.fall > 0) k.fall = Math.max(0, k.fall - 1 / 60);
+    if ((last[9] ?? 0) > 0 && k.air <= 0) k.air = Math.min(AIR_TIME, last[9]);
+    if (k.air > 0) k.air = Math.max(0, k.air - 1 / 60);
     // the spin-out plays here too (it starts when an update says the kart is spinning)
     const spin = last[7];
     if (spin > 0 && k.spin <= 0) k.spin = Math.min(SPIN_TIME, spin);
@@ -1098,6 +1265,8 @@ export class KartGame {
           Math.round(k.total),
           flags,
           Math.round(Math.max(0, k.spin) * 100) / 100,
+          Math.round(Math.max(0, k.fall) * 100) / 100,
+          Math.round(Math.max(0, k.air) * 100) / 100,
         ]);
       }
       on.sendState(rows);
@@ -1256,7 +1425,7 @@ export class KartGame {
       ctx.fillStyle = "rgba(10,3,18,0.62)";
       ctx.fillRect(ox, oy, UW * u, UH * u);
       text("PINK KART", UW / 2, 44, 34, "#ff46c8", "center");
-      text("DEMO - TRACK 1", UW / 2, 88, 10, "#ffe23c", "center");
+      text(TRACKS[this.trackNo].name, UW / 2, 88, 10, "#ffe23c", "center");
       ITEMS.forEach((it, i) => pic(this.img[`item-${it}`], UW / 2 - 7 * 19 + i * 38 + 3, 112, 32 / 48));
       if (this.touch) {
         text("LEFT THUMB: STEER   RIGHT: ITEM / BRAKE", UW / 2, 160, 7, "#fff", "center");
@@ -1300,11 +1469,27 @@ export class KartGame {
           text(this.touch ? "TAP TO RACE AGAIN" : "ENTER: RACE AGAIN   ESC: MENU", UW / 2, 236, 9, "#fff", "center");
       }
     }
-    if (this.paused) {
-      ctx.fillStyle = "rgba(10,3,18,0.7)";
+    if (this.menuOpen) {
+      // the pause menu: the same pale green boxes as every other game, pink = the picked row
+      ctx.fillStyle = "rgba(22,12,29,0.7)";
       ctx.fillRect(ox, oy, UW * u, UH * u);
-      text("PAUSED", UW / 2, 110, 22, "#ff46c8", "center");
-      text("ESC OR ENTER TO GO ON", UW / 2, 146, 8, "#fff", "center");
+      const box = (label: string, y: number, picked: boolean, pad = 10) => {
+        ctx.font = `${Math.round(8 * u)}px ${this.font}, monospace`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        const bw = ctx.measureText(label).width + pad * u;
+        ctx.fillStyle = picked ? "#d63cc8" : "#d7efbc";
+        ctx.fillRect(Math.round(ox + (UW / 2) * u - bw / 2), oy + (y - 2) * u, Math.round(bw), 12 * u);
+        ctx.fillStyle = picked ? "#ffffff" : "#111111";
+        ctx.fillText(label, ox + (UW / 2) * u, oy + y * u);
+      };
+      box(this.online ? "MENU" : "PAUSED", MENU_TOP + 26, false, 8);
+      const rows = this.menuRows();
+      rows.forEach((label, i) => box((i === this.menuRow ? "> " : "") + label, MENU_TOP + 42 + i * 14, i === this.menuRow));
+      const N = this.track.center.length;
+      const stats = this.online ? "THE RACE KEEPS GOING" : `LAP ${clamp(Math.floor(me.total / N) + 1, 1, LAPS)}/${LAPS}  ${fmtTime(this.clock)}`;
+      text(stats, UW / 2, MENU_TOP + 42 + rows.length * 14 + 4, 8, "#fff", "center");
+      if (Math.floor(performance.now() / 500) % 2 === 0) box(this.touch ? "TAP TO CHOOSE" : "\u2191\u2193 CHOOSE \u00b7 OK CONFIRM", MENU_TOP + 132, false, 8);
     }
     ctx.restore();
   }
@@ -1320,15 +1505,29 @@ export class KartGame {
     const rx = -dy, ry = dx;
     const camX = me.x - dx * CAM_BACK, camY = me.y - dy * CAM_BACK;
 
-    // ---- sky: sky.png is one full turn, so it wraps around exactly once (one sun)
+    // ---- which zone you're in (0 = the field, 1 = the void): the sky and the haze fade from one to the other
+    const zoneNow = this.track.zone ? this.track.zone[me.idx] ?? 0 : 0;
+    this.zoneF += (zoneNow - this.zoneF) * 0.04;
+    if (Math.abs(zoneNow - this.zoneF) < 0.01) this.zoneF = zoneNow;
+    const zf = this.zoneF;
+
+    // ---- sky: one full turn per picture, so it wraps around exactly once (one sun; in the void: one spiral)
     const sky = this.img["sky"];
     let off = (((ca / (Math.PI * 2)) * sky.width) % sky.width + sky.width) % sky.width;
     off = Math.round(off);
     const skyY = HORIZON + 4 - sky.height;
-    b.fillStyle = "#100628";
+    b.fillStyle = zf > 0.5 ? "#060210" : "#100628";
     b.fillRect(0, 0, BW, HORIZON);
     b.drawImage(sky, -off, skyY);
     b.drawImage(sky, sky.width - off, skyY);
+    if (zf > 0) {
+      const vs = this.img["sky-void"];
+      b.globalAlpha = zf;
+      b.fillRect(0, 0, BW, HORIZON);
+      b.drawImage(vs, -off, skyY);
+      b.drawImage(vs, vs.width - off, skyY);
+      b.globalAlpha = 1;
+    }
 
     // ---- ground
     const S = this.gsize;
@@ -1338,27 +1537,43 @@ export class KartGame {
     const rows = BH - HORIZON;
     const types = this.types, TH = this.track.size / 2;
     const mask = this.mask, seed = this.seedMap;
-    const FOG_R = 235, FOG_G = 50, FOG_B = 170; // far away the ground fades into the pink haze
+    const outside = this.track.outside ?? 0; // what's past the edge of the map: more field (0) or the void (3)
+    // far away the ground fades into the haze: pink over the field, deep purple in the void
+    const FOG_R = Math.round(235 + (52 - 235) * zf), FOG_G = Math.round(50 + (14 - 50) * zf), FOG_B = Math.round(170 + (84 - 170) * zf);
     for (let r = 0; r < rows; r++) {
       const z = (CAM_H * FOCAL) / (r + 0.5);
       const stepX = (rx * z) / FOCAL, stepY = (ry * z) / FOCAL;
       let wx = camX + dx * z - stepX * (BW / 2), wy = camY + dy * z - stepY * (BW / 2);
       const fog = z > 500 ? Math.min(0.85, (z - 500) / 2600) : 0;
       const f256 = (fog * 256) | 0, inv = 256 - f256;
+      // THE VOID has no ground: it's the haze at the horizon, getting darker towards your feet
+      const vd = Math.min(1, r / 70);
+      const voidC = 0xff000000 | (Math.round(FOG_B + (14 - FOG_B) * vd) << 16) | (Math.round(FOG_G + (2 - FOG_G) * vd) << 8) | Math.round(FOG_R + (6 - FOG_R) * vd);
       let o = r * BW;
       for (let x = 0; x < BW; x++, o++) {
         const ix = (wx * gs) | 0, iy = (wy * gs) | 0;
         let c: number;
         let field = 1;
-        if (ix >= 0 && iy >= 0 && ix < S && iy < S) {
-          c = G[iy * S + ix];
-          if (types[(iy >> 1) * TH + (ix >> 1)]) field = 0;
-        } else c = ((ix % 96) + 96) % 96 < 3 || ((iy % 96) + 96) % 96 < 3 ? 0xff4a103a : 0xff200914; // past the map: more dark field
-        if (f256) {
-          const cr = ((c & 255) * inv + FOG_R * f256) >> 8;
-          const cg = (((c >> 8) & 255) * inv + FOG_G * f256) >> 8;
-          const cb = (((c >> 16) & 255) * inv + FOG_B * f256) >> 8;
-          c = 0xff000000 | (cb << 16) | (cg << 8) | cr;
+        let t = outside;
+        const inside = ix >= 0 && iy >= 0 && ix < S && iy < S;
+        if (inside) t = types[(iy >> 1) * TH + (ix >> 1)];
+        if (t === 3) {
+          // void: far-away stars that turn with you but never come closer
+          field = 2;
+          let h = Math.imul(x + off, 374761393) + Math.imul(r, 668265263);
+          h = Math.imul(h ^ (h >>> 13), 1274126177);
+          c = r > 6 && ((h ^ (h >>> 16)) & 1023) === 0 ? ((h >>> 20) & 1 ? 0xffdc96ff : 0xffb4ffaa) : voidC;
+        } else {
+          if (inside) {
+            c = G[iy * S + ix];
+            if (t) field = 0;
+          } else c = ((ix % 96) + 96) % 96 < 3 || ((iy % 96) + 96) % 96 < 3 ? 0xff4a103a : 0xff200914; // past the map: more dark field
+          if (f256) {
+            const cr = ((c & 255) * inv + FOG_R * f256) >> 8;
+            const cg = (((c >> 8) & 255) * inv + FOG_G * f256) >> 8;
+            const cb = (((c >> 16) & 255) * inv + FOG_B * f256) >> 8;
+            c = 0xff000000 | (cb << 16) | (cg << 8) | cr;
+          }
         }
         out[o] = c;
         mask[o] = field;
@@ -1367,18 +1582,24 @@ export class KartGame {
         wy += stepY;
       }
     }
-    // ---- THE FIELD SITS HIGHER THAN THE ROAD: wherever field meets road, a fringe of dark grass with pink tips
-    // stands up along the edge and sways. (Far edges also get a little dark bank under the grass.)
+    // ---- EDGES. The field sits higher than the road: a fringe of dark grass with pink tips stands up along the edge and sways.
+    // Over the void the road (and the field) is a floating slab: you see its dark side wherever it ends towards you.
     const sway = performance.now() / 1000;
     for (let r = 2; r < rows; r++) {
       const z = (CAM_H * FOCAL) / (r + 0.5);
-      if (z > 620) continue; // too far away to see blades
       const tall = (GRASS_TALL * FOCAL) / z; // how tall a blade is on screen at this distance
+      const thick = Math.max(1, Math.round((SLAB_THICK * FOCAL) / z)); // how thick the slab looks at this distance
       const row = r * BW;
       for (let x = 0; x < BW; x++) {
         const o = row + x;
         const here = mask[o], above = mask[o - BW];
         if (here === above) continue;
+        if (here === 2 || above === 2) {
+          if (here === 2)
+            for (let k = 0; k < thick && r + k < rows; k++) out[o + k * BW] = k === 0 ? SLAB_LIP : (seed[o - BW] & 3) === 0 ? SLAB_RIB : SLAB_SIDE;
+          continue;
+        }
+        if (z > 620) continue; // too far away to see blades
         // the field pixel right at the edge decides how its clump looks
         const sd = here ? seed[o] : seed[o - BW];
         const wave = 0.75 + 0.25 * Math.sin(sway * 4 + sd * 0.7 + x * 0.05);
@@ -1442,8 +1663,11 @@ export class KartGame {
       const spinning = k.spin > 0;
       const squash = spinning ? Math.max(0.12, Math.cos((rel - (quarter * Math.PI) / 2) * 2)) : 1;
       const hop = spinning ? Math.sin((1 - k.spin / SPIN_TIME) * Math.PI) * 9 : 0;
+      // a jump is an arc; falling into the void = sinking and shrinking
+      const jumpZ = k.air > 0 ? Math.sin((1 - k.air / AIR_TIME) * Math.PI) * 16 : 0;
+      const drop = k.fall > 0 ? 1 - k.fall / FALL_TIME : 0;
       const shake = k.stall > 0 || (this.state === "count" && k.rev >= 0) ? (Math.floor(now / 40) % 2) * 0.5 : 0;
-      list.push({ img: im, sx: frame * fw, sw: fw, sh: im.height, x: k.x, y: k.y, k: CARS[k.car].k, lift: hop + shake, flip: view === "side" && rel < 0, shadow: true, squash, kart: true });
+      list.push({ img: im, sx: frame * fw, sw: fw, sh: im.height, x: k.x, y: k.y, k: CARS[k.car].k * (1 - 0.6 * drop), lift: hop + shake + jumpZ - drop * drop * 44, flip: view === "side" && rel < 0, shadow: k.fall <= 0 && k.air <= 0, squash, kart: true });
     }
     for (const bx of this.boxes)
       if (bx.back <= 0) {

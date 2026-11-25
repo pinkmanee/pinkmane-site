@@ -9,7 +9,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { KartGame } from "../../../game/kart/kart";
+import { KartGame, TRACKS } from "../../../game/kart/kart";
 import { Session, MAX_RACERS, type View } from "../../../game/kart/online";
 import { cleanCode, cleanMusicLink, cleanRacerName, musicSite } from "../../../game/kart/links";
 
@@ -25,7 +25,6 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
   const sessionRef = useRef<Session | null>(null);
   const [screen, setScreen] = useState<Screen>("menu");
   const [view, setView] = useState<View | null>(null);
-  const [leaving, setLeaving] = useState(false); // the "leave the lobby?" box (Esc during an online race)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState("");
@@ -37,6 +36,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
   const [owner, setOwner] = useState("");
   const [stream, setStream] = useState(false);
   const [bots, setBots] = useState(true);
+  const [track, setTrack] = useState(0); // which track: solo, and the lobby you host
   const [needLink, setNeedLink] = useState(false); // the song box only shows after a stream lobby asked for it
 
   // ---- start the game, read ?join=CODE and ?local
@@ -45,12 +45,27 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
     if (!canvas) return;
     const game = new KartGame(canvas, pixelFont);
     game.overlay = true;
+    // the rows of the game's pause menu (Esc): KART MENU, LEAVE / CLOSE LOBBY, GAME MENU
+    const leaveLobby = () => {
+      sessionRef.current?.leave();
+      sessionRef.current = null;
+      setView(null);
+    };
     game.onMenu = () => {
-      if (sessionRef.current) setLeaving((v) => !v);
-      else {
-        game.toLobby();
-        setScreen("menu");
-      }
+      game.toLobby();
+      setScreen("menu");
+    };
+    game.onLeave = () => {
+      leaveLobby();
+      game.toLobby();
+      setScreen("menu");
+    };
+    game.onGameMenu = () => {
+      leaveLobby();
+      try {
+        sessionStorage.setItem("pinkmane-open-games", "1");
+      } catch {}
+      window.location.href = "/";
     };
     gameRef.current = game;
     game.start();
@@ -72,6 +87,19 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
       game.destroy();
     };
   }, [pixelFont]);
+
+  // the track picker: the next one in the list (and the game shows it behind the menu)
+  const nextTrack = () => {
+    const t = (track + 1) % TRACKS.length;
+    setTrack(t);
+    gameRef.current?.setTrack(t);
+    sessionRef.current?.setTrack(t);
+  };
+  // in somebody else's lobby: show the track the host picked
+  const hostTrack = view && !view.isHost && view.phase === "lobby" ? view.track : -1;
+  useEffect(() => {
+    if (hostTrack >= 0) gameRef.current?.setTrack(hostTrack);
+  }, [hostTrack]);
 
   const remember = () => {
     try {
@@ -95,6 +123,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
       const s = await Session.open({ mode, name: n, link: song || undefined, code: cleanCode(code), stream, bots, owner: owner || undefined, local });
       remember();
       s.attach(game);
+      if (mode === "create") s.setTrack(track);
       sessionRef.current = s;
       s.subscribe((v) => setView(v));
       setScreen("online");
@@ -114,7 +143,6 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
     sessionRef.current?.leave();
     sessionRef.current = null;
     setView(null);
-    setLeaving(false);
     gameRef.current?.toLobby();
     setScreen("menu");
   };
@@ -129,9 +157,9 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
     );
   };
 
-  // ---- the solo race hides the menu; Esc at the end brings it back (game.onMenu)
+  // ---- the solo race hides the menu; the pause menu's KART MENU row brings it back (game.onMenu)
   const solo = () => {
-    gameRef.current?.startSolo();
+    gameRef.current?.startSolo(track);
     setScreen("none");
   };
 
@@ -238,8 +266,9 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
   if (screen === "menu")
     overlay = panel(
       <>
-        {title("PINK KART", "DEMO · TRACK 1" + (local ? " · LOCAL TEST MODE" : ""))}
+        {title("PINK KART", local ? "LOCAL TEST MODE" : undefined)}
         <div style={{ display: "grid", gap: 10 }}>
+          {btn(`TRACK: ${TRACKS[track].name}  ▸`, nextTrack, { dim: true })}
           {btn("SOLO RACE", solo, { big: true })}
           {btn("CREATE LOBBY", () => (setError(""), setScreen("create")), { big: true })}
           {btn("JOIN LOBBY", () => (setError(""), setScreen("join")), { big: true })}
@@ -338,6 +367,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
 
           {isHost ? (
             <>
+              <div style={{ marginTop: 12 }}>{btn(`TRACK: ${TRACKS[view.track]?.name ?? "?"}  ▸`, nextTrack, { dim: true })}</div>
               {!view.stream && toggle("FILL WITH BOTS", "EMPTY SEATS GET A BOT, UP TO 6 KARTS.", view.bots, (v) => s.setBots(v))}
               <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                 {btn("START RACE", () => s.start(), { big: true, off: view.players.length < 2 && !view.bots })}
@@ -349,6 +379,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
             <div style={{ display: "flex", gap: 10, marginTop: 16, alignItems: "center" }}>
               <div style={{ flex: 1, fontSize: 8, lineHeight: 1.7 }}>
                 WAITING FOR THE HOST TO START
+                <div style={{ opacity: 0.75 }}>TRACK: {TRACKS[view.track]?.name ?? "?"}</div>
                 {myLine >= MAX_RACERS && <div style={{ color: PINK }}>YOU'RE #{myLine + 1} IN LINE</div>}
               </div>
               {btn("LEAVE", leave, { dim: true })}
@@ -411,16 +442,6 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
         </div>
       );
     }
-    if (leaving && !ended)
-      overlay = panel(
-        <>
-          {title(isHost ? "CLOSE THE LOBBY?" : "LEAVE THE LOBBY?", isHost ? "EVERYBODY GETS SENT BACK TO THE MENU." : undefined)}
-          <div style={{ display: "flex", gap: 10 }}>
-            {btn(isHost ? "CLOSE IT" : "LEAVE", leave, { big: true })}
-            {btn("KEEP RACING", () => setLeaving(false), { dim: true })}
-          </div>
-        </>,
-      );
   }
 
   // a small MENU button at the bottom while racing (phones have no Esc key)
@@ -459,7 +480,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
       )}
       {racing && (
         <button
-          onClick={() => gameRef.current?.onMenu()}
+          onClick={() => gameRef.current?.openMenu()}
           style={{
             position: "absolute",
             left: "50%",

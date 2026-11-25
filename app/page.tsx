@@ -312,7 +312,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     name: "Pink Kart",
     id: "kart",
     preview: "/previews/pinkkart.gif",
-    blurb: "NEW · ONLINE. PINKMANE's own racing game: hand-drawn flaming karts on a wiggly night track. Race solo, or make a lobby code and race your friends. 808 bombs, vinyls, autotune mics.",
+    blurb: "NEW · ONLINE. PINKMANE's own racing game: hand-drawn flaming karts, 2 tracks (NIGHT FIELD and VOID HIGHWAY). Race solo, or make a lobby code and race your friends.",
     how: "arrows = drive · space = use your item · hold gas when 2 shows = rocket start",
     psp: true,
     link: "/games/pink-kart",
