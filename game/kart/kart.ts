@@ -247,6 +247,10 @@ export class KartGame {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d")!;
     this.font = pixelFont;
+    // make sure the pixel font is loaded before the game draws its text (otherwise the first screens use a plain font)
+    try {
+      void document.fonts.load(`12px ${pixelFont}`);
+    } catch {}
     this.base = base;
     this.buf = document.createElement("canvas");
     this.buf.width = BW;

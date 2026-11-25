@@ -476,7 +476,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
   const racing = screen === "none" || (screen === "online" && inRace);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#07060c", overflow: "hidden", touchAction: "none", userSelect: "none" }}>
+    <div style={{ position: "fixed", inset: 0, background: "#07060c", overflow: "hidden", touchAction: "none", userSelect: "none", fontFamily: font }}>
       <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%", imageRendering: "pixelated" }} aria-label="PINK KART" />
       <div style={{ touchAction: "auto", userSelect: "text" }}>{overlay}</div>
       {/* back to the main site, straight into its game list (hidden while racing: it would cover the lap counter) */}
@@ -493,9 +493,9 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
           left: 12,
           top: 10,
           padding: "6px 10px",
-          fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
-          fontWeight: 700,
-          fontSize: 12,
+          fontFamily: font,
+          fontSize: 9,
+          textShadow: `1px 1px 0 ${INK}`,
           color: PALE,
           background: "rgba(10,8,18,0.6)",
           border: `2px solid ${PALE}`,
@@ -515,9 +515,9 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
             bottom: 8,
             transform: "translateX(-50%)",
             padding: "6px 10px",
-            fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
-            fontWeight: 700,
-            fontSize: 12,
+            fontFamily: font,
+            fontSize: 9,
+            textShadow: `1px 1px 0 ${INK}`,
             color: PALE,
             background: "rgba(10,8,18,0.6)",
             border: `2px solid ${PALE}`,
