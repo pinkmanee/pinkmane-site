@@ -25,12 +25,15 @@ type TrackPack = { track: TrackData; ground: Uint32Array; gsize: number; gs: num
 // THE TRACKS: each is trackN.json + trackN-ground.png + trackN-map.png in public/kart/
 export const TRACKS = [
   { id: "track1", name: "NIGHT FIELD", hue: 0 },
-  { id: "track2", name: "VOID HIGHWAY", hue: -75 },
-  { id: "track3", name: "HIGH HILLS", hue: 68 },
+  { id: "track2", name: "VOID HIGHWAY", hue: -75, road: "neon" },
+  { id: "track3", name: "HIGH HILLS", hue: 68, greenPlants: true, road: "brick" },
 ];
 // EACH MAP HAS ITS OWN COLOURS. "hue" turns the colour wheel for that map's ground, sky and haze (in degrees):
 // 0 = the original pink and purple, -75 = cold blue, 68 = sunset orange and red. Change a number to recolour a map.
 // The karts, items, trees and the light-blue boost pads keep their own colours on every map.
+// road: how the road itself looks. none = the original grey road with pink and white curbs,
+//   "neon" = a dark glassy road with a glowing blue grid and blue curbs, "brick" = a road of warm bricks with orange curbs.
+// greenPlants: the pink outlines of the weed plants and trees by the road turn light green on that map.
 function hueMatrix(deg: number): number[] {
   const a = (deg * Math.PI) / 180, c = Math.cos(a), n = Math.sin(a);
   return [
@@ -46,7 +49,54 @@ function tint(c: number, m: number[], keepSun = false): number {
   if (keepSun && r > 140 && g > 90 && g > b * 1.25 && r >= g * 0.9) return c;
   return ((c & 0xff000000) | (cap(m[6] * r + m[7] * g + m[8] * b) << 16) | (cap(m[3] * r + m[4] * g + m[5] * b) << 8) | cap(m[0] * r + m[1] * g + m[2] * b)) >>> 0;
 }
-type Pal = { fog: number[]; vfog: number[]; vdeep: number[]; farLine: number; farDark: number; lip: number; side: number; rib: number; gDark: number; gMid: number; gTip: number; gBank: number; sky: HTMLCanvasElement; skyVoid: HTMLCanvasElement };
+// THE ROAD STYLES. The road picture is painted with a few fixed colours: three greys for the tarmac, white and pink
+// for the curbs, a dark edge line and the pale centre dashes. Each style swaps those for its own colours and patterns.
+const ROAD_KEYS: Record<number, string> = {
+  [abgrKey(70, 58, 98)]: "t0", [abgrKey(78, 66, 108)]: "t1", [abgrKey(88, 76, 120)]: "t2",
+  [abgrKey(244, 240, 252)]: "cw", [abgrKey(255, 70, 200)]: "cp", [abgrKey(40, 26, 60)]: "edge", [abgrKey(226, 214, 255)]: "dash",
+};
+function abgrKey(r: number, g: number, b: number) {
+  return (b << 16) | (g << 8) | r;
+}
+function hash2(a: number, b: number) {
+  let h = Math.imul(a, 374761393) + Math.imul(b, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+/** one road pixel in a style (or 0 = leave it as it is). x, y are world positions */
+function roadPixel(style: string, c: number, x: number, y: number): number {
+  const key = ROAD_KEYS[c & 0xffffff];
+  if (!key) return 0;
+  const shade = key === "t0" ? 0 : key === "t1" ? 1 : 2;
+  if (style === "neon") {
+    // dark glass with a glowing blue grid; curbs blue and white
+    if (key === "cw") return abgr(230, 250, 255);
+    if (key === "cp") return abgr(40, 196, 255);
+    if (key === "edge") return abgr(8, 12, 28);
+    if (key === "dash") return abgr(130, 236, 255);
+    const gx = (x | 0) % 32 === 0, gy = (y | 0) % 32 === 0;
+    if (gx && gy) return abgr(150, 230, 255);
+    if (gx || gy) return abgr(34, 96, 150);
+    return [abgr(18, 22, 42), abgr(22, 27, 50), abgr(26, 32, 58)][shade];
+  }
+  if (style === "brick") {
+    // warm bricks in rows, with dark mortar between them; curbs orange and cream
+    if (key === "cw") return abgr(255, 230, 184);
+    if (key === "cp") return abgr(255, 132, 36);
+    if (key === "edge") return abgr(46, 20, 24);
+    if (key === "dash") return abgr(255, 210, 110);
+    const BW2 = 16, BH2 = 8;
+    const ry = Math.floor(y / BH2), off = ry % 2 ? BW2 / 2 : 0, rx = Math.floor((x + off) / BW2);
+    if ((y | 0) % BH2 === 0 || ((x + off) | 0) % BW2 === 0) return abgr(66, 30, 34);
+    const pick = hash2(rx, ry) % 3;
+    const base = [[124, 62, 52], [138, 74, 58], [112, 54, 48]][pick];
+    const lift = (shade - 1) * 5;
+    return abgr(base[0] + lift, base[1] + lift, base[2] + lift);
+  }
+  return 0;
+}
+
+type Pal = { fog: number[]; vfog: number[]; vdeep: number[]; farLine: number; farDark: number; lip: number; side: number; rib: number; gDark: number; gMid: number; gTip: number; gBank: number; sky: HTMLCanvasElement; skyVoid: HTMLCanvasElement; props: Img };
 const rgbOf = (c: number) => [c & 255, (c >> 8) & 255, (c >> 16) & 255];
 const abgr = (r: number, g: number, b: number) => (0xff000000 | (b << 16) | (g << 8) | r) >>> 0;
 const BOLD = 0.07; // how much fatter the game's letters are drawn (0 = normal)
@@ -634,19 +684,32 @@ export class KartGame {
       }
     nc.putImageData(nd, 0, 0);
     // this map's own colours: turn the ground's colours (but not the boost pads: they stay light blue everywhere)
-    const hue = TRACKS.find((t) => t.id === id)?.hue ?? 0;
-    if (hue) {
-      const M = hueMatrix(hue), TH = S / 2, k = S / GZ / 2;
+    const info = TRACKS.find((t) => t.id === id) as { hue: number; road?: string } | undefined;
+    const hue = info?.hue ?? 0, style = info?.road ?? "";
+    if (hue || style) {
+      const M = hueMatrix(hue), TH = S / 2, k = S / GZ / 2, wk = S / GZ;
       for (let y = 0; y < GZ; y++) {
         const row = Math.min(TH - 1, (y * k) | 0) * TH;
-        for (let x = 0; x < GZ; x++) if (types[row + Math.min(TH - 1, (x * k) | 0)] !== 2) ground[y * GZ + x] = tint(ground[y * GZ + x], M);
+        for (let x = 0; x < GZ; x++) {
+          const t = types[row + Math.min(TH - 1, (x * k) | 0)];
+          if (t === 2) continue; // boost pads stay light blue everywhere
+          const o = y * GZ + x;
+          if (style && (t === 1 || t === 4)) {
+            const c = roadPixel(style, ground[o], x * wk, y * wk);
+            if (c) {
+              ground[o] = c;
+              continue;
+            }
+          }
+          if (hue) ground[o] = tint(ground[o], M);
+        }
       }
     }
     return { track, ground, gsize: GZ, gs: GZ / S, types, mini };
   }
 
   /** the sky, haze and edge colours of one map, turned to that map's hue */
-  private makePal(hue: number): Pal {
+  private makePal(hue: number, greenPlants = false): Pal {
     const M = hueMatrix(hue);
     const sky = (name: string) => {
       const im = this.img[name];
@@ -670,7 +733,30 @@ export class KartGame {
       lip: t(SLAB_LIP), side: t(SLAB_SIDE), rib: t(SLAB_RIB),
       gDark: t(GRASS_DARK), gMid: t(GRASS_MID), gTip: t(GRASS_TIP), gBank: t(GRASS_BANK),
       sky: sky("sky"), skyVoid: sky("sky-void"),
+      props: greenPlants ? this.greenProps() : this.img["props"],
     };
+  }
+
+  /** the plants by the road with light-green outlines instead of pink (the black stays black) */
+  private greenProps(): HTMLCanvasElement {
+    const im = this.img["props"];
+    const c = document.createElement("canvas");
+    c.width = im.width;
+    c.height = im.height;
+    const x = c.getContext("2d", { willReadFrequently: true })!;
+    x.drawImage(im, 0, 0);
+    const d = x.getImageData(0, 0, c.width, c.height);
+    const px = d.data;
+    for (let i = 0; i < px.length; i += 4) {
+      const r = px[i], g = px[i + 1], b = px[i + 2];
+      if (!px[i + 3] || r < 90 || g > r * 0.65 || b < 50) continue; // not pink or purple: leave it
+      const L = Math.max(r, b);
+      px[i] = Math.round(L * 0.5);
+      px[i + 1] = Math.round(L * 0.86);
+      px[i + 2] = Math.round(L * 0.42);
+    }
+    x.putImageData(d, 0, 0);
+    return c;
   }
 
   private useTrack(i: number) {
@@ -682,7 +768,7 @@ export class KartGame {
     this.gs = p.gs;
     this.types = p.types;
     this.mini = p.mini;
-    this.pal = p.pal ?? (p.pal = this.makePal(TRACKS[this.trackNo].hue));
+    this.pal = p.pal ?? (p.pal = this.makePal(TRACKS[this.trackNo].hue, !!(TRACKS[this.trackNo] as { greenPlants?: boolean }).greenPlants));
     this.zoneF = 0;
   }
 
@@ -1847,7 +1933,7 @@ export class KartGame {
         list.push({ img: im, sx: (Math.floor(now / 250) % 2) * 28, sw: 28, sh: 28, x: bx.x, y: bx.y, k: 0.55, lift: 5 + Math.sin(now / 300 + bx.x) * 2, flip: false, shadow: true });
       }
     // beside the track: the black sigil trees (pictures 0-2 in props.png) and black weed plants (3-5), about half and half
-    for (const p of this.track.props) list.push({ img: this.img["props"], sx: (p[2] + ((p[0] + p[1]) % 2) * 3) * 40, sw: 40, sh: 64, x: p[0], y: p[1], k: 1.1, lift: 0, flip: false, shadow: false });
+    for (const p of this.track.props) list.push({ img: this.pal.props, sx: (p[2] + ((p[0] + p[1]) % 2) * 3) * 40, sw: 40, sh: 64, x: p[0], y: p[1], k: 1.1, lift: 0, flip: false, shadow: false });
     // the flying part: mountain tops standing in the hills, and rings hanging in the air
     for (const pk of this.track.peaks ?? []) list.push({ img: this.img["peak"], sx: 0, sw: 64, sh: 100, x: pk[0], y: pk[1], k: 1.05, lift: 0, flip: false, shadow: false });
     for (const rg of this.track.rings ?? []) list.push({ img: this.img["ring"], sx: (Math.floor(now / 200) % 2) * 48, sw: 48, sh: 48, x: rg[0], y: rg[1], k: 0.9, lift: rg[2] - 12, flip: false, shadow: false });
