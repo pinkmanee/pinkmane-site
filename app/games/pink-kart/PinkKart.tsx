@@ -372,6 +372,8 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
             key={t.id}
             data-map
             onClick={onPick ? () => onPick(i) : undefined}
+            // moving the keyboard highlight onto a map picks it straight away (no need to press Enter)
+            onFocus={onPick ? () => i !== picked && onPick(i) : undefined}
             disabled={!onPick}
             style={{
               padding: 0,
