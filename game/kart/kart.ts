@@ -17,15 +17,21 @@ type TrackData = {
   spawnIdx?: number[]; // where a kart is put back after falling (before the jump if it fell into the gap)
   spawnOff?: number[]; // ...and how far to the side (the split has a hole in the middle)
   outside?: number; // what's past the edge of the map (3 = void)
+  alt?: number[]; // the flying part: how high the karts fly at every centre point (0 = on the ground)
+  peaks?: [number, number][]; // mountain tops to dodge while flying
+  rings?: [number, number, number][]; // rings to fly through for a boost: x, y, height
 };
 type TrackPack = { track: TrackData; ground: Uint32Array; gsize: number; gs: number; types: Uint8Array; mini: HTMLCanvasElement };
 // THE TRACKS: each is trackN.json + trackN-ground.png + trackN-map.png in public/kart/
 export const TRACKS = [
   { id: "track1", name: "NIGHT FIELD" },
   { id: "track2", name: "VOID HIGHWAY" },
+  { id: "track3", name: "HIGH HILLS" },
 ];
 const AIR_TIME = 0.9; // seconds in the air after a jump
-const FALL_TIME = 0.9; // seconds a kart falls into the void before it's put back
+const FALL_TIME = 1.5; // seconds a kart falls (and tumbles) into the void...
+const BURST_TIME = 0.85; // ...then it bursts into pixels at the bottom, and after that it's put back
+const FALL_DEPTH = 85; // how deep it falls (world units)
 const SLAB_THICK = 7; // how thick the floating road looks from the side (world units)
 const SLAB_LIP = 0xffc846ff, SLAB_SIDE = 0xff2a0a1e, SLAB_RIB = 0xff48143a;
 
@@ -81,7 +87,7 @@ const skinColor = (skin: number): [number, number, number] => (skin === 0 ? [255
 // ---------------- ONLINE: what the game and the lobby (game/kart/online.ts) say to each other
 export type Seat = { id: string; name: string; skin: number; bot: boolean };
 export type ResultRow = { id: string; name: string; time: number | null; bot: boolean };
-export type ItemEvent = { id: string; k: number; kind: ItemName; x: number; y: number; vx: number; vy: number };
+export type ItemEvent = { id: string; k: number; kind: ItemName; x: number; y: number; vx: number; vy: number; h?: number };
 export interface OnlineLink {
   myId: string;
   isHost: boolean;
@@ -131,7 +137,9 @@ type Kart = {
   place: number;
   lost: number;
   air: number; // seconds left in the air (after a jump)
-  fall: number; // seconds left of falling into the void
+  fall: number; // seconds left of falling into the void (the last BURST_TIME of it is the pixel burst)
+  alt: number; // how high it's flying right now (0 = on the ground)
+  tilt: number; // flying: banking into the turn
 };
 type Thing = {
   kind: "vinyl" | "wall" | "bomb" | "mic" | "boom" | "wave";
@@ -140,13 +148,14 @@ type Thing = {
   vx: number;
   vy: number;
   z: number;
+  alt: number; // how high it was used (things thrown while flying stay up there)
   t: number;
   life: number;
   owner: Kart;
   idx: number;
   id: string; // online: the same item has the same id on every screen
 };
-type Sprite = { img: Img; sx: number; sw: number; sh: number; x: number; y: number; k: number; lift: number; flip: boolean; shadow: boolean; squash?: number; kart?: boolean };
+type Sprite = { img: Img; sx: number; sw: number; sh: number; x: number; y: number; k: number; lift: number; flip: boolean; shadow: boolean; squash?: number; kart?: boolean; rot?: number };
 
 const wrapAngle = (a: number) => {
   while (a > Math.PI) a -= Math.PI * 2;
@@ -180,6 +189,7 @@ export class KartGame {
 
   private packs: TrackPack[] = [];
   private trackNo = 0;
+  private fallCam = 0;
   private zoneF = 0; // 0 = the field's sky and haze, 1 = the void's (it fades between them)
   private track!: TrackData;
   private ground!: Uint32Array;
@@ -296,7 +306,7 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["sky", "sky-void", "props", "itembox", ...Object.keys(CARS).flatMap((c) => VIEWS.map((v) => `kart-${c}-${v}`)), ...ITEMS.map((i) => `item-${i}`)];
+    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", ...Object.keys(CARS).flatMap((c) => VIEWS.map((v) => `kart-${c}-${v}`)), ...ITEMS.map((i) => `item-${i}`)];
     const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n))]);
     this.packs = packs;
     this.useTrack(0);
@@ -540,6 +550,8 @@ export class KartGame {
         lost: 0,
         air: 0,
         fall: 0,
+        alt: 0,
+        tilt: 0,
       });
     }
     this.me = this.karts[5];
@@ -752,7 +764,14 @@ export class KartGame {
         k.air -= dt;
         steer *= 0.3; // not much steering in the air
       }
-      const type = k.air > 0 ? 1 : this.typeAt(k.x, k.y);
+      // FLYING: over the hills the kart grows wings and rises to the flight path's height (which goes up and down)
+      const under = this.typeAt(k.x, k.y);
+      const altT = under === 5 ? this.track.alt?.[k.idx] || 70 : 0;
+      k.alt += (altT - k.alt) * Math.min(1, (altT > k.alt ? 2.2 : 3.2) * dt);
+      if (altT === 0 && k.alt < 0.5) k.alt = 0;
+      const flying = k.alt > 6;
+      k.tilt += ((flying ? steer * 0.45 : 0) - k.tilt) * Math.min(1, 8 * dt);
+      const type = k.air > 0 || flying ? 1 : under;
       if (type === 2 && k.boost < 0.9) k.boost = 1.1;
       if (type === 4) {
         // the jump: everybody gets launched fast enough to make it across
@@ -761,7 +780,7 @@ export class KartGame {
         if (k.player) this.say("JUMP!", 0.8);
       }
       if (type === 3) {
-        k.fall = FALL_TIME;
+        k.fall = FALL_TIME + BURST_TIME;
         k.boost = 0;
         k.spin = 0;
         k.spinA = 0;
@@ -778,6 +797,7 @@ export class KartGame {
         if (k.blind > 0) top *= 0.8;
       }
       if (type === 0) top *= 0.42;
+      if (flying) top *= 1.12;
       if (k.boost > 0) top = MAX_SPEED * 1.5;
       if (k.spin > 0) {
         // a spin-out: exactly two full turns, fast at first and easing out, so it always ends facing forward
@@ -826,6 +846,26 @@ export class KartGame {
       k.idx = best;
       k.total += delta;
       k.off = Math.sqrt(bd);
+      if (flying) {
+        // the wind keeps you on the flight path
+        const hw = this.track.halfw[k.idx];
+        if (k.off > hw) {
+          k.x += (C[k.idx][0] - k.x) * 0.05;
+          k.y += (C[k.idx][1] - k.y) * 0.05;
+          k.speed *= 0.99;
+        }
+        // mountain tops spin you out, rings give a boost
+        for (const pk of this.track.peaks ?? [])
+          if (Math.abs(pk[0] - k.x) < 17 && Math.abs(pk[1] - k.y) < 17 && k.safe <= 0) {
+            this.hit(k, 0.8);
+            k.speed *= 0.4;
+          }
+        for (const rg of this.track.rings ?? [])
+          if (k.boost < 0.6 && Math.abs(rg[0] - k.x) < 19 && Math.abs(rg[1] - k.y) < 19) {
+            k.boost = 1.3;
+            if (k.player) this.say("RING!", 0.6);
+          }
+      }
       // lost far away from the road (or a stuck bot): put back
       k.lost = k.off > this.track.halfw[k.idx] + 150 || (!k.player && Math.abs(k.speed) < 25 && k.spin <= 0) ? k.lost + dt : 0;
       if (k.lost > (k.player ? 3 : 2.5)) this.rescue(k);
@@ -874,7 +914,7 @@ export class KartGame {
     for (let i = 0; i < this.karts.length; i++)
       for (let j = i + 1; j < this.karts.length; j++) {
         const a = this.karts[i], b = this.karts[j];
-        if (a.left || b.left) continue;
+        if (a.left || b.left || Math.abs(a.alt - b.alt) > 20) continue;
         const ra = a.ctl === "remote", rb = b.ctl === "remote";
         if (ra && rb) continue; // two other players' karts: their own screens sort that out
         const dx = b.x - a.x, dy = b.y - a.y;
@@ -929,7 +969,7 @@ export class KartGame {
     k.item = null;
     const dx = Math.cos(k.a), dy = Math.sin(k.a);
     const fast = Math.max(0, k.speed) + 230;
-    const ev: ItemEvent = { id: `${this.online?.myId ?? "s"}-${++this.itemN}`, k: k.skin, kind: it, x: k.x, y: k.y, vx: 0, vy: 0 };
+    const ev: ItemEvent = { id: `${this.online?.myId ?? "s"}-${++this.itemN}`, k: k.skin, kind: it, x: k.x, y: k.y, vx: 0, vy: 0, h: Math.round(k.alt) };
     if (it === "bomb") Object.assign(ev, { x: k.x + dx * 12, y: k.y + dy * 12, vx: dx * fast, vy: dy * fast });
     if (it === "vinyl") Object.assign(ev, { x: k.x - dx * 20, y: k.y - dy * 20 });
     if (it === "wall") Object.assign(ev, { x: k.x - dx * 24, y: k.y - dy * 24 });
@@ -942,14 +982,14 @@ export class KartGame {
   // an item goes off (one of mine, or one that came in from another player's screen)
   private applyItem(k: Kart, ev: ItemEvent) {
     const add = (kind: Thing["kind"], life: number) =>
-      this.things.push({ kind, x: ev.x, y: ev.y, vx: ev.vx, vy: ev.vy, z: 0, t: 0, life, owner: k, idx: k.idx, id: ev.id });
+      this.things.push({ kind, x: ev.x, y: ev.y, vx: ev.vx, vy: ev.vy, z: 0, alt: typeof ev.h === "number" && isFinite(ev.h) ? clamp(ev.h, 0, 200) : 0, t: 0, life, owner: k, idx: k.idx, id: ev.id });
     if (ev.kind === "bomb") add("bomb", 0.8);
     if (ev.kind === "vinyl") add("vinyl", 30);
     if (ev.kind === "wall") add("wall", 10);
     if (ev.kind === "mic") add("mic", 7);
     if (ev.kind === "bass") {
       add("wave", 0.5);
-      for (const o of this.karts) if (o !== k && Math.hypot(o.x - ev.x, o.y - ev.y) < 150) this.hit(o, 1.1);
+      for (const o of this.karts) if (o !== k && Math.abs(o.alt - k.alt) < 30 && Math.hypot(o.x - ev.x, o.y - ev.y) < 150) this.hit(o, 1.1);
     }
     if (ev.kind === "mute") {
       for (const o of this.karts) if (o !== k && !o.finished && this.mine(o)) o.blind = 3.5;
@@ -977,7 +1017,7 @@ export class KartGame {
           t.t = 0;
           t.life = 0.42;
           t.z = 0;
-          for (const k of this.karts) if (Math.hypot(k.x - t.x, k.y - t.y) < 46) this.hit(k, 1.3);
+          for (const k of this.karts) if (Math.abs(k.alt - t.alt) < 30 && Math.hypot(k.x - t.x, k.y - t.y) < 46) this.hit(k, 1.3);
         }
       } else if (t.kind === "mic") {
         // chase the kart in front, along the road
@@ -1007,14 +1047,14 @@ export class KartGame {
         t.x += t.vx * 430 * dt;
         t.y += t.vy * 430 * dt;
         for (const k of this.karts)
-          if (k !== t.owner && this.mine(k) && !k.left && Math.hypot(k.x - t.x, k.y - t.y) < 15) {
+          if (k !== t.owner && this.mine(k) && !k.left && Math.abs(k.alt - t.alt) < 30 && Math.hypot(k.x - t.x, k.y - t.y) < 15) {
             this.hit(k, 1.2);
             this.used(t);
             break;
           }
       } else if (t.kind === "vinyl") {
         for (const k of this.karts)
-          if ((k !== t.owner || t.t > 1) && this.mine(k) && !k.left && Math.hypot(k.x - t.x, k.y - t.y) < 14) {
+          if ((k !== t.owner || t.t > 1) && this.mine(k) && !k.left && Math.abs(k.alt - t.alt) < 30 && Math.hypot(k.x - t.x, k.y - t.y) < 14) {
             if (k.safe <= 0) {
               this.hit(k, 1.2);
               this.used(t);
@@ -1023,7 +1063,7 @@ export class KartGame {
           }
       } else if (t.kind === "wall") {
         for (const k of this.karts) {
-          if (!this.mine(k)) continue;
+          if (!this.mine(k) || Math.abs(k.alt - t.alt) > 30) continue;
           const dx = k.x - t.x, dy = k.y - t.y;
           const d = Math.hypot(dx, dy);
           if ((k !== t.owner || t.t > 1) && d < 22 && d > 0.01) {
@@ -1131,6 +1171,8 @@ export class KartGame {
         lost: 0,
         air: 0,
         fall: 0,
+        alt: 0,
+        tilt: 0,
       });
     });
     this.me = this.karts.find((k) => k.player) ?? this.karts[0];
@@ -1230,8 +1272,12 @@ export class KartGame {
     k.boost = flags & 1 ? 0.1 : 0;
     k.rev = flags & 8 ? 0 : -1;
     if (flags & 2 && !k.finished) k.finished = true;
+    // flying: the same rise and dip as on that player's own screen
+    const altT = this.typeAt(k.x, k.y) === 5 ? this.track.alt?.[k.idx] || 70 : 0;
+    k.alt += (altT - k.alt) * Math.min(1, (altT > k.alt ? 2.2 : 3.2) / 60);
+    if (altT === 0 && k.alt < 0.5) k.alt = 0;
     // falling and jumping play here too
-    if ((last[8] ?? 0) > 0 && k.fall <= 0) k.fall = Math.min(FALL_TIME, last[8]);
+    if ((last[8] ?? 0) > 0 && k.fall <= 0) k.fall = Math.min(FALL_TIME + BURST_TIME, last[8]);
     if (k.fall > 0) k.fall = Math.max(0, k.fall - 1 / 60);
     if ((last[9] ?? 0) > 0 && k.air <= 0) k.air = Math.min(AIR_TIME, last[9]);
     if (k.air > 0) k.air = Math.max(0, k.air - 1 / 60);
@@ -1496,6 +1542,7 @@ export class KartGame {
 
   private drawWorld() {
     const me = this.me;
+    const camH = CAM_H + me.alt * 0.92; // when you fly, the camera goes up with you and the ground drops away
     const b = this.bctx;
     // the camera swings smoothly behind the kart (on the title screen it circles)
     const wantA = this.state === "title" ? me.a + Math.sin(this.stateT * 0.5) * 0.5 : me.a;
@@ -1503,7 +1550,10 @@ export class KartGame {
     const ca = this.camA;
     const dx = Math.cos(ca), dy = Math.sin(ca);
     const rx = -dy, ry = dx;
-    const camX = me.x - dx * CAM_BACK, camY = me.y - dy * CAM_BACK;
+    // when you fall into the void the camera pulls back, so you watch your kart drop and burst
+    this.fallCam += ((me.fall > 0 ? 1 : 0) - this.fallCam) * 0.1;
+    const back = CAM_BACK + 190 * this.fallCam;
+    const camX = me.x - dx * back, camY = me.y - dy * back;
 
     // ---- which zone you're in (0 = the field, 1 = the void): the sky and the haze fade from one to the other
     const zoneNow = this.track.zone ? this.track.zone[me.idx] ?? 0 : 0;
@@ -1541,7 +1591,7 @@ export class KartGame {
     // far away the ground fades into the haze: pink over the field, deep purple in the void
     const FOG_R = Math.round(235 + (52 - 235) * zf), FOG_G = Math.round(50 + (14 - 50) * zf), FOG_B = Math.round(170 + (84 - 170) * zf);
     for (let r = 0; r < rows; r++) {
-      const z = (CAM_H * FOCAL) / (r + 0.5);
+      const z = (camH * FOCAL) / (r + 0.5);
       const stepX = (rx * z) / FOCAL, stepY = (ry * z) / FOCAL;
       let wx = camX + dx * z - stepX * (BW / 2), wy = camY + dy * z - stepY * (BW / 2);
       const fog = z > 500 ? Math.min(0.85, (z - 500) / 2600) : 0;
@@ -1586,7 +1636,7 @@ export class KartGame {
     // Over the void the road (and the field) is a floating slab: you see its dark side wherever it ends towards you.
     const sway = performance.now() / 1000;
     for (let r = 2; r < rows; r++) {
-      const z = (CAM_H * FOCAL) / (r + 0.5);
+      const z = (camH * FOCAL) / (r + 0.5);
       const tall = (GRASS_TALL * FOCAL) / z; // how tall a blade is on screen at this distance
       const thick = Math.max(1, Math.round((SLAB_THICK * FOCAL) / z)); // how thick the slab looks at this distance
       const row = r * BW;
@@ -1627,12 +1677,13 @@ export class KartGame {
         const sc = FOCAL / z;
         const size = Math.max(1, Math.round(5 * sc * (1 - g * 0.5)));
         b.fillStyle = i % 2 ? "#ff46c8" : "#ffffff";
-        b.fillRect(Math.round(BW / 2 + (ex * rx + ey * ry) * sc - size / 2), Math.round(HORIZON + CAM_H * sc - size), size, size);
+        b.fillRect(Math.round(BW / 2 + (ex * rx + ey * ry) * sc - size / 2), Math.round(HORIZON + camH * sc - size), size, size);
       }
     }
 
     // ---- everything standing on the ground
     const list: Sprite[] = [];
+    const bursts: { x: number; y: number; t: number; col: [number, number, number] }[] = [];
     const now = performance.now();
     this.tags = [];
     for (const k of this.karts) {
@@ -1644,7 +1695,7 @@ export class KartGame {
         if (z > 30 && z < 420) {
           const sc = FOCAL / z;
           const px = BW / 2 + (ex * rx + ey * ry) * sc;
-          const top = HORIZON + CAM_H * sc - 78 * CARS[k.car].k * sc;
+          const top = HORIZON + camH * sc - (78 * CARS[k.car].k + k.alt) * sc;
           // drawn on the menu grid (480 x 270), which matches the race screen here
           this.tags.push({ x: (px * UW) / BW, y: ((top - 8) * UH) / BH, name: k.name, col: skinColor(k.skin) });
         }
@@ -1665,9 +1716,21 @@ export class KartGame {
       const hop = spinning ? Math.sin((1 - k.spin / SPIN_TIME) * Math.PI) * 9 : 0;
       // a jump is an arc; falling into the void = sinking and shrinking
       const jumpZ = k.air > 0 ? Math.sin((1 - k.air / AIR_TIME) * Math.PI) * 16 : 0;
-      const drop = k.fall > 0 ? 1 - k.fall / FALL_TIME : 0;
+      // falling into the void: it tumbles down and shrinks, then bursts into pixels at the bottom
+      if (k.fall > 0 && k.fall <= BURST_TIME) {
+        bursts.push({ x: k.x, y: k.y, t: 1 - k.fall / BURST_TIME, col: skinColor(k.skin) });
+        continue;
+      }
+      const drop = k.fall > 0 ? 1 - (k.fall - BURST_TIME) / FALL_TIME : 0;
+      const tumble = drop > 0 ? Math.max(0.15, Math.abs(Math.cos(drop * 9))) : 1;
+      if (k.alt > 2) {
+        // the wings (behind the kart), opening as it takes off
+        const open = Math.min(1, k.alt / 30);
+        const wg = this.img["wings"];
+        list.push({ img: wg, sx: 0, sw: wg.width, sh: wg.height, x: k.x, y: k.y, k: 0.3 * open, lift: k.alt + 7, flip: false, shadow: false, kart: true, rot: k.tilt });
+      }
       const shake = k.stall > 0 || (this.state === "count" && k.rev >= 0) ? (Math.floor(now / 40) % 2) * 0.5 : 0;
-      list.push({ img: im, sx: frame * fw, sw: fw, sh: im.height, x: k.x, y: k.y, k: CARS[k.car].k * (1 - 0.6 * drop), lift: hop + shake + jumpZ - drop * drop * 44, flip: view === "side" && rel < 0, shadow: k.fall <= 0 && k.air <= 0, squash, kart: true });
+      list.push({ img: im, sx: frame * fw, sw: fw, sh: im.height, x: k.x, y: k.y, k: CARS[k.car].k * (1 - 0.65 * drop), lift: hop + shake + jumpZ + k.alt - drop * drop * FALL_DEPTH, flip: view === "side" && rel < 0, shadow: k.fall <= 0 && k.air <= 0 && k.alt <= 6, squash: squash * tumble, kart: true, rot: k.tilt });
     }
     for (const bx of this.boxes)
       if (bx.back <= 0) {
@@ -1676,15 +1739,18 @@ export class KartGame {
       }
     // beside the track: the black sigil trees (pictures 0-2 in props.png) and black weed plants (3-5), about half and half
     for (const p of this.track.props) list.push({ img: this.img["props"], sx: (p[2] + ((p[0] + p[1]) % 2) * 3) * 40, sw: 40, sh: 64, x: p[0], y: p[1], k: 1.1, lift: 0, flip: false, shadow: false });
+    // the flying part: mountain tops standing in the hills, and rings hanging in the air
+    for (const pk of this.track.peaks ?? []) list.push({ img: this.img["peak"], sx: 0, sw: 64, sh: 100, x: pk[0], y: pk[1], k: 1.05, lift: 0, flip: false, shadow: false });
+    for (const rg of this.track.rings ?? []) list.push({ img: this.img["ring"], sx: (Math.floor(now / 200) % 2) * 48, sw: 48, sh: 48, x: rg[0], y: rg[1], k: 0.9, lift: rg[2] - 12, flip: false, shadow: false });
     for (const t of this.things) {
       if (t.kind === "wave") continue;
       if (t.kind === "boom") {
         // the blast: 6 frames, always the same size, sitting on the ground
         const f = Math.min(5, Math.floor((t.t / t.life) * 6));
-        list.push({ img: this.boom, sx: f * 64, sw: 64, sh: 64, x: t.x, y: t.y, k: 1.08, lift: -12, flip: false, shadow: false });
+        list.push({ img: this.boom, sx: f * 64, sw: 64, sh: 64, x: t.x, y: t.y, k: 1.08, lift: t.alt - 12, flip: false, shadow: false });
       } else {
         const name = t.kind === "bomb" ? "item-bomb" : t.kind === "mic" ? "item-mic" : t.kind === "vinyl" ? "item-vinyl" : "item-wall";
-        list.push({ img: this.img[name], sx: 0, sw: 48, sh: 48, x: t.x, y: t.y, k: t.kind === "wall" ? 0.95 : 0.42, lift: t.z + (t.kind === "mic" ? 4 : 0), flip: false, shadow: t.kind !== "wall" });
+        list.push({ img: this.img[name], sx: 0, sw: 48, sh: 48, x: t.x, y: t.y, k: t.kind === "wall" ? 0.95 : 0.42, lift: t.z + t.alt + (t.kind === "mic" ? 4 : 0), flip: false, shadow: t.kind !== "wall" });
       }
     }
     const proj: { s: Sprite; z: number; px: number; py: number; sc: number }[] = [];
@@ -1697,7 +1763,7 @@ export class KartGame {
       const sc = FOCAL / z;
       const px = BW / 2 + side * sc;
       if (px < -200 || px > BW + 200) continue;
-      proj.push({ s, z, px, py: HORIZON + CAM_H * sc, sc });
+      proj.push({ s, z, px, py: HORIZON + camH * sc, sc });
     }
     proj.sort((a, c) => c.z - a.z);
     for (const p of proj) {
@@ -1711,7 +1777,14 @@ export class KartGame {
         b.fillRect(Math.round(p.px - fullW * 0.42), Math.round(p.py - Math.max(1, h * 0.05)), Math.round(fullW * 0.84), Math.max(1, Math.round(h * 0.1)));
       }
       if (p.z > 500) b.globalAlpha = Math.max(0.25, 1 - (p.z - 500) / 1300);
-      if (s.flip) {
+      if (s.rot) {
+        // banking while flying
+        b.save();
+        b.translate(Math.round(p.px), y + Math.round(h / 2));
+        b.rotate(s.rot);
+        b.drawImage(s.img, s.sx, 0, s.sw, s.sh, -Math.round(w / 2), -Math.round(h / 2), Math.round(w), Math.round(h));
+        b.restore();
+      } else if (s.flip) {
         b.save();
         b.translate(x + Math.round(w), y);
         b.scale(-1, 1);
@@ -1719,6 +1792,28 @@ export class KartGame {
         b.restore();
       } else b.drawImage(s.img, s.sx, 0, s.sw, s.sh, x, y, Math.round(w), Math.round(h));
       b.globalAlpha = 1;
+    }
+    // ---- the pixel burst at the bottom of a fall: a white flash, then squares flying apart
+    for (const bu of bursts) {
+      const ex = bu.x - camX, ey = bu.y - camY;
+      const z = ex * dx + ey * dy;
+      if (z < 12 || z > 1200) continue;
+      const sc = FOCAL / z;
+      const cx = BW / 2 + (ex * rx + ey * ry) * sc, cy = HORIZON + camH * sc + (FALL_DEPTH - 4) * sc;
+      const cols = ["#ff46c8", "#ffffff", `rgb(${bu.col[0]},${bu.col[1]},${bu.col[2]})`, "#7a3ce0", "#ffe23c"];
+      if (bu.t < 0.12) {
+        const f = Math.max(4, Math.round(40 * sc));
+        b.fillStyle = "#ffffff";
+        b.fillRect(Math.round(cx - f / 2), Math.round(cy - f / 2), f, f);
+      }
+      const out2 = bu.t * (2 - bu.t); // fast at first, slowing down
+      for (let i = 0; i < 46; i++) {
+        const a = i * 2.399, sp = 26 + ((i * 37) % 62);
+        const size = Math.max(1, Math.round((7.5 - 6.5 * bu.t) * sc * (1 + (i % 3) * 0.5)));
+        if (bu.t > 0.55 && i % 2) continue; // half of them are gone by the end
+        b.fillStyle = cols[i % cols.length];
+        b.fillRect(Math.round(cx + Math.cos(a) * sp * out2 * sc - size / 2), Math.round(cy + (Math.sin(a) * sp * out2 * 0.7 + 14 * bu.t * bu.t) * sc - size / 2), size, size);
+      }
     }
   }
 }

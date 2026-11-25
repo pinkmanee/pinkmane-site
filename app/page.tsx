@@ -312,7 +312,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     name: "Pink Kart",
     id: "kart",
     preview: "/previews/pinkkart.gif",
-    blurb: "NEW · ONLINE. PINKMANE's own racing game: hand-drawn flaming karts, 2 tracks (NIGHT FIELD and VOID HIGHWAY). Race solo, or make a lobby code and race your friends.",
+    blurb: "NEW · ONLINE. PINKMANE's own racing game: hand-drawn flaming karts, 3 tracks (NIGHT FIELD, VOID HIGHWAY and HIGH HILLS, where the karts grow wings). Race solo, or make a lobby code and race your friends.",
     how: "arrows = drive · space = use your item · hold gas when 2 shows = rocket start",
     psp: true,
     link: "/games/pink-kart",
@@ -430,7 +430,8 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   },
 ];
 // The big games (the first list you see) and the mini games (behind the MINI GAMES row)
-const MAIN_GAMES = PICKER_GAMES.filter((g) => !g.mini && g.id !== "kart");
+// PINK KART is hidden on the live site for now: it only shows in the list on your own computer (localhost)
+const MAIN_GAMES = PICKER_GAMES.filter((g) => !g.mini && (g.id !== "kart" || process.env.NODE_ENV === "development"));
 const MINI_GAMES = PICKER_GAMES.filter((g) => g.mini);
 const MINI_ROW = "Mini Games";
 
