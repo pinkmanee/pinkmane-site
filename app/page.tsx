@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -28,6 +28,8 @@ import GunCursor from "./components/GunCursor";
 import AsciiIntro from "./components/AsciiIntro";
 import TrackVideo from "./components/TrackVideo";
 import { useHasMouse } from "./components/useHasMouse";
+import VisitCounter from "./components/VisitCounter";
+import DailyReward, { readDaily } from "./components/DailyReward";
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -1132,7 +1134,10 @@ export default function Home() {
   // The song list. In PINKMANE VOID on the handheld the VOID_BEATS are added after your songs (your songs keep their places in the list).
   // (now in EVERY game, on the PSP and on the iPod: the beats join the player while any game is open)
   const inVoid = playing;
-  const tracks = inVoid ? GAME_TRACKS : TRACKS;
+  // beats unlocked with the daily rewards join your songs on the iPod (outside the games too)
+  const [unlockedBeats, setUnlockedBeats] = useState<string[]>(() => (typeof window === "undefined" ? [] : readDaily().beats));
+  const menuTracks = useMemo(() => [...TRACKS, ...VOID_BEATS.filter((b) => unlockedBeats.includes(b.file))], [unlockedBeats]);
+  const tracks = inVoid ? GAME_TRACKS : menuTracks;
   const tracksRef = useRef(tracks);
   tracksRef.current = tracks;
   // PHONES + TABLETS: on a phone or tablet, Pink Maze and Pinkmane Void get their own full-screen
@@ -1304,6 +1309,12 @@ export default function Home() {
   const isFirstRender = useRef(true);
 
   const songRef = useRef<HTMLAudioElement | null>(null);
+  const pendingBeatRef = useRef<string | null>(null); // a beat that was just unlocked: play it
+  // VOLUME ON iPHONES: an iPhone ignores a song's own volume setting (it's always full), so the slider did nothing there.
+  // Once the music runs through the sound engine (see hookUpBass), the slider turns this volume knob instead.
+  const volGainRef = useRef<GainNode | null>(null);
+  const volumeRef = useRef(0.5);
+  const volumeLockedRef = useRef(false); // true = this browser ignores the song's own volume (iPhone / iPad)
   // The whole page; the beat clock writes the beat values onto it
   const mainRef = useRef<HTMLElement>(null);
   // The beat numbers, shared with the liquid background
@@ -1372,6 +1383,16 @@ export default function Home() {
       })
       .catch(() => {});
   };
+
+  // A beat was just unlocked with the daily reward: it's in the song list now, so play it
+  useEffect(() => {
+    const file = pendingBeatRef.current;
+    if (!file || inVoid) return;
+    pendingBeatRef.current = null;
+    const i = tracksRef.current.findIndex((t) => t.file === file);
+    if (i >= 0) loadAndPlay(i);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unlockedBeats]);
 
   // Opening or leaving a game swaps the song list (menus: all your songs, games: ENDER PEARLS + the beats).
   // The first GAME_KEEP songs are in both lists, so they just keep playing. Anything else that's on isn't in the new list:
@@ -1923,8 +1944,12 @@ export default function Home() {
         // Browser isn't allowing sound yet: don't touch the song, try again in a bit
         if (ctx.state !== "running" || hookedTo) return;
         const source = ctx.createMediaElementSource(audio);
-        // what you hear goes straight out, untouched
-        source.connect(ctx.destination);
+        // what you hear goes out through a volume knob (only turned on iPhones, where the song's own volume does nothing)
+        const vol = ctx.createGain();
+        vol.gain.value = volumeLockedRef.current ? volumeRef.current : 1;
+        source.connect(vol);
+        vol.connect(ctx.destination);
+        volGainRef.current = vol;
         // a side copy goes to the listener (it's never heard)
         const node = ctx.createAnalyser();
         node.fftSize = 2048;
@@ -2130,6 +2155,12 @@ export default function Home() {
     } catch {}
     audio.volume = startVolume;
     setVolume(startVolume);
+    volumeRef.current = startVolume;
+    try {
+      const probe = new Audio();
+      probe.volume = 0.5;
+      volumeLockedRef.current = probe.volume !== 0.5; // an iPhone keeps it at 1
+    } catch {}
     const onEnded = () => {
       trace("song-ended", `#${trackRef.current}`);
       loadAndPlay(trackRef.current + 1);
@@ -2157,12 +2188,13 @@ export default function Home() {
     // REMEMBER WHERE YOU WERE: the song you were on and how far in. Coming back continues from there (after CLICK TO START).
     try {
       const saved = JSON.parse(localStorage.getItem("pinkmane-song") || "null") as { file?: string; time?: number } | null;
-      const i = saved?.file ? TRACKS.findIndex((t) => t.file === saved.file) : -1;
+      const list = tracksRef.current; // your songs (plus any beats you unlocked)
+      const i = saved?.file ? list.findIndex((t) => t.file === saved.file) : -1;
       const at = Math.max(0, Number(saved?.time) || 0);
       if (i > 0 || (i === 0 && at > 5)) {
         trackRef.current = i;
         setTrackIndex(i);
-        audio.src = TRACKS[i].file;
+        audio.src = list[i].file;
         if (at > 3) {
           // jump to where you were once the song file knows its length (not if that was right at the end)
           const seek = () => {
@@ -2321,7 +2353,10 @@ export default function Home() {
   const changeVolume = (value: number) => {
     setVolTipFade(true); // they found it: hide the volume tip
     setVolume(value);
+    volumeRef.current = value;
     if (songRef.current) songRef.current.volume = value;
+    // iPhone: the song's own volume is ignored, so turn the sound engine's knob
+    if (volumeLockedRef.current && volGainRef.current) volGainRef.current.gain.value = value;
     window.dispatchEvent(new CustomEvent("pinkmane-level-control", { detail: { volume: value } }));
     try {
       localStorage.setItem("pinkmane-volume", String(value));
@@ -4129,6 +4164,18 @@ activeGame === "rush" ? (
       />
       {/* THE GUN (computers only): the mouse is an aim, clicks are shots. Off inside the games and on phones. */}
       <GunCursor active={!playing && !isTouch && !fsc.isFullscreen} muted={isMuted} font={pixelFont.style.fontFamily} />
+      {/* DAILY REWARD: a card once a day after CLICK TO START (components/DailyReward.tsx) */}
+      <DailyReward
+        show={entered && !playing && !handheld}
+        font={pixelFont.style.fontFamily}
+        beats={VOID_BEATS}
+        onBeat={(file) => {
+          pendingBeatRef.current = file;
+          setUnlockedBeats((b) => (b.includes(file) ? b : [...b, file]));
+        }}
+      />
+      {/* the visit counter, bottom right (hidden while the handheld covers the screen) */}
+      <VisitCounter font={pixelFont.style.fontFamily} hidden={handheld} />
 
       <style jsx global>{`
         html,
@@ -4822,6 +4869,21 @@ activeGame === "rush" ? (
         }
 
         /* Top controls row: battery, VU bars, mute */
+        /* phones: the iPod gets a strip at the top for the battery + volume, so they don't sit on the screen's edge */
+        @media (max-width: 600px) {
+          .ipod-shell {
+            padding-top: 46px !important;
+          }
+          .top-controls {
+            top: 13px !important;
+            right: 20px !important;
+          }
+          /* a longer slider: easier to hit with a thumb */
+          .volume-slider {
+            width: 96px !important;
+            height: 20px !important;
+          }
+        }
         .top-controls {
           position: absolute;
           top: 14px;

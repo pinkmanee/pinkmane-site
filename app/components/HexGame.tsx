@@ -95,6 +95,7 @@ const SKINS: { id: string; name: string; price: number }[] = [
   { id: "fire", name: "FIRE", price: 120 },
   { id: "rainbow", name: "RAINBOW", price: 200 },
   { id: "gold", name: "SILVER", price: 320 },
+  { id: "streak", name: "STREAK", price: 1 }, // only from the 7-day daily reward (shows LOCKED until then)
 ];
 const TRAILS: { id: string; name: string; price: number; info: string }[] = [
   { id: "none", name: "NO TRAIL", price: 0, info: "JUST THE TRIANGLE" },

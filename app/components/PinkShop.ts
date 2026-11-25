@@ -917,7 +917,11 @@ export const SKIN_COLORS: Record<string, [string, string, string]> = {
   shadow: ["#1e1230", "#4a2c6a", "#8a6ab8"],
   // (the id stays "gold" so everyone who bought it keeps it, but it is SHINY SILVER now: see silverShine below)
   gold: ["#3a4058", "#c8d0e8", "#ffffff"],
+  // STREAK: only from the 7-day daily reward on the iPod (components/DailyReward.tsx)
+  streak: ["#3a0a2e", "#ff2fb0", "#ffd84a"],
 };
+// items you can't buy, only get as a daily reward (they show LOCKED in the shop until then)
+export const DAILY_ONLY: Record<string, string> = { "skin:streak": "7-DAY DAILY STREAK ONLY" };
 
 // ---------- SHINY SILVER ----------
 // The silver skin shimmers: a slow shine that comes and goes, plus a quick bright glint every 1.6 seconds.
@@ -998,6 +1002,7 @@ export function makeArcade(o: ArcadeOpts) {
     wear: shop.wear,
     preview: o.preview,
     sound: sound.shopSound,
+    locked: (id) => DAILY_ONLY[id] ?? null,
   };
   const setPause = (on: boolean) => {
     if (on && (busy() || pause.on)) return;

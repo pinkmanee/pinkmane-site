@@ -77,6 +77,7 @@ const SKINS: { id: string; name: string; price: number }[] = [
   { id: "ghost", name: "GHOST", price: 200 },
   { id: "shadow", name: "SHADOW", price: 260 },
   { id: "gold", name: "SILVER", price: 350 },
+  { id: "streak", name: "STREAK", price: 1 }, // only from the 7-day daily reward (shows LOCKED until then)
 ];
 const SHOP_ROWS: ShopRow[] = [
   { kind: "head", label: "BIRDS" },
