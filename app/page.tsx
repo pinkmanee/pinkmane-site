@@ -430,7 +430,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   },
 ];
 // The big games (the first list you see) and the mini games (behind the MINI GAMES row)
-const MAIN_GAMES = PICKER_GAMES.filter((g) => !g.mini);
+const MAIN_GAMES = PICKER_GAMES.filter((g) => !g.mini && g.id !== "kart");
 const MINI_GAMES = PICKER_GAMES.filter((g) => g.mini);
 const MINI_ROW = "Mini Games";
 
