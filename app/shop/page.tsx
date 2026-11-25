@@ -339,14 +339,6 @@ const INSTAGRAM_HANDLE = "@pinkmanee";
 // The "EXIT SHOP?" question that pops up when you press Back on the shop's main menu
 const EXIT_OPTIONS = ["YES, EXIT", "NO, STAY"];
 
-// The keys you can use, drawn under the handheld (only on computers), same as the main page
-const KEY_LEGEND: [string[], string][] = [
-  [["↑", "↓", "W", "S"], "move"],
-  [["ENTER"], "ok"],
-  [["MOUSE WHEEL"], "scroll"],
-  [["BACKSPACE"], "back"],
-];
-
 export default function Shop() {
   const router = useRouter();
   const [menu, setMenu] = useState<MenuKey>("main");
@@ -826,6 +818,18 @@ export default function Shop() {
               </div>
             ) : activeCategory ? (
               <div className="psp-placeholder">
+                {/* back to the shop list: a small pink arrow, top left (tap, click or shoot it) */}
+                <button
+                  className={`${pixelFont.className} psp-back`}
+                  onClick={goBack}
+                  onMouseDown={noFocus}
+                  data-shoot
+                  aria-label="Back"
+                >
+                  <svg viewBox="0 0 7 7" width="14" height="14" shapeRendering="crispEdges" aria-hidden="true">
+                    <path d="M3 0h1v1H3zM2 1h1v1H2zM1 2h1v1H1zM0 3h7v1H0zM1 4h1v1H1zM2 5h1v1H2zM3 6h1v1H3z" fill="currentColor" />
+                  </svg>
+                </button>
                 <div className="psp-placeholder-text">COMING SOON</div>
                 <div className="psp-placeholder-sub">
                   {activeCategory} drop pending
@@ -924,19 +928,7 @@ export default function Shop() {
           </div>
         </div>
 
-        {/* Keys you can use, drawn as white key outlines (only on computers) */}
-        <div className={`hh-keys ${pixelFont.className}`}>
-          {KEY_LEGEND.map(([keys, label]) => (
-            <span className="hh-keygroup" key={label}>
-              {keys.map((k) => (
-                <span className="hh-key" key={k}>
-                  {k}
-                </span>
-              ))}
-              <span className="hh-keylabel">{label}</span>
-            </span>
-          ))}
-        </div>
+        {/* (the key legend that used to sit under the handheld is gone: the screen is clear enough without it) */}
       </div>
 
       {/* THE GUN (computers only), the same one as on the main page: the mouse is an aim, clicks are shots,
@@ -1249,7 +1241,28 @@ export default function Shop() {
           border-radius: 3px;
         }
 
+        .psp-back {
+          position: absolute;
+          top: 10px;
+          left: 10px;
+          width: 34px;
+          height: 30px;
+          padding: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #fff;
+          background: #ff5fae;
+          border: 2px solid #fff;
+          box-shadow: 3px 3px 0 #000;
+          cursor: pointer;
+        }
+        .psp-back:active {
+          transform: translate(2px, 2px);
+          box-shadow: 1px 1px 0 #000;
+        }
         .psp-placeholder {
+          position: relative;
           flex: 1;
           display: flex;
           flex-direction: column;
