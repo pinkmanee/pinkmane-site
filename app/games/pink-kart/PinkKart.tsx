@@ -415,10 +415,16 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
           {btn("CREATE LOBBY", () => (setError(""), setScreen("create")), { big: true, icon: "create" })}
           {btn("JOIN LOBBY", () => (setError(""), setScreen("join")), { big: true, icon: "join" })}
         </div>
-        <div style={{ fontSize: 7, marginTop: 16, lineHeight: 1.9, opacity: 0.75, textAlign: "center" }}>
+        {/* the keys on a computer, the thumbs on a phone */}
+        <div className="pk-keys" style={{ fontSize: 7, marginTop: 16, lineHeight: 1.9, opacity: 0.75, textAlign: "center" }}>
           W A S D + ENTER: MENU · BACKSPACE: BACK<br />ARROWS / WASD DRIVE · SPACE ITEM · R BACK ON THE ROAD
           <br />
           HOLD GAS WHEN 2 SHOWS = ROCKET START
+        </div>
+        <div className="pk-thumbs" style={{ fontSize: 7, marginTop: 16, lineHeight: 1.9, opacity: 0.75, textAlign: "center" }}>
+          LEFT THUMB STEERS · RIGHT: ITEM AND BRAKE
+          <br />
+          THE KART DRIVES BY ITSELF · HOLD THE SCREEN WHEN 2 SHOWS = ROCKET START
         </div>
       </>,
       true,
@@ -607,6 +613,8 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
 .pk-ember { animation: pk-ember 1.4s ease-in-out infinite; }
 @keyframes pk-ember { 0%, 100% { fill: #ff8a3c; } 50% { fill: #ffe23c; } }
 @media (max-width: 420px) { .pk-ico { display: none !important; } }
+.pk-thumbs { display: none; }
+@media (hover: none) and (pointer: coarse) { .pk-keys { display: none; } .pk-thumbs { display: block; } }
 @media (prefers-reduced-motion: reduce) { .pk-smoke, .pk-ember { animation: none; } }`}</style>
       <div ref={navRef} className="pk-nav" style={{ touchAction: "auto", userSelect: "text" }}>{overlay}</div>
       {/* back to the main site, straight into its game list (hidden while racing: it would cover the lap counter) */}

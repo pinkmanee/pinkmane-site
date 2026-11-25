@@ -1586,7 +1586,8 @@ export class KartGame {
         if (me.item) text(ITEM_LABEL[me.item], UW / 2, by + 38, 6, "#ffe23c", "center");
       }
       // minimap
-      const mx = UW - 78, my = UH - 78, ms = 70 / 96;
+      // (on a phone it sits top right, under the clock: the bottom corners are where your thumbs are)
+      const mx = UW - 78, my = this.touch ? 22 : UH - 78, ms = 70 / 96;
       ctx.globalAlpha = 0.85;
       pic(this.mini, mx, my, ms);
       ctx.globalAlpha = 1;

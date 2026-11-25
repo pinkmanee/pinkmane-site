@@ -467,11 +467,22 @@ function GamePicker({
   }, [onMini]);
   const miniShow = MINI_GAMES[miniTick % Math.max(1, MINI_GAMES.length)];
 
-  // keep the highlighted row in view
+  // keep the highlighted row in view.
+  // Keys, the D-pad and swiping keep it in the middle of the list. A row you TAPPED stays exactly where it is (the list only
+  // moves if that row was cut off at the edge): before, the list slid the tapped row to the middle, so your next tap landed on
+  // a different game than the one you meant.
+  const tappedRef = useRef(false);
   useEffect(() => {
     const list = listRef.current;
     const row = list?.children[selected] as HTMLElement | undefined;
     if (!list || !row) return;
+    if (tappedRef.current) {
+      tappedRef.current = false;
+      const top = row.offsetTop, bottom = top + row.offsetHeight;
+      if (top < list.scrollTop) list.scrollTo({ top, behavior: "smooth" });
+      else if (bottom > list.scrollTop + list.clientHeight) list.scrollTo({ top: bottom - list.clientHeight, behavior: "smooth" });
+      return;
+    }
     const top = row.offsetTop - list.clientHeight / 2 + row.offsetHeight / 2;
     list.scrollTo({ top, behavior: "smooth" });
   }, [selected]);
@@ -515,7 +526,10 @@ function GamePicker({
             onClick={() => {
               if (drag.current.moved) return; // that was a swipe, not a tap
               if (i === selected) onOpen(i);
-              else onHighlight(i);
+              else {
+                tappedRef.current = true;
+                onHighlight(i);
+              }
             }}
             onMouseDown={(e) => e.preventDefault()}
           >
@@ -3252,7 +3266,8 @@ activeGame === "rush" ? (
         </div>
       </div>
 
-      {/* Keys you can use, drawn as white key outlines like under the handheld (only on computers) */}
+      {/* Keys you can use, drawn as white key outlines like under the handheld (only on computers: never on a phone or tablet) */}
+      {!isTouch && (
       <div className={`hh-keys ipod-keys ${pixelFont.className}`}>
         {(!playing
           ? [
@@ -3311,6 +3326,7 @@ activeGame === "rush" ? (
           </span>
         ))}
       </div>
+      )}
       </div>
 
       {/* PHONES + TABLETS: the game fills the screen, with big see-through thumb buttons on top */}

@@ -24,3 +24,31 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* PHONES + TABLETS
+   - no grey/blue flash when you tap something
+   - no double-tap zoom (taps also react straight away)
+   - holding your finger down doesn't select text or turn the screen blue, and doesn't pop up the copy / save menu.
+     Boxes you type in (names, lobby codes, song links) still work as normal. */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+  touch-action: manipulation;
+}
+@media (any-hover: none) {
+  body,
+  body * {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  body input,
+  body textarea,
+  body [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+}
