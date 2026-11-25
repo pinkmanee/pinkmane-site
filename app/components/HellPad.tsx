@@ -21,10 +21,12 @@ const buzz = () => {
 const send = (stick: "move" | "fire", x: number, y: number, on: boolean) =>
   window.dispatchEvent(new CustomEvent("pinkmane-hell-stick", { detail: { stick, x, y, on } }));
 
-function Joystick() {
+// the joystick. onMove: who gets the stick (Pink Hell by default; Pink Bomber passes its own)
+function Joystick({ onMove, label = "Joystick: walk" }: { onMove?: (x: number, y: number, on: boolean) => void; label?: string }) {
   const knob = useRef<HTMLSpanElement>(null);
   const move = (x: number, y: number, on: boolean) => {
-    send("move", x, y, on);
+    if (onMove) onMove(x, y, on);
+    else send("move", x, y, on);
     if (knob.current) {
       knob.current.style.transform = `translate(calc(-50% + ${x * 60}%), calc(-50% + ${y * 60}%))`;
       knob.current.classList.toggle("hp-knob-on", on);
@@ -46,7 +48,7 @@ function Joystick() {
     <div
       className="hp-joy"
       role="group"
-      aria-label="Joystick: walk"
+      aria-label={label}
       onPointerDown={(e) => {
         e.preventDefault();
         try {
@@ -120,6 +122,15 @@ export default function HellPad({ onWeapon }: Props) {
           <span>GUN</span>
         </button>
       )}
+      <PadStyle />
+    </>
+  );
+}
+
+// the look of the joystick and the buttons (shared by Pink Hell and Pink Bomber)
+function PadStyle() {
+  return (
+    <>
       <style>{`
         /* the pink joystick, bottom left */
         .hp-joy {
@@ -233,6 +244,51 @@ export default function HellPad({ onWeapon }: Props) {
           }
         }
       `}</style>
+    </>
+  );
+}
+
+// PINK BOMBER on phones + tablets: the same pink joystick (walk on the grid: it goes the way you push the most)
+// and one big BOMB button (also START / OK on the menus).
+export function BomberPad({ onDir, onBomb }: { onDir: (key: string | null) => void; onBomb: (down: boolean) => void }) {
+  const [down, setDown] = useState(false);
+  const last = useRef<string | null>(null);
+  const stick = (x: number, y: number, on: boolean) => {
+    let key: string | null = null;
+    // a little dead spot in the middle, then the way you push the most
+    if (on && Math.hypot(x, y) > 0.3) key = Math.abs(x) >= Math.abs(y) ? (x > 0 ? "ArrowRight" : "ArrowLeft") : y > 0 ? "ArrowDown" : "ArrowUp";
+    if (key === last.current) return;
+    last.current = key;
+    if (key) buzz();
+    onDir(key);
+  };
+  const bomb = (on: boolean) => {
+    if (on === down) return;
+    setDown(on);
+    onBomb(on);
+    if (on) buzz();
+  };
+  return (
+    <>
+      <Joystick onMove={stick} label="Joystick: walk" />
+      <button
+        className={`hp-fire ${down ? "hp-on" : ""}`}
+        aria-label="Bomb"
+        onPointerDown={(e) => {
+          e.preventDefault();
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {}
+          bomb(true);
+        }}
+        onPointerUp={() => bomb(false)}
+        onPointerCancel={() => bomb(false)}
+        onLostPointerCapture={() => bomb(false)}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <span>BOMB</span>
+      </button>
+      <PadStyle />
     </>
   );
 }

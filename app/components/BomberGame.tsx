@@ -1008,7 +1008,7 @@ export default function BomberGame({ actionSignal, fontFamily, muted, touch = fa
         if (s.level === 5) drawText(ctx, fontFamily, "BOARS ARE FAST!", W / 2, 84, "#ff8a5a");
       }
       if (s.mode === "running" && s.level === 1 && s.levelT >= 2 && s.levelT < 6) {
-        drawText(ctx, fontFamily, isTouch() ? "PAD = WALK   A / TAP = BOMB" : "ARROWS = WALK   SPACE = BOMB", W / 2, 100, "#ffffff");
+        drawText(ctx, fontFamily, isTouch() ? "STICK = WALK   BOMB / TAP = BOMB" : "ARROWS = WALK   SPACE = BOMB", W / 2, 100, "#ffffff");
       }
       if (s.mode === "clear" && s.t > 0.3) {
         drawText(ctx, fontFamily, "STASH SECURED!", W / 2, 54, GOLD, 16);
@@ -1024,8 +1024,8 @@ export default function BomberGame({ actionSignal, fontFamily, muted, touch = fa
           title: GAME_TITLE,
           sub: "BLOW UP THE PIGLETS",
           lines: [
-            [isTouch() ? "PAD = WALK" : "ARROWS = WALK", "#ffffff"],
-            [isTouch() ? "A / TAP = BOMB" : "SPACE = BOMB", KIT.lilac],
+            [isTouch() ? "STICK = WALK" : "ARROWS = WALK", "#ffffff"],
+            [isTouch() ? "BOMB / TAP = BOMB" : "SPACE = BOMB", KIT.lilac],
             ["CLEAR THEM ALL, FIND THE STASH", KIT.lilac],
           ],
           start: isTouch() ? "TAP TO START" : "SPACE = START",

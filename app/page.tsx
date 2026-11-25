@@ -20,6 +20,7 @@ const KongGame = dynamic(() => import("./components/KongGame"), { ssr: false });
 const BomberGame = dynamic(() => import("./components/BomberGame"), { ssr: false });
 const HellGame = dynamic(() => import("./components/HellGame"), { ssr: false });
 const HellPad = dynamic(() => import("./components/HellPad"), { ssr: false });
+const BomberPad = dynamic(() => import("./components/HellPad").then((m) => m.BomberPad), { ssr: false });
 const PinkRushGame = dynamic(() => import("./components/PinkRushGame"), { ssr: false });
 import { useFullscreen, FullscreenCornerButton, InstallHelp } from "./components/Fullscreen";
 import { trace, traceActive, writePageBeat, useTraceSetup, TraceOverlay } from "./components/Trace";
@@ -3425,6 +3426,9 @@ activeGame === "rush" ? (
           ) : gamePicker || activeGame === "jungle" || activeGame === "jet" || activeGame === "ninja" ? null : activeGame === "hell" ? (
             // Pink Hell: a pink joystick on the left, a big FIRE button + GUN on the right (components/HellPad.tsx)
             <HellPad onWeapon={() => tapKey("q")} />
+          ) : activeGame === "bomber" ? (
+            // Pink Bomber: the same pink joystick (walk) and a big BOMB button (components/HellPad.tsx)
+            <BomberPad onDir={tpSet} onBomb={tpA} />
           ) : activeGame === "super" ? (
             <div
               className="tp-walk"
@@ -3536,7 +3540,7 @@ activeGame === "rush" ? (
             </>
           )}
           {/* Pink Jungle on phones has no thumb buttons: you swipe on the screen instead */}
-          {!gamePicker && activeGame !== "jungle" && activeGame !== "hell" && activeGame !== "jet" && activeGame !== "ninja" && activeGame !== "rush" && activeGame !== "kong" && (
+          {!gamePicker && activeGame !== "jungle" && activeGame !== "hell" && activeGame !== "jet" && activeGame !== "ninja" && activeGame !== "rush" && activeGame !== "kong" && activeGame !== "bomber" && (
           <button
             className={`tp-btn tp-a ${tpAOn ? "tp-on" : ""}`}
             aria-label={activeGame === "super" ? "Jump" : "Start"}
