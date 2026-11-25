@@ -238,19 +238,38 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
 
   // ---------------------------------------------------------------- pieces of the menus
   const font = `${pixelFont}, ui-monospace, monospace`;
-  // THE LITTLE PICTURES ON THE MENU BUTTONS, drawn dot by dot. "#" = a dark dot, "o" = a white dot (the flame hair), "." = nothing.
-  // SOLO = one racer, CREATE = a group and a plus, JOIN = a group and an arrow. Change the dots here to redraw them.
-  const RACER = [".o.o.o.", ".ooooo.", ".#####.", "#######", "#..#..#", "#######", ".#####.", "..###..", ".#####.", "#######"];
-  const PLUS = [".......", ".......", ".......", "...#...", "...#...", ".#####.", "...#...", "...#...", ".......", "......."];
-  const ARROW = [".......", ".......", ".......", "...#...", "....#..", "######.", "....#..", "...#...", ".......", "......."];
+  // THE LITTLE PICTURES ON THE MENU BUTTONS, drawn dot by dot. "#" = a dark dot, "o" = a white dot, "e" = the joint's glowing tip,
+  // "." = nothing. SOLO = one racer, CREATE = three racers and a plus, JOIN = an arrow into three racers.
+  // Every racer has a joint, and a little smoke rises off its tip and wiggles (the moves are in the <style> further down).
+  const RACER = [".o.o.o..", ".ooooo..", ".#####..", "#######.", "#..#..#.", "#######.", ".#####oe", "..###...", ".#####..", "#######."];
+  const PLUS = ["", "", "", "..#..", "..#..", "#####", "..#..", "..#..", "", ""];
+  const ARROW = ["", "", "", "..#..", "...#.", "#####", "...#.", "..#..", "", ""];
   const ICONS: Record<string, string[][]> = { solo: [RACER], create: [RACER, RACER, RACER, PLUS], join: [ARROW, RACER, RACER, RACER] };
   const icon = (kind: string) => {
     const parts = ICONS[kind] ?? [];
-    const D = 3; // how big one dot is
-    const w = parts.length * 8 - 1;
+    const D = 2; // how big one dot is (in screen pixels)
+    const dots: ReactNode[] = [];
+    let x0 = 0, racer = 0;
+    parts.forEach((g, n) => {
+      const w = Math.max(...g.map((r) => r.length));
+      g.forEach((row, y) =>
+        row.split("").forEach((ch, x) => {
+          if (ch === ".") return;
+          dots.push(<rect key={`${n}-${y}-${x}`} className={ch === "e" ? "pk-ember" : undefined} x={x0 + x} y={y} width={1} height={1} fill={ch === "o" ? "#ffffff" : ch === "e" ? "#ff8a3c" : INK} />);
+        }),
+      );
+      if (g === RACER) {
+        // three puffs of smoke, one after the other, from the joint's tip; every racer starts at a different moment
+        for (let k = 0; k < 3; k++)
+          dots.push(<rect key={`${n}-smoke-${k}`} className="pk-smoke" x={x0 + 7} y={5} width={1} height={1} fill="#ffffff" style={{ animationDelay: `${-(racer * 0.55 + k * 0.6)}s` }} />);
+        racer++;
+      }
+      x0 += w + 1;
+    });
+    const w = x0 - 1;
     return (
-      <svg width={w * D} height={10 * D} viewBox={`0 0 ${w} 10`} shapeRendering="crispEdges" aria-hidden="true" style={{ flex: "none" }}>
-        {parts.map((g, n) => g.map((row, y) => row.split("").map((ch, x) => (ch === "." ? null : <rect key={`${n}-${y}-${x}`} x={n * 8 + x} y={y} width={1} height={1} fill={ch === "o" ? "#ffffff" : INK} />))))}
+      <svg className="pk-ico" width={w * D} height={10 * D} viewBox={`0 0 ${w} 10`} shapeRendering="crispEdges" aria-hidden="true" style={{ display: "block", overflow: "visible" }}>
+        {dots}
       </svg>
     );
   };
@@ -269,14 +288,17 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
         cursor: opts.off ? "default" : "pointer",
         width: opts.big ? "100%" : undefined,
         letterSpacing: 1,
-        display: opts.icon ? "flex" : undefined,
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 14,
       }}
     >
-      {opts.icon && icon(opts.icon)}
-      {label}
+      {opts.icon ? (
+        // the words stay in the middle of the button; the picture hangs just to the right of them
+        <span style={{ position: "relative", display: "inline-block" }}>
+          {label}
+          <span style={{ position: "absolute", left: "100%", top: "50%", transform: "translateY(-50%)", marginLeft: 10 }}>{icon(opts.icon)}</span>
+        </span>
+      ) : (
+        label
+      )}
     </button>
   );
   const field = (label: string, value: string, set: (v: string) => void, opts: { place?: string; max?: number; upper?: boolean; type?: string } = {}) => (
@@ -571,7 +593,19 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
       <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%", imageRendering: "pixelated" }} aria-label="PINK KART" />
       {/* the highlight for keyboard play, and slightly fatter letters everywhere */}
       <style>{`.pk-nav button:focus, .pk-nav input:focus, .pk-nav a:focus { outline: 3px solid #ffffff !important; outline-offset: 2px; }
-.pk-root, .pk-root button, .pk-root input { -webkit-text-stroke: 0.5px currentColor; }`}</style>
+.pk-root, .pk-root button, .pk-root input { -webkit-text-stroke: 0.5px currentColor; }
+.pk-smoke { animation: pk-smoke 1.8s steps(2, end) infinite; }
+@keyframes pk-smoke {
+  0% { transform: translate(0px, 0px); opacity: 0.95; }
+  25% { transform: translate(1px, -2px); opacity: 0.85; }
+  50% { transform: translate(0px, -4px); opacity: 0.65; }
+  75% { transform: translate(1px, -6px); opacity: 0.4; }
+  100% { transform: translate(0px, -8px); opacity: 0; }
+}
+.pk-ember { animation: pk-ember 1.4s ease-in-out infinite; }
+@keyframes pk-ember { 0%, 100% { fill: #ff8a3c; } 50% { fill: #ffe23c; } }
+@media (max-width: 420px) { .pk-ico { display: none !important; } }
+@media (prefers-reduced-motion: reduce) { .pk-smoke, .pk-ember { animation: none; } }`}</style>
       <div ref={navRef} className="pk-nav" style={{ touchAction: "auto", userSelect: "text" }}>{overlay}</div>
       {/* back to the main site, straight into its game list (hidden while racing: it would cover the lap counter) */}
       {!racing && (
