@@ -362,7 +362,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
       {children}
     </div>
   );
-  // CHOOSE THE MAP: one little screen per map with a moving preview (public/kart/preview-trackN.gif)
+  // CHOOSE THE MAP: one little screen per map with a moving preview (public/kart/preview-trackN.webp)
   const maps = (picked: number, onPick?: (i: number) => void) => (
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 9, textAlign: "center", marginBottom: 8, color: PALE }}>{onPick ? "CHOOSE THE MAP" : "THE MAP"}</div>
@@ -386,7 +386,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={`/kart/preview-${t.id}.gif`} alt={t.name} draggable={false} style={{ display: "block", width: "100%", aspectRatio: "16 / 9", imageRendering: "pixelated", filter: i === picked ? "none" : "brightness(0.6)" }} />
+            <img src={`/kart/preview-${t.id}.webp`} alt={t.name} draggable={false} style={{ display: "block", width: "100%", aspectRatio: "16 / 9", imageRendering: "pixelated", filter: i === picked ? "none" : "brightness(0.6)" }} />
             <div style={{ fontSize: 7, padding: "6px 2px", color: i === picked ? INK : PALE, background: i === picked ? PINK : "transparent" }}>{t.name}</div>
           </button>
         ))}
@@ -419,7 +419,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
         <div className="pk-keys" style={{ fontSize: 7, marginTop: 16, lineHeight: 1.9, opacity: 0.75, textAlign: "center" }}>
           W A S D + ENTER: MENU · BACKSPACE: BACK<br />ARROWS / WASD DRIVE · SPACE ITEM · R BACK ON THE ROAD
           <br />
-          HOLD GAS WHEN 2 SHOWS = ROCKET START
+          HOLD GAS WHEN 2 SHOWS = ROCKET START · M: SOUND ON / OFF
         </div>
         <div className="pk-thumbs" style={{ fontSize: 7, marginTop: 16, lineHeight: 1.9, opacity: 0.75, textAlign: "center" }}>
           LEFT THUMB STEERS · RIGHT: ITEM AND BRAKE

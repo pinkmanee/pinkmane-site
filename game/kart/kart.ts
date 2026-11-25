@@ -2,6 +2,16 @@
 // The ground is one big flat picture (public/kart/track1-ground.png) tilted into 3D, like old SNES racers.
 // Everything you see comes from the pictures in public/kart/ : swap a picture, the game changes.
 
+import { KartSound } from "./sound";
+
+// THE MUSIC IN PINK KART: which of your beats plays where (files in public/music). Change a file name to change the song.
+const MUSIC: Record<string, string> = {
+  menu: "/music/beat-4.mp3", // the kart menu and the lobby
+  track1: "/music/beat-2.mp3", // NIGHT FIELD
+  track2: "/music/beat-3.mp3", // VOID HIGHWAY
+  track3: "/music/beat-5.mp3", // HIGH HILLS
+};
+
 type Img = HTMLImageElement | HTMLCanvasElement;
 // DETAIL: pictures can be drawn at double detail (the items are 96×96 instead of 48×48, the plants 80×128 instead of
 // 40×64). They still show at the same size in the game, just with finer pixels. The game works it out from the size.
@@ -322,6 +332,9 @@ export class KartGame {
   private tapItem = false;
   private lay = { ox: 0, oy: 0, u: 1 };
   private cleanup: (() => void)[] = [];
+  /** music + sound effects (game/kart/sound.ts) */
+  readonly snd = new KartSound();
+  private lastBeep = -1;
 
   constructor(canvas: HTMLCanvasElement, pixelFont: string, base = "/kart/") {
     this.canvas = canvas;
@@ -351,6 +364,7 @@ export class KartGame {
       .then(() => {
         this.ready = true;
         this.reset();
+        this.snd.setMusic(MUSIC.menu);
       })
       .catch((e) => {
         this.loadError = String(e);
@@ -368,12 +382,19 @@ export class KartGame {
           this.acc -= 1 / 60;
         }
       }
+      // the engine hum follows your kart's speed (quiet in menus, paused, falling or after the finish)
+      if (this.ready) {
+        const me = this.me;
+        const racing = this.state === "race" && !this.paused && !this.menuOpen && !!me && me.fall <= 0 && !me.finished;
+        this.snd.engine(racing, me ? Math.abs(me.speed) / MAX_SPEED : 0, !!me && me.boost > 0);
+      }
       this.draw();
     };
     this.raf = requestAnimationFrame(loop);
   }
 
   destroy() {
+    this.snd.destroy();
     this.dead = true;
     cancelAnimationFrame(this.raf);
     this.cleanup.forEach((f) => f());
@@ -459,7 +480,12 @@ export class KartGame {
     const typing = (e: Event) => !!(e.target as HTMLElement | null)?.closest?.("input, textarea, select");
     const down = (e: KeyboardEvent) => {
       if (typing(e)) return;
+      this.snd.unlock();
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (k === "m" && !e.repeat) {
+        this.say(this.snd.toggleMute() ? "SOUND OFF" : "SOUND ON", 1);
+        return;
+      }
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(k)) e.preventDefault();
       // driving with the keyboard: the on-screen phone buttons go away
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "a", "s", "d", " "].includes(k)) this.touch = false;
@@ -495,6 +521,7 @@ export class KartGame {
     };
     const pd = (e: PointerEvent) => {
       if (e.pointerType === "touch") this.touch = true;
+      this.snd.unlock();
       const p = pos(e);
       // PHONES: the PAUSE button (top left) and the BACK ON THE ROAD button (shows when you're lost) are checked first,
       // so the same tap doesn't also steer or fire an item
@@ -518,7 +545,7 @@ export class KartGame {
         }
         this.pointers.delete(e.pointerId);
       } else if (this.state === "done" || (this.state === "title" && !this.overlay)) this.confirm();
-      else if (this.touch && p.x > UW / 2 && (p.y < 165 || p.x >= UW - 62)) this.tapItem = true;
+      else if (this.touch && p.x > UW / 2 && (p.y < 165 || p.x >= UW - 68)) this.tapItem = true;
     };
     const pm = (e: PointerEvent) => {
       if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, pos(e));
@@ -533,6 +560,10 @@ export class KartGame {
       this.pointers.clear();
     };
     window.addEventListener("blur", blur);
+    // another tab or the phone's home screen: the music goes quiet (and comes back when you return)
+    const vis = () => this.snd.setHidden(document.hidden);
+    document.addEventListener("visibilitychange", vis);
+    this.cleanup.push(() => document.removeEventListener("visibilitychange", vis));
     this.cleanup.push(() => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
@@ -546,7 +577,8 @@ export class KartGame {
 
   // ---- THE PAUSE MENU (the same one as every game). Solo: the race stops. Online: the others keep racing.
   private menuRows(): string[] {
-    return this.online ? ["RESUME", this.online.isHost ? "CLOSE LOBBY" : "LEAVE LOBBY", "GAME MENU"] : ["RESUME", "RESTART", "KART MENU", "GAME MENU"];
+    const sound = this.snd.muted ? "SOUND: OFF" : "SOUND: ON";
+    return this.online ? ["RESUME", this.online.isHost ? "CLOSE LOBBY" : "LEAVE LOBBY", sound, "GAME MENU"] : ["RESUME", "RESTART", "KART MENU", sound, "GAME MENU"];
   }
 
   /** Esc, P, or the page's little MENU button */
@@ -558,9 +590,11 @@ export class KartGame {
     this.menuRow = 0;
     this.paused = !this.online;
     this.keys.clear();
+    this.snd.setDuck(true);
   }
 
   private closeMenu() {
+    this.snd.setDuck(false);
     this.menuOpen = false;
     this.paused = false;
     this.keys.clear();
@@ -569,6 +603,11 @@ export class KartGame {
 
   private menuChoose() {
     const pick = this.menuRows()[this.menuRow];
+    // SOUND: ON / OFF flips right there, and the menu stays open
+    if (pick.startsWith("SOUND")) {
+      this.snd.toggleMute();
+      return;
+    }
     this.closeMenu();
     if (pick === "RESTART") this.startSolo();
     else if (pick === "KART MENU") this.onMenu();
@@ -594,8 +633,8 @@ export class KartGame {
     let s = 0;
     let brake = false;
     for (const p of this.pointers.values()) {
-      if (p.x < 200 && p.y > 90) s += p.x < 79 ? -1 : 1;
-      if (p.x >= UW / 2 && p.x < UW - 62 && p.y >= 165) brake = true;
+      if (p.x < 200 && p.y > 90) s += p.x < 97 ? -1 : 1;
+      if (p.x >= UW / 2 && p.x < UW - 68 && p.y >= 165) brake = true;
     }
     return { s: clamp(s, -1, 1), brake };
   }
@@ -856,6 +895,12 @@ export class KartGame {
       const held = !this.menuOpen && (this.keys.has("ArrowUp") || this.keys.has("w") || (this.touch && this.pointers.size > 0));
       if (!held) me.rev = -1;
       else if (me.rev < 0) me.rev = this.stateT;
+      // 3, 2, 1: a beep on each number
+      const beat = Math.floor(this.stateT);
+      if (beat !== this.lastBeep && beat < 3) {
+        this.lastBeep = beat;
+        this.snd.play("beep");
+      }
       if (this.stateT >= GO_TIME) {
         this.state = "race";
         this.stateT = 0;
@@ -869,6 +914,10 @@ export class KartGame {
           else if (k.rev >= 0) k.stall = 1.2;
         }
         this.say(me.rev >= REV_FROM ? "ROCKET START!" : me.rev >= 0 ? "TOO EARLY!" : "GO!", 1.2);
+        this.lastBeep = -1;
+        this.snd.play("go");
+        if (me.rev >= REV_FROM) this.snd.play("boost");
+        else if (me.rev >= 0) this.snd.play("stall");
         for (const k of this.karts) if (k.ctl !== "remote") k.rev = -1;
       }
       for (const k of this.karts) if (k.ctl === "remote") this.stepRemote(k);
@@ -978,7 +1027,10 @@ export class KartGame {
       const flying = k.alt > 6;
       k.tilt += ((flying ? steer * 0.45 : 0) - k.tilt) * Math.min(1, 8 * dt);
       const type = k.air > 0 || flying ? 1 : under;
-      if (type === 2 && k.boost < 0.9) k.boost = 1.1;
+      if (type === 2 && k.boost < 0.9) {
+        if (k.player) this.snd.play("boost");
+        k.boost = 1.1;
+      }
       if (type === 4) {
         // the jump: everybody gets launched fast enough to make it across
         k.air = AIR_TIME;
@@ -1086,6 +1138,7 @@ export class KartGame {
         if (k.player) {
           this.state = "done";
           this.stateT = 0;
+          this.snd.play("finish");
           this.online?.sendFinish(k.time);
         }
         if (!k.isBot && this.firstFin < 0) this.firstFin = this.clock;
@@ -1105,6 +1158,7 @@ export class KartGame {
           if (b.back <= 0 && Math.abs(b.x - k.x) < 15 && Math.abs(b.y - k.y) < 15) {
             b.back = 2.5;
             k.roulette = 0.9;
+            if (k.player) this.snd.play("pick");
           }
       }
       if (k.item && k.spin <= 0) {
@@ -1157,6 +1211,13 @@ export class KartGame {
   private say(text: string, secs: number) {
     this.flash = text;
     this.flashT = secs;
+    // the sound that goes with the message
+    if (text === "JUMP!") this.snd.play("jump");
+    else if (text === "INTO THE VOID") this.snd.play("fall");
+    else if (text === "RING!") this.snd.play("ring");
+    else if (text === "FINAL LAP") this.snd.play("lap");
+    else if (text === "OUCH") this.snd.play("hit");
+    else if (text.endsWith("MUTED!") || text.endsWith("MUTED YOU!")) this.snd.play("muted");
   }
 
   // does this screen decide what happens to this kart? (solo: every kart; online: mine, and the bots on the host's screen)
@@ -1184,6 +1245,7 @@ export class KartGame {
     if (it === "wall") Object.assign(ev, { x: k.x - dx * 24, y: k.y - dy * 24 });
     if (it === "mic") Object.assign(ev, { x: k.x + dx * 14, y: k.y + dy * 14, vx: dx, vy: dy });
     if (it === "bolt") k.boost = 1.7;
+    if (k.player) this.snd.play(it === "bolt" ? "boost" : "use");
     this.applyItem(k, ev);
     if (this.online && it !== "bolt") this.online.sendItem(ev);
   }
@@ -1198,6 +1260,7 @@ export class KartGame {
     if (ev.kind === "mic") add("mic", 7);
     if (ev.kind === "bass") {
       add("wave", 0.5);
+      if (this.me && Math.hypot(this.me.x - ev.x, this.me.y - ev.y) < 400) this.snd.play("wave");
       for (const o of this.karts) if (o !== k && Math.abs(o.alt - k.alt) < 30 && Math.hypot(o.x - ev.x, o.y - ev.y) < 150) this.hit(o, 1.1);
     }
     if (ev.kind === "mute") {
@@ -1223,6 +1286,7 @@ export class KartGame {
         t.z = Math.sin((t.t / t.life) * Math.PI) * 26;
         if (t.t >= t.life) {
           t.kind = "boom";
+          if (this.me && Math.hypot(this.me.x - t.x, this.me.y - t.y) < 450) this.snd.play("boom");
           t.t = 0;
           t.life = 0.42;
           t.z = 0;
@@ -1293,7 +1357,9 @@ export class KartGame {
   /** SOLO: a race against 5 bots */
   startSolo(track = this.trackNo) {
     if (!this.ready) return;
+    this.snd.unlock();
     this.useTrack(track);
+    this.snd.setMusic(MUSIC[TRACKS[this.trackNo].id] ?? MUSIC.menu);
     this.reset();
     this.state = "count";
     this.stateT = 0;
@@ -1306,6 +1372,8 @@ export class KartGame {
     this.things = [];
     this.menuOpen = false;
     this.paused = false;
+    this.snd.setDuck(false);
+    this.snd.setMusic(MUSIC.menu);
     this.state = "title";
     this.stateT = 0;
   }
@@ -1328,6 +1396,7 @@ export class KartGame {
   onlineGo(seats: Seat[], link: OnlineLink, track = 0) {
     if (!this.ready) return;
     this.useTrack(track);
+    this.snd.setMusic(MUSIC[TRACKS[this.trackNo].id] ?? MUSIC.menu);
     const C = this.track.center;
     const N = C.length;
     this.karts = [];
@@ -1663,19 +1732,22 @@ export class KartGame {
       }
       // phone buttons
       if (this.touch && this.state !== "done") {
+        // big see-through thumb buttons: you see the road through them, they light up pink while held
         const btn = (label: string, x: number, y: number, bw: number, bh: number, on: boolean) => {
-          ctx.fillStyle = on ? "rgba(255,70,200,0.55)" : "rgba(18,4,28,0.45)";
+          ctx.fillStyle = on ? "rgba(255,70,200,0.5)" : "rgba(18,4,28,0.22)";
           ctx.fillRect(ox + x * u, oy + y * u, bw * u, bh * u);
-          ctx.strokeStyle = "#ece6ff";
+          ctx.strokeStyle = on ? "#ffffff" : "rgba(236,230,255,0.7)";
+          ctx.lineWidth = Math.max(1, 2 * u);
           ctx.strokeRect(ox + x * u, oy + y * u, bw * u, bh * u);
-          text(label, x + bw / 2, y + bh / 2 - 5, 10, "#fff", "center");
+          ctx.lineWidth = Math.max(1, u);
+          text(label, x + bw / 2, y + bh / 2 - 6, 12, on ? "#fff" : "rgba(255,255,255,0.85)", "center");
         };
         const t = this.touchSteer();
-        btn("<", 6, UH - 96, 70, 50, t.s < 0);
-        btn(">", 82, UH - 96, 70, 50, t.s > 0);
+        btn("<", 6, UH - 112, 88, 70, t.s < 0);
+        btn(">", 100, UH - 112, 88, 70, t.s > 0);
         // BRAKE and ITEM sit right at the right edge, under your right thumb
-        btn("BRAKE", UW - 128, UH - 92, 62, 40, t.brake);
-        btn("ITEM", UW - 58, UH - 132, 50, 40, false);
+        btn("BRAKE", UW - 146, UH - 78, 76, 52, t.brake);
+        btn("ITEM", UW - 64, UH - 146, 58, 58, false);
       }
     }
     if (this.state === "count") {

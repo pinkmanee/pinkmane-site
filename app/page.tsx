@@ -61,7 +61,7 @@ const TipArrow = () => {
   );
 };
 
-const GLYPH_IMAGES = ["/glyphs/heart.gif", "/glyphs/sparkle.gif"];
+const GLYPH_IMAGES = ["/glyphs/heart.webp", "/glyphs/sparkle.webp"];
 
 // PINKMANE flying with a jetpack: made from the same pixels as the game character (pinkdude.png),
 // with a jetpack on his back. O / Y are the flame.
@@ -160,37 +160,37 @@ function makeJetDudeImage() {
 const JET_DUDE_IMAGE = makeJetDudeImage();
 
 const ITEM_ICONS: Record<string, string> = {
-  Music: "/icons/music.gif",
-  Socials: "/icons/socials.gif",
-  Merch: "/icons/merch.gif",
-  Releases: "/icons/releases.gif",
-  SoundCloud: "/icons/soundcloud.gif",
-  Spotify: "/icons/spotify.gif",
-  YouTube: "/icons/youtube.gif",
-  "Apple Music": "/icons/apple-music.gif",
-  Bandcamp: "/icons/bandcamp.gif",
-  Instagram: "/icons/instagram.gif",
-  Twitch: "/icons/twitch.gif",
+  Music: "/icons/music.webp",
+  Socials: "/icons/socials.webp",
+  Merch: "/icons/merch.webp",
+  Releases: "/icons/releases.webp",
+  SoundCloud: "/icons/soundcloud.webp",
+  Spotify: "/icons/spotify.webp",
+  YouTube: "/icons/youtube.webp",
+  "Apple Music": "/icons/apple-music.webp",
+  Bandcamp: "/icons/bandcamp.webp",
+  Instagram: "/icons/instagram.webp",
+  Twitch: "/icons/twitch.webp",
   TOPSHELF: "/icons/topshelf.gif",
-  Extras: "/icons/extras.gif",
-  Games: "/icons/games.gif",
-  "Mini Games": "/icons/games.gif",
-  "Pink Run": "/icons/pinkrun.gif",
-  "Pinkmane Void": "/icons/superpinkmane.gif",
-  "Pink Hexagon": "/icons/pinkhex.gif",
-  "Pink Maze": "/icons/pinkmaze.gif",
-  "Pink Vortex": "/icons/pinkvortex.gif",
-  "Pink Bird": "/icons/pinkbird.gif",
-  "Pink Snake": "/icons/pinksnake.gif",
-  "Pink Jungle": "/icons/pinkjungle.gif",
-  "Pink Jetpack": "/icons/pinkjet.gif",
-  "Weed Ninja": "/icons/pinkninja.gif",
-  "Kong Bong": "/icons/kongbong.gif",
-  "Pink Bomber": "/icons/pinkbomber.gif",
-  "Pink Hell": "/icons/pinkhell.gif",
-  "Pink Rush": "/icons/pinkrush.gif",
-  "Pink Kart": "/icons/pinkkart.gif",
-  Back: "/icons/arrow.gif",
+  Extras: "/icons/extras.webp",
+  Games: "/icons/games.webp",
+  "Mini Games": "/icons/games.webp",
+  "Pink Run": "/icons/pinkrun.webp",
+  "Pinkmane Void": "/icons/superpinkmane.webp",
+  "Pink Hexagon": "/icons/pinkhex.webp",
+  "Pink Maze": "/icons/pinkmaze.webp",
+  "Pink Vortex": "/icons/pinkvortex.webp",
+  "Pink Bird": "/icons/pinkbird.webp",
+  "Pink Snake": "/icons/pinksnake.webp",
+  "Pink Jungle": "/icons/pinkjungle.webp",
+  "Pink Jetpack": "/icons/pinkjet.webp",
+  "Weed Ninja": "/icons/pinkninja.webp",
+  "Kong Bong": "/icons/kongbong.webp",
+  "Pink Bomber": "/icons/pinkbomber.webp",
+  "Pink Hell": "/icons/pinkhell.webp",
+  "Pink Rush": "/icons/pinkrush.webp",
+  "Pink Kart": "/icons/pinkkart.webp",
+  Back: "/icons/arrow.webp",
 };
 
 // BEAT SYNC: everything that wiggles on the site moves to the song that's playing.
@@ -318,7 +318,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pinkmane Void",
     id: "super",
-    preview: "/previews/void-zones.gif", // a trip through every zone + your best plays
+    preview: "/previews/void-zones.webp", // a trip through every zone + your best plays
     blurb: "The main game. Run, jump and shoot through the Void, beat the bosses, stack your gold.",
     how: "left/right = walk · up = jump · down = shoot",
     psp: true,
@@ -326,7 +326,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Kart",
     id: "kart",
-    preview: "/previews/pinkkart.gif",
+    preview: "/previews/pinkkart.webp",
     blurb: "NEW · ONLINE. PINKMANE's own racing game: hand-drawn flaming karts, 3 tracks (NIGHT FIELD, VOID HIGHWAY and HIGH HILLS, where the karts grow wings). Race solo, or make a lobby code and race your friends.",
     how: "arrows = drive · space = use your item · hold gas when 2 shows = rocket start",
     psp: true,
@@ -335,7 +335,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Rush",
     id: "rush",
-    preview: "/previews/pinkrush.gif",
+    preview: "/previews/pinkrush.webp",
     blurb: "26 LEVELS. A fast platformer drawn in glowing text characters: run loops upside down, stomp bugs, ride the wind, hop over the void, climb towers, get sucked into the vortex.",
     how: "left/right = run · space = jump · down = slide (stomp in the air) · V = paper look",
     psp: true,
@@ -343,7 +343,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Jungle",
     id: "jungle",
-    preview: "/previews/jungle-worlds.gif",
+    preview: "/previews/jungle-worlds.webp",
     blurb: "Run down the old jungle path. Dodge rocks, roots and branches, BEARMANPIG is right behind you!",
     how: "left/right = lane · up = jump · down = duck",
     psp: true,
@@ -351,7 +351,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Hell",
     id: "hell",
-    preview: "/previews/hell-maps.gif",
+    preview: "/previews/hell-maps.webp",
     blurb: "Demons pour out of the portals in waves. Grab the shotgun and blast them all, BEARMANPIG waits every 5th wave!",
     how: "WASD = move · mouse = aim · click = shoot · phone: joystick + FIRE",
     psp: true,
@@ -359,7 +359,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Weed Ninja",
     id: "ninja",
-    preview: "/previews/ninja.gif",
+    preview: "/previews/ninja.webp",
     blurb: "Weed nugs in every colour fly up, you chop them in half and the kief falls out. 3 in one swipe = combo. Don't cut the bombs! Or try ZEN mode: 60 seconds, no bombs.",
     how: "drag the mouse / swipe = slice",
     psp: true,
@@ -367,7 +367,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Kong Bong",
     id: "kong",
-    preview: "/previews/kong-levels.gif",
+    preview: "/previews/kong-levels.webp",
     blurb: "BEARMANPIG throws speakers down the girders and hits his bong after every throw. Climb up, jump the speakers, grab THE STASH.",
     how: "left/right = walk · up/down = ladders · space = jump",
     psp: true,
@@ -375,7 +375,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Bomber",
     id: "bomber",
-    preview: "/previews/bomber.gif",
+    preview: "/previews/bomber.webp",
     blurb: "Drop bombs, blow up the speakers and the piglets. Clear them all and THE STASH opens. Power-ups hide in the speakers. Don't stand in your own blast!",
     how: "arrows = walk · space = drop a bomb",
     psp: true,
@@ -383,7 +383,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Hexagon",
     id: "hex",
-    preview: "/previews/hex-colours.gif",
+    preview: "/previews/hex-colours.webp",
     blurb: "The walls close in. Spin around the middle and slip through the gaps as long as you can.",
     how: "left/right = spin",
     psp: false,
@@ -392,7 +392,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Jetpack",
     id: "jet",
-    preview: "/previews/jet.gif",
+    preview: "/previews/jet.webp",
     blurb: "DEMO. Fly through the night city on a jetpack that shoots weed leaves. Dodge the zappers and the rockets!",
     how: "hold space / hold the screen = fly up · let go = fall",
     mini: true,
@@ -401,7 +401,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Maze",
     id: "maze",
-    preview: "/previews/maze.gif",
+    preview: "/previews/maze.webp",
     blurb: "Eat every dot in the maze and don't let the skulls catch you.",
     how: "arrows steer",
     mini: true,
@@ -410,7 +410,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Vortex",
     id: "vortex",
-    preview: "/previews/vortex.gif",
+    preview: "/previews/vortex.webp",
     blurb: "Spin the paddle around the vortex, keep the ball in and break the rings.",
     how: "mouse wheel / up / down = spin",
     mini: true,
@@ -419,7 +419,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Snake",
     id: "snake",
-    preview: "/previews/snake.gif",
+    preview: "/previews/snake.webp",
     blurb: "Eat, grow longer, don't bite yourself.",
     how: "arrows steer",
     mini: true,
@@ -428,7 +428,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Bird",
     id: "bird",
-    preview: "/previews/bird.gif",
+    preview: "/previews/bird.webp",
     blurb: "Flap through the gaps between the pipes. One touch and you're out.",
     how: "space / tap = flap",
     mini: true,
@@ -437,7 +437,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   {
     name: "Pink Run",
     id: "pinkrun",
-    preview: "/previews/pinkrun.gif",
+    preview: "/previews/pinkrun.webp",
     blurb: "Jump over everything in your way. How far can you get?",
     how: "space / tap = jump",
     mini: true,
@@ -449,6 +449,13 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
 const MAIN_GAMES = PICKER_GAMES.filter((g) => !g.mini);
 const MINI_GAMES = PICKER_GAMES.filter((g) => g.mini);
 const MINI_ROW = "Mini Games";
+
+// The pictures are .webp files (a lot smaller than the old .gifs). A browser that can't show one gets the old .gif instead;
+// if that's missing too, the space stays empty.
+function webpFallback(img: HTMLImageElement) {
+  if (img.src.endsWith(".webp")) img.src = img.src.replace(/\.webp$/, ".gif");
+  else img.style.visibility = "hidden";
+}
 
 // The game list on the PSP screen: rows on the left, the highlighted game's preview on the right.
 // Keys / D-pad / wheel move the highlight (the page does that), OK / A plays.
@@ -554,7 +561,7 @@ function GamePicker({
                 alt=""
                 className="gp-icon"
                 draggable={false}
-                onError={(e) => (e.currentTarget.style.visibility = "hidden")} // a missing icon file: leave the space empty
+                onError={(e) => webpFallback(e.currentTarget)} // a missing icon file: leave the space empty
               />
             )}
             <span className="gp-name">{name}</span>
@@ -572,7 +579,7 @@ function GamePicker({
                 src={game.preview}
                 alt={`${game.name} preview`}
                 draggable={false}
-                onError={(e) => (e.currentTarget.style.visibility = "hidden")} // a missing preview file: leave the space empty
+                onError={(e) => webpFallback(e.currentTarget)} // a missing preview file: leave the space empty
               />
             </button>
             <div className="gp-title">
@@ -591,7 +598,7 @@ function GamePicker({
                 src={miniShow.preview}
                 alt="Mini Games preview"
                 draggable={false}
-                onError={(e) => (e.currentTarget.style.visibility = "hidden")}
+                onError={(e) => webpFallback(e.currentTarget)}
               />
             </button>
             <div className="gp-title">
@@ -3092,7 +3099,9 @@ activeGame === "rush" ? (
                       alt=""
                       onError={(e) => {
                         const img = e.currentTarget;
-                        if (img.src.endsWith(".gif")) img.src = img.src.replace(/\.gif$/, ".png");
+                        // a browser that can't show .webp gets the old .gif, then a .png, then nothing
+                        if (img.src.endsWith(".webp")) img.src = img.src.replace(/\.webp$/, ".gif");
+                        else if (img.src.endsWith(".gif")) img.src = img.src.replace(/\.gif$/, ".png");
                         else img.style.display = "none";
                       }}
                       style={{
