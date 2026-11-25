@@ -650,18 +650,6 @@ export const PROMPTS: Prompt[] = [
     ],
   },
   {
-    id: "starwars",
-    cat: "FILM & CARTOONS",
-    q: "NAME A STAR WARS CHARACTER",
-    t: [
-      "darth vader|vader, luke skywalker|luke, yoda, han solo|han, princess leia|leia, chewbacca|chewie",
-      "r2-d2|r2d2, c-3po|c3po, obi wan kenobi|obi wan, anakin skywalker|anakin, darth maul, palpatine|emperor palpatine|the emperor, boba fett, jabba the hutt|jabba, kylo ren, rey, grogu|baby yoda",
-      "padme|padme amidala, mace windu, count dooku|dooku, qui gon jinn|qui gon, jar jar binks|jar jar, lando calrissian|lando, finn, poe dameron|poe, bb-8|bb8, the mandalorian|din djarin|mando, ahsoka|ahsoka tano, general grievous|grievous, jango fett",
-      "admiral ackbar|ackbar, wedge antilles, grand moff tarkin|tarkin, snoke, captain phasma|phasma, rose tico, kanan jarrus, ezra bridger, hera syndulla, sabine wren, cassian andor|andor, jyn erso, k-2so|k2so, saw gerrera, orson krennic, cad bane, asajj ventress, savage opress, captain rex|rex, bo katan",
-      "greedo, salacious crumb, bib fortuna, max rebo, sy snootles, nien nunb, bossk, dengar, ig-88, 4-lom, zuckuss, wicket, ponda baba, dr evazan, biggs darklighter, porkins, jek porkins, momaw nadon, figrin dan, watto, sebulba, plo koon, kit fisto, ki adi mundi, shaak ti, aayla secura, luminara unduli, barriss offee, thrawn, cara dune, moff gideon, the armorer, fennec shand, babu frik, zorii bliss",
-    ],
-  },
-  {
     id: "horror",
     cat: "FILM & CARTOONS",
     q: "NAME A HORROR MOVIE",
