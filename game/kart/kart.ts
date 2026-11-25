@@ -582,6 +582,12 @@ export class KartGame {
   }
 
   /** Esc, P, or the page's little MENU button */
+  // For game controllers (app/components/GamepadBridge.tsx): "kart" = driving (A is gas),
+  // "menu" = a menu or the results are showing (A is OK).
+  padMode(): "kart" | "menu" {
+    return (this.state === "race" || this.state === "count") && !this.menuOpen ? "kart" : "menu";
+  }
+
   openMenu() {
     if (!this.ready || this.state === "title") return;
     if (this.menuOpen) return this.closeMenu();

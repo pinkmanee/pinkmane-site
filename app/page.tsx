@@ -33,6 +33,7 @@ import DailyReward, { readDaily } from "./components/DailyReward";
 import SnippetToast from "./components/SnippetToast"; // "SNIPPET UNLOCKED!" (the rules + target scores: components/Snippets.ts)
 import { SNIPPETS, unlockedSnippets } from "./components/Snippets";
 import LiveDot from "./components/LiveDot"; // the red LIVE on the iPod while you're streaming on Twitch
+import GamepadBridge from "./components/GamepadBridge"; // game controllers: they press the same keys as the keyboard
 import DropAlert from "./components/DropAlert"; // the NOTIFY ME card (iPod: Socials > Drop Alerts)
 
 const pixelFont = Press_Start_2P({
@@ -4230,6 +4231,8 @@ activeGame === "rush" ? (
           setUnlockedSnips((s) => (s.includes(file) ? s : [...s, file]));
         }}
       />
+      {/* GAME CONTROLLERS: in the menus and in every game (the buttons per game are in components/GamepadBridge.tsx) */}
+      <GamepadBridge mode={playing ? activeGame : "menu"} ready={entered && !exiting} font={pixelFont.style.fontFamily} />
       {/* DROP ALERTS: the NOTIFY ME card */}
       <DropAlert open={dropOpen} onClose={() => setDropOpen(false)} font={pixelFont.style.fontFamily} />
       {/* the visit counter, bottom right (hidden while the handheld covers the screen) */}

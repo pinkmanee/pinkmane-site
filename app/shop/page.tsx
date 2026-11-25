@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Press_Start_2P, Silkscreen } from "next/font/google";
 import GunCursor from "../components/GunCursor";
+import GamepadBridge from "../components/GamepadBridge"; // game controllers work in the shop menus too
 import DropAlert from "../components/DropAlert"; // the NOTIFY ME card on the COMING SOON screens
 
 const pixelFont = Press_Start_2P({
@@ -938,6 +939,7 @@ export default function Shop() {
 
       {/* THE GUN (computers only), the same one as on the main page: the mouse is an aim, clicks are shots,
           RIGHT CLICK / keys 1 - 5 switch ammo. Off on phones and while the shop powers off. */}
+      <GamepadBridge mode="menu" ready={!exiting} font={pixelFont.style.fontFamily} />
       <DropAlert open={dropOpen} onClose={() => setDropOpen(false)} font={pixelFont.style.fontFamily} />
       <GunCursor active={!isTouch && !exiting && !dropOpen} muted={isMuted} font={pixelFont.style.fontFamily} />
 

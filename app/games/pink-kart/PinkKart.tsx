@@ -10,6 +10,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { KartGame, TRACKS } from "../../../game/kart/kart";
+import GamepadBridge from "../../components/GamepadBridge"; // game controllers: A = gas, B = brake, X = item, START = pause
 import { Session, MAX_RACERS, type View } from "../../../game/kart/online";
 import { cleanCode, cleanMusicLink, cleanRacerName, musicSite } from "../../../game/kart/links";
 
@@ -599,6 +600,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "#07060c", overflow: "hidden", touchAction: "none", userSelect: "none", fontFamily: font }} className="pk-root">
       <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%", imageRendering: "pixelated" }} aria-label="PINK KART" />
+      <GamepadBridge mode={() => gameRef.current?.padMode() ?? "menu"} font={font} />
       {/* the highlight for keyboard play, and slightly fatter letters everywhere */}
       <style>{`.pk-nav button:focus, .pk-nav input:focus, .pk-nav a:focus { outline: 3px solid #ffffff !important; outline-offset: 2px; }
 .pk-root, .pk-root button, .pk-root input { -webkit-text-stroke: 0.5px currentColor; }
