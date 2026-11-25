@@ -16,8 +16,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL("https://pinkmane.site"),
   title: "PINKMANE",
+  // what Google shows under the link (keep it under ~160 characters)
   description:
-    "PINKMANE is a cloud rap and trap artist. Stream on Spotify, Apple Music and SoundCloud, shop merch, and find all socials.",
+    "PINKMANE is an independent artist, producer and coder who makes his own games. Play PINKMANE VOID, his main game, listen to the music and shop merch.",
   keywords: [
     "PINKMANE",
     "PINKMANE music",
@@ -25,13 +26,17 @@ export const metadata: Metadata = {
     "PINKMANE soundcloud",
     "PINKMANE cloud rap",
     "PINKMANE trap",
+    "PINKMANE VOID",
+    "PINKMANE games",
+    "PINKMANE producer",
+    "independent artist",
   ],
   alternates: {
     canonical: "/",
   },
   openGraph: {
     title: "PINKMANE",
-    description: "Cloud rap and trap from PINKMANE. Music, releases, merch and socials.",
+    description: "PINKMANE is an independent artist, producer and coder who makes his own games. Play PINKMANE VOID, his main game, listen to the music and shop merch.",
     url: "https://pinkmane.site",
     siteName: "PINKMANE",
     type: "website",
@@ -39,7 +44,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "PINKMANE",
-    description: "Cloud rap and trap from PINKMANE. Music, releases, merch and socials.",
+    description: "PINKMANE is an independent artist, producer and coder who makes his own games. Play PINKMANE VOID, his main game, listen to the music and shop merch.",
   },
 };
 

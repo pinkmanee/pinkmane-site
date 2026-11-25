@@ -289,8 +289,22 @@ const STRUCTURED_DATA = {
   url: "https://pinkmane.site",
   genre: ["Cloud rap", "Trap"],
   description:
-    "PINKMANE is an artist and producer who codes and makes music in their free time. Cloud rap and trap, made mostly with Serum 2. Music on Spotify, YouTube, Apple Music, SoundCloud and Bandcamp.",
+    "PINKMANE is an independent artist, producer and coder who makes his own games. His main game is PINKMANE VOID, playable on pinkmane.site. The music is cloud rap and trap, made mostly with Serum 2, on Spotify, YouTube, Apple Music, SoundCloud and Bandcamp.",
   sameAs: ARTIST_LINKS.map((link) => link.url),
+};
+
+// SEO: tells Google about the main game too (made by PINKMANE, free to play in the browser)
+const GAME_DATA = {
+  "@context": "https://schema.org",
+  "@type": "VideoGame",
+  name: "PINKMANE VOID",
+  url: "https://pinkmane.site",
+  description: "PINKMANE VOID, the main game by PINKMANE: run, jump and shoot through the Void and beat the bosses. Free to play in the browser.",
+  author: { "@type": "MusicGroup", name: "PINKMANE", url: "https://pinkmane.site" },
+  gamePlatform: "Web browser",
+  applicationCategory: "Game",
+  operatingSystem: "Any",
+  offers: { "@type": "Offer", price: "0", priceCurrency: "EUR" },
 };
 
 // ---------- GAMES on the PSP ----------
@@ -2690,13 +2704,18 @@ activeGame === "rush" ? (
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
       />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(GAME_DATA) }}
+      />
 
       {/* SEO: text and links for search engines and screen readers (visually hidden) */}
       <div className="sr-only">
         <h1>PINKMANE</h1>
         <p>
-          PINKMANE is an artist and producer who codes and makes music in their
-          free time. Cloud rap and trap, made mostly with Serum 2. Releases include ENDER PEARLS and TOPSHELF.
+          PINKMANE is an independent artist, producer and coder who makes his own games. His main game is PINKMANE VOID,
+          free to play right here, next to Pink Kart, Pink Rush, Pink Jungle, Pink Hell, Weed Ninja, Kong Bong, Pink Bomber
+          and the mini games. The music is cloud rap and trap, made mostly with Serum 2. Releases include ENDER PEARLS and TOPSHELF.
           Stream PINKMANE on Spotify, YouTube, Apple Music and SoundCloud, get the music
           on Bandcamp, follow on Instagram and Twitch, and shop official merch.
         </p>
