@@ -236,15 +236,15 @@ export const PROMPTS: Prompt[] = [
     ],
   },
   {
-    id: "spice",
+    id: "strain",
     cat: "FOOD",
-    q: "NAME A SPICE OR A HERB",
+    q: "NAME A WEED STRAIN",
     t: [
-      "salt, pepper, basil, cinnamon, garlic",
-      "oregano, paprika, ginger, chili|chilli, cumin, rosemary, thyme, parsley, mint, curry|curry powder",
-      "turmeric, nutmeg, cloves, coriander|cilantro, dill, vanilla, bay leaf, sage, saffron, chives, cayenne",
-      "cardamom, star anise, fennel seeds, mustard seeds, allspice, tarragon, marjoram, lemongrass, sumac, za'atar|zaatar, garam masala, chili flakes, smoked paprika, white pepper, lovage",
-      "asafoetida|hing, fenugreek, nigella, galangal, mace, grains of paradise, long pepper, sichuan pepper, annatto|achiote, epazote, shiso|perilla, kaffir lime leaves|makrut lime, curry leaves, ajwain, amchur, black lime|loomi, mahlab, ras el hanout, berbere, savory, chervil, sorrel, hyssop, borage, angelica",
+      "og kush, purple haze, sour diesel, blue dream, white widow",
+      "gelato, girl scout cookies|gsc|cookies, gorilla glue|gg4|gorilla glue 4, pineapple express, northern lights, amnesia haze|amnesia, ak 47|ak47, wedding cake, runtz, zkittlez|skittlez|skittles, lemon haze, kush",
+      "jack herer, super lemon haze, super silver haze, granddaddy purple|gdp|grand daddy purple, green crack, durban poison, skywalker og|skywalker, bubba kush, trainwreck, maui wowie|maui waui, acapulco gold, cheese|uk cheese, blueberry, strawberry cough, bruce banner, sunset sherbet|sherbet|sherbert, do si dos|dosidos, mimosa, gmo|gmo cookies|garlic cookies, purple punch, ice cream cake, critical|critical mass, hindu kush, afghan kush|afghani, chemdawg|chemdog, haze, white rhino, gushers, biscotti, pink runtz, white runtz",
+      "headband, tangie, mac|miracle alien cookies|mac 1, london pound cake|pound cake, apple fritter, cereal milk, gary payton, jealousy, rainbow belts, rs11|rainbow sherbet 11, zoap, permanent marker, lemon cherry gelato, la confidential, la kush cake, kush mints, animal mints, animal cookies, thin mint, cherry pie, forbidden fruit, tropicana cookies|trop cookies, papaya, mango kush, banana kush, strawberry banana, grape ape, purple kush, purple urkle|urkle, mendo breath, platinum og, king louis xiii|king louis, tahoe og, sfv og, fire og, wifi og|white fire og, ghost og, alien og, stardawg, sour tangie, super skunk, skunk|skunk 1, lemon skunk, cinderella 99|c99, harlequin, acdc, charlottes web, g13, alaskan thunder fuck|atf, chocolope, laughing buddha, lambs bread|lambs breath, thai stick|thai, colombian gold, panama red, malawi gold, moby dick, gorilla zkittlez, slurricane, sundae driver, wedding crasher, peanut butter breath, oreoz, gelato 41, gelato 33|larry bird, black cherry gelato, lava cake, motor breath, grease monkey, tropicanna punch, blue cheese, blue zushi|zushi, cali kush, lemon tree, pink kush, death bubba, tom ford pink kush, black domina, blackberry kush, bubblegum, juicy fruit, ny diesel|nyc diesel, sour og, sour kush, critical kush, amnesia lemon, silver haze, neville's haze|nevilles haze, white russian, great white shark, snow white, big bud, power plant, jack frost, white berry, ice, blue mystic, kali mist",
+      "pink panties, khalifa kush|kk, biscotti mintz, superboof, blockberry, cap junky, dante's inferno|dantes inferno, runtz muffin, obama runtz, georgia pie, marshmallow og, ice cream man, pure michigan, garlic breath, gmo zkittlez, donny burger, han solo burger, dulce de uva, lemon pepper, chimera, modified grapes, grape gasoline, jet fuel gelato, candy rain, gello, y griega, mochi|mochi gelato, guava, guava gelato, gelonade, ether, runtz og, sherb cream pie, sherbacio, zacks pie, bacio gelato, moonbow, the soap, trufflez|white truffle|truffle, black truffle, horchata, jokerz, project 4516, starburst og, e85, zerbert, bubble bath, compound z, waiting game, grandi guava, pave|the pave, pressure, pink certz, la pop rocks, cheetah piss, cat piss, gelato cake, wedding pie, triangle kush, triangle mints, cuban linx, face off og, pre 98 bubba, master kush, vanilla kush, lavender, lsd, hash plant, afghan skunk, shiva skunk, hawaiian snow, utopia haze, amnesia core cut, dr grinspoon, nepalese, nevil's wreck, swazi gold, durban kush, red congolese, kilimanjaro, lemon thai, chocolate thai, hawaiian haze, mexican sativa, romulan, mk ultra, blue moonshine, purple afghani, querkle, plushberry, agent orange, pinkmane kush",
     ],
   },
   {
