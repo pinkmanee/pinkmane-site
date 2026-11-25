@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Press_Start_2P, Silkscreen } from "next/font/google";
 import GunCursor from "../components/GunCursor";
+import DropAlert from "../components/DropAlert"; // the NOTIFY ME card on the COMING SOON screens
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -371,6 +372,7 @@ export default function Shop() {
   const [exiting, setExiting] = useState(false);
   // The "EXIT SHOP?" question is open, and which answer is highlighted (0 = yes, 1 = no)
   const [confirmExit, setConfirmExit] = useState(false);
+  const [dropOpen, setDropOpen] = useState(false); // the NOTIFY ME card is open
   const [confirmSel, setConfirmSel] = useState(0);
 
   // Which background mode is picked (0, 1 or 2), remembered (shared with the main page)
@@ -844,6 +846,9 @@ export default function Shop() {
                 <div className="psp-placeholder-sub">
                   to know when it drops · X / ENTER to open
                 </div>
+                <button className={`${pixelFont.className} psp-notify-btn`} onClick={() => setDropOpen(true)} onMouseDown={noFocus} data-shoot>
+                  OR GET AN EMAIL: NOTIFY ME
+                </button>
               </div>
             ) : (
               <div className="psp-list">
@@ -933,7 +938,8 @@ export default function Shop() {
 
       {/* THE GUN (computers only), the same one as on the main page: the mouse is an aim, clicks are shots,
           RIGHT CLICK / keys 1 - 5 switch ammo. Off on phones and while the shop powers off. */}
-      <GunCursor active={!isTouch && !exiting} muted={isMuted} font={pixelFont.style.fontFamily} />
+      <DropAlert open={dropOpen} onClose={() => setDropOpen(false)} font={pixelFont.style.fontFamily} />
+      <GunCursor active={!isTouch && !exiting && !dropOpen} muted={isMuted} font={pixelFont.style.fontFamily} />
 
       <style jsx global>{`
         /* PHONES: holding a finger on a button used to pop up "Copy" and select its text.
@@ -1285,6 +1291,19 @@ export default function Shop() {
         }
 
         /* "FOLLOW ON IG" button on the COMING SOON screens: pink, gently pulsing so it gets noticed */
+        .psp-notify-btn {
+          margin-top: 12px;
+          padding: 7px 10px;
+          font-size: 8px;
+          color: #fff;
+          background: transparent;
+          border: 2px solid #ff5fd2;
+          cursor: pointer;
+        }
+        .psp-notify-btn:hover,
+        .psp-notify-btn:active {
+          background: #d63cc8;
+        }
         .psp-ig-btn {
           margin-top: 6px;
           border: none;

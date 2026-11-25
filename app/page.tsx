@@ -30,6 +30,10 @@ import TrackVideo from "./components/TrackVideo";
 import { useHasMouse } from "./components/useHasMouse";
 import VisitCounter from "./components/VisitCounter";
 import DailyReward, { readDaily } from "./components/DailyReward";
+import SnippetToast from "./components/SnippetToast"; // "SNIPPET UNLOCKED!" (the rules + target scores: components/Snippets.ts)
+import { SNIPPETS, unlockedSnippets } from "./components/Snippets";
+import LiveDot from "./components/LiveDot"; // the red LIVE on the iPod while you're streaming on Twitch
+import DropAlert from "./components/DropAlert"; // the NOTIFY ME card (iPod: Socials > Drop Alerts)
 
 const pixelFont = Press_Start_2P({
   weight: "400",
@@ -173,6 +177,7 @@ const ITEM_ICONS: Record<string, string> = {
   Bandcamp: "/icons/bandcamp.webp",
   Instagram: "/icons/instagram.webp",
   Twitch: "/icons/twitch.webp",
+  "Drop Alerts": "/icons/bell.webp",
   TOPSHELF: "/icons/topshelf.webp", // a small copy of the TOPSHELF cover
   Extras: "/icons/extras.webp",
   Games: "/icons/games.webp",
@@ -1146,8 +1151,18 @@ export default function Home() {
   const inVoid = playing;
   // beats unlocked with the daily rewards join your songs on the iPod (outside the games too)
   const [unlockedBeats, setUnlockedBeats] = useState<string[]>(() => (typeof window === "undefined" ? [] : readDaily().beats));
-  const menuTracks = useMemo(() => [...TRACKS, ...VOID_BEATS.filter((b) => unlockedBeats.includes(b.file))], [unlockedBeats]);
-  const tracks = inVoid ? GAME_TRACKS : menuTracks;
+  // UNRELEASED SNIPPETS: beat a game's target score and one joins the songs, in the menus AND in the games
+  // (the rules, the target scores and the snippet list are in components/Snippets.ts)
+  const [unlockedSnips, setUnlockedSnips] = useState<string[]>([]);
+  useEffect(() => {
+    unlockedSnippets().then(setUnlockedSnips);
+  }, []);
+  const snipTracks = useMemo(() => SNIPPETS.filter((t) => unlockedSnips.includes(t.file)), [unlockedSnips]);
+  const menuTracks = useMemo(() => [...TRACKS, ...VOID_BEATS.filter((b) => unlockedBeats.includes(b.file)), ...snipTracks], [unlockedBeats, snipTracks]);
+  const gameTracks = useMemo(() => [...GAME_TRACKS, ...snipTracks], [snipTracks]);
+  const tracks = inVoid ? gameTracks : menuTracks;
+  // DROP ALERTS: the NOTIFY ME card is open (iPod: Socials > Drop Alerts)
+  const [dropOpen, setDropOpen] = useState(false);
   const tracksRef = useRef(tracks);
   tracksRef.current = tracks;
   // PHONES + TABLETS: on a phone or tablet, Pink Maze and Pinkmane Void get their own full-screen
@@ -1345,7 +1360,7 @@ export default function Home() {
   const menus = {
     main: ["Music", "Socials", "Merch", "Games"],
     music: ["SoundCloud", "Spotify", "YouTube", "Apple Music", "Bandcamp", "Back"],
-    socials: ["Instagram", "Twitch", "Releases", "Back"],
+    socials: ["Instagram", "Twitch", "Drop Alerts", "Releases", "Back"],
     releases: [...RELEASES.map((r) => r.name), "Back"],
     // Games: the main game first, the rest live one step deeper in Mini Games
     // Games: shown on the PSP as a list with previews (see PICKER_GAMES)
@@ -1404,12 +1419,31 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unlockedBeats]);
 
+  // A snippet was just unlocked by beating a target score: it's in the song list now (also inside the games), so play it
+  const pendingSnipRef = useRef<string | null>(null);
+  useEffect(() => {
+    const file = pendingSnipRef.current;
+    if (!file) return;
+    pendingSnipRef.current = null;
+    if (gameSongRef.current) return; // a level's own song is playing: leave it, the snippet is in the list for later
+    const i = tracksRef.current.findIndex((t) => t.file === file);
+    if (i >= 0) loadAndPlay(i);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unlockedSnips]);
+
   // Opening or leaving a game swaps the song list (menus: all your songs, games: ENDER PEARLS + the beats).
   // The first GAME_KEEP songs are in both lists, so they just keep playing. Anything else that's on isn't in the new list:
   // go to the first song of the new list (and keep it paused if the music was paused).
   useEffect(() => {
     if (trackRef.current < GAME_KEEP) return;
     const audio = songRef.current;
+    // the song that's on is in the new list too (an unlocked snippet or beat): keep it playing, just at its new place
+    const at = audio ? tracksRef.current.findIndex((t) => audio.src.endsWith(t.file)) : -1;
+    if (at >= 0) {
+      trackRef.current = at;
+      setTrackIndex(at);
+      return;
+    }
     if (audio && !audio.paused) {
       loadAndPlay(0);
     } else {
@@ -1660,6 +1694,7 @@ export default function Home() {
       if (item === "Twitch") {
         window.open("https://www.twitch.tv/pinkmanee", "_blank");
       }
+      if (item === "Drop Alerts") setDropOpen(true);
       if (item === "Releases") {
         setMenu("releases");
         setSelected(0);
@@ -3007,8 +3042,11 @@ activeGame === "rush" ? (
               backgroundPosition: "center",
               padding: "clamp(14px, 4vw, 20px) 0",
               flexShrink: 0,
+              position: "relative",
             }}
           >
+            {/* the red LIVE while you're streaming on Twitch (a tap opens the stream) */}
+            <LiveDot font={pixelFont.style.fontFamily} />
             <h2
               style={{
                 textAlign: "center",
@@ -4173,7 +4211,7 @@ activeGame === "rush" ? (
         fontFamily={pixelFont.style.fontFamily}
       />
       {/* THE GUN (computers only): the mouse is an aim, clicks are shots. Off inside the games and on phones. */}
-      <GunCursor active={!playing && !isTouch && !fsc.isFullscreen} muted={isMuted} font={pixelFont.style.fontFamily} />
+      <GunCursor active={!playing && !isTouch && !fsc.isFullscreen && !dropOpen} muted={isMuted} font={pixelFont.style.fontFamily} />
       {/* DAILY REWARD: a card once a day after CLICK TO START (components/DailyReward.tsx) */}
       <DailyReward
         show={entered && !playing && !handheld}
@@ -4184,6 +4222,16 @@ activeGame === "rush" ? (
           setUnlockedBeats((b) => (b.includes(file) ? b : [...b, file]));
         }}
       />
+      {/* UNRELEASED SNIPPETS: the message when a target score is beaten (or how close the run was) */}
+      <SnippetToast
+        font={pixelFont.style.fontFamily}
+        onUnlock={(file) => {
+          pendingSnipRef.current = file;
+          setUnlockedSnips((s) => (s.includes(file) ? s : [...s, file]));
+        }}
+      />
+      {/* DROP ALERTS: the NOTIFY ME card */}
+      <DropAlert open={dropOpen} onClose={() => setDropOpen(false)} font={pixelFont.style.fontFamily} />
       {/* the visit counter, bottom right (hidden while the handheld covers the screen) */}
       <VisitCounter font={pixelFont.style.fontFamily} hidden={handheld} />
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { reportScore } from "./Snippets"; // unreleased snippets: a run that beats the target score unlocks one
 
 // ONLINE TOP 10 for the mini games. It looks exactly like PINKMANE VOID's Top 10:
 // pale green screen, GOLD 1st, SILVER 2nd, BRONZE 3rd, every row wiggles a little, a shine sweeps over the gold one,
@@ -155,6 +156,7 @@ export function ScorePanel({
   apiRef.current = {
     gameOver: (score, runTime) => {
       run.current = { score: Math.floor(score), runTime };
+      reportScore(game, Math.floor(score));
       viewOnly.current = false;
       setMessage("");
       go("loading");

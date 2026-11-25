@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { reportScore } from "./Snippets"; // unreleased snippets: an infinite run that beats the target score unlocks one
 import { trace } from "./Trace"; // the phone flight recorder: writes down what happened before a crash (does nothing on a computer)
 
 type Props = {
@@ -5492,6 +5493,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       s.flashText = "TRY AGAIN!";
       return;
     }
+    reportScore("super", Math.floor(s.score));
     if (qualifies(Math.floor(s.score))) {
       s.mode = "entry";
       setMessage("");
