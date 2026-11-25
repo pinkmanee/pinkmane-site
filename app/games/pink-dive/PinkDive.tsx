@@ -91,6 +91,20 @@ function useBeeps() {
 
 // ---------------------------------------------------------------- the sea (canvas)
 // depth = how far down the camera is, in score points (0 = at the surface, 700 = the trench)
+// THE DIVE SCENE, made from PINKMANE's own game art:
+//   at the surface: the VOID ghost ship (public/game/ghostship.png) sails past the sunset
+//   PINKMANE himself (public/game/pinkdude.png) drives the pink sub, smoking under a glass dome
+//   the deeper you sink, the stranger it gets:
+//     ~110-320  the weed forest (the plants from Pink Kart, public/kart/props.png)
+//     ~250-450  skeletons swimming around (the ship's crew)
+//     ~380-560  lost Pink Kart items drifting down (skull bomb, lightning bolt, the eye, a sigil)
+//     ~500+     ghost PINKMANE (public/game/pinkdude-ghost.png) haunting the dark
+//     the floor: a sunken Pink Kart between the weed plants
+// (the numbers are scores: 1 point = 3 pixels of water)
+const SKELETON = [
+  ["..www..", ".wkwkw.", "..www..", "...w...", "w.www.w", ".wwwww.", "...w...", "..www..", "..w.w..", ".w...w."],
+  ["..www..", ".wkwkw.", "..www..", "...w...", "..www..", ".wwwww.", "w..w..w", "..www..", "..w.w..", "..w.w.."],
+];
 function Sea({ depth }: { depth: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const target = useRef(depth);
@@ -98,10 +112,38 @@ function Sea({ depth }: { depth: number }) {
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return;
+    // drawn at 240 x 135 "big pixels"; the canvas itself is twice that, so the game sprites keep their own detail
     const W = 240, H = 135;
-    cv.width = W;
-    cv.height = H;
+    cv.width = W * 2;
+    cv.height = H * 2;
     const c = cv.getContext("2d")!;
+    c.imageSmoothingEnabled = false;
+    c.setTransform(2, 0, 0, 2, 0, 0);
+    const load = (src: string) => {
+      const im = new Image();
+      im.src = src;
+      return im;
+    };
+    const DUDE = load("/game/pinkdude.png");
+    const GHOST = load("/game/pinkdude-ghost.png");
+    const SHIP = load("/game/ghostship.png");
+    const PROPS = load("/kart/props.png");
+    const KART = load("/kart/kart-mane-side.png");
+    const JUNK = ["bomb", "bolt", "mute", "vinyl"].map((n) => load(`/kart/item-${n}.png`)); // skull bomb, lightning, the eye, a sigil
+    const ready = (im: HTMLImageElement) => im.complete && im.naturalWidth > 0;
+    // a picture from a sheet: (sx, sy, sw, sh) on the sheet -> (x, y, w, h) on screen, optionally mirrored
+    const spr = (im: HTMLImageElement, sx: number, sy: number, sw: number, sh: number, x: number, y: number, w: number, h: number, flip = false) => {
+      if (!ready(im)) return;
+      if (!flip) {
+        c.drawImage(im, sx, sy, sw, sh, Math.round(x), Math.round(y), w, h);
+        return;
+      }
+      c.save();
+      c.translate(Math.round(x) + w, Math.round(y));
+      c.scale(-1, 1);
+      c.drawImage(im, sx, sy, sw, sh, 0, 0, w, h);
+      c.restore();
+    };
     let raf = 0;
     let cam = target.current;
     const start = performance.now();
@@ -110,8 +152,12 @@ function Sea({ depth }: { depth: number }) {
       const x = Math.sin(n * 127.1) * 43758.5453;
       return x - Math.floor(x);
     };
-    const fish = Array.from({ length: 46 }, (_, i) => ({ y: 40 + rnd(i) * 2300, x: rnd(i + 50) * W, s: rnd(i + 99) < 0.5 ? -1 : 1, v: 4 + rnd(i + 7) * 10, kind: Math.floor(rnd(i + 3) * 3) }));
+    const fish = Array.from({ length: 40 }, (_, i) => ({ y: 40 + rnd(i) * 2300, x: rnd(i + 50) * W, s: rnd(i + 99) < 0.5 ? -1 : 1, v: 4 + rnd(i + 7) * 10, kind: Math.floor(rnd(i + 3) * 3) }));
     const specks = Array.from({ length: 60 }, (_, i) => ({ y: rnd(i + 200) * 2400, x: rnd(i + 300) * W, v: 0.5 + rnd(i + 400) }));
+    const weeds = Array.from({ length: 16 }, (_, i) => ({ y: 330 + i * 40 + rnd(i + 500) * 20, left: i % 2 === 0, pic: 3 + (i % 3), off: rnd(i + 600), back: i % 4 === 3 }));
+    const skels = Array.from({ length: 7 }, (_, i) => ({ y: 760 + i * 80 + rnd(i + 700) * 40, x: rnd(i + 710), v: 3 + rnd(i + 720) * 5, s: i % 2 ? 1 : -1 }));
+    const junk = Array.from({ length: 6 }, (_, i) => ({ y: 1150 + i * 85, x: 0.15 + rnd(i + 800) * 0.7, pic: i % 4 }));
+    const ghosts = Array.from({ length: 4 }, (_, i) => ({ y: 1520 + i * 150, x: 0.2 + rnd(i + 900) * 0.6, flip: i % 2 === 1 }));
     const rect = (x: number, y: number, w: number, h: number, col: string) => {
       c.fillStyle = col;
       c.fillRect(Math.round(x), Math.round(y), w, h);
@@ -126,91 +172,157 @@ function Sea({ depth }: { depth: number }) {
       const upright = box.height > box.width * 1.1;
       const seenW = Math.min(W, Math.max(40, (H * box.width) / Math.max(1, box.height)));
       const seenX = (W - seenW) / 2;
-      // 1 score point = 3 pixels of water.
       const camY = cam * 3; // pixels of water above the sub
-      const subY = upright ? 100 : 62;
+      const subY = upright ? 100 : 60;
       const surface = subY - camY - 2; // where the waterline is on screen
-      // sky (dusk pink) above the water
+      const at = (worldY: number) => worldY - camY + subY; // a depth in the sea -> a height on the screen
+      c.clearRect(0, 0, W, H);
+      // ---- sky (dusk pink), the sun and the ghost ship ----
       if (surface > 0) {
         for (let y = 0; y < Math.min(H, surface); y++) rect(0, y, W, 1, lerp([54, 18, 74], [255, 122, 200], Math.max(0, Math.min(1, y / 60))));
-        // the sun, half sunk in the sea
-        const sunX = seenX + seenW * 0.72;
+        const sunX = seenX + seenW * (upright ? 0.18 : 0.93);
         for (let dy = 0; dy < 13; dy++) {
           const hw = Math.round(Math.sqrt(13 * 13 - dy * dy));
           rect(sunX - hw, surface - 1 - dy, hw * 2, 1, dy < 4 ? "#ffd0ee" : "#ffeaf8");
         }
-        // clouds
         for (let i = 0; i < 4; i++) {
           const cx = ((i * 73 + t * (3 + i)) % (W + 60)) - 30, cy = 10 + i * 9 + surface - 60;
           rect(cx, cy, 26, 4, "rgba(255,255,255,0.22)");
           rect(cx + 6, cy - 3, 14, 3, "rgba(255,255,255,0.22)");
         }
+        // the VOID ghost ship, rocking on the waves (only the ship: the cloud it sails on in VOID is left off)
+        // (upright, the sub is in the middle: the ship stays out at the right edge, partly cut off)
+        const shipX = upright ? seenX + seenW - 8 + Math.sin(t * 0.15) * 3 : seenX + seenW * 0.8 + Math.sin(t * 0.15) * 6;
+        const rock = Math.round(Math.sin(t * 1.3) * 0.8);
+        spr(SHIP, 0, 0, 72, 46, shipX - 18, surface - 20 + rock, 36, 23);
       }
-      // water: gets darker the deeper you are
+      // ---- water: darker the deeper you are ----
       const from = Math.max(0, Math.ceil(surface));
       for (let y = from; y < H; y += 3) {
-        // how deep this row is (0 at the top, 1 at the trench); rows lower on the screen are a touch darker
         const k = Math.min(1, Math.max(0, (y - surface) / 3) / 700 + (y / H) * 0.1);
         rect(0, y, W, 3, k < 0.3 ? lerp([214, 74, 178], [98, 38, 140], k / 0.3) : lerp([98, 38, 140], [8, 4, 18], Math.min(1, (k - 0.3) / 0.5)));
       }
-      // the waterline: little waves
       if (surface > -4 && surface < H) for (let x = 0; x < W; x += 4) rect(x, surface + Math.round(Math.sin(x * 0.2 + t * 2)), 4, 2, "#ffc4ee");
-      // light rays near the top
       if (camY < 500) {
         c.globalAlpha = Math.max(0, 0.07 - camY / 7000);
         for (let i = 0; i < 9; i++) rect(8 + i * 27 + Math.sin(t * 0.4 + i) * 5, Math.max(0, surface + 2), 3 + (i % 3) * 2, H, "#ffe6f7");
         c.globalAlpha = 1;
       }
-      // specks drifting up
-      for (const s of specks) {
-        const y = ((s.y - t * 6 * s.v) % 2400 + 2400) % 2400;
-        const sy = y - camY + subY;
-        if (sy > Math.max(0, surface + 3) && sy < H) rect(s.x, sy, 1, 1, "rgba(255,220,250,0.35)");
+      const wet = (y: number, h: number) => y + h > Math.max(0, surface + 3) && y < H; // on screen and under water
+      for (const sp of specks) {
+        const y = (((sp.y - t * 6 * sp.v) % 2400) + 2400) % 2400;
+        const sy = at(y);
+        if (wet(sy, 1)) rect(sp.x, sy, 1, 1, "rgba(255,220,250,0.35)");
       }
-      // fish shadows swimming by
+      // ---- the weed forest (back row first, dimmer) ----
+      const weed = (back: boolean) => {
+        for (const w of weeds) {
+          if (w.back !== back) continue;
+          const base = at(w.y);
+          if (!wet(base - 32, 34)) continue;
+          const sway = Math.sin(t * 0.9 + w.off * 6) * 1.2;
+          const x = back ? seenX + seenW * (0.25 + w.off * 0.5) : w.left ? seenX - 3 + w.off * 6 : seenX + seenW - 17 - w.off * 6;
+          c.globalAlpha = back ? 0.45 : 1;
+          spr(PROPS, w.pic * 80, 0, 80, 128, x + sway, base - 32, 20, 32, !w.left);
+          c.globalAlpha = 1;
+          if (!back) rect(x - 2, base - 1, 24, 3, "#14061f"); // the rock it grows on
+        }
+      };
+      weed(true);
+      // ---- fish ----
       for (const f of fish) {
-        const sy = f.y - camY + subY;
-        if (sy < Math.max(0, surface + 6) || sy > H) continue;
-        const x = (((f.x + t * f.v * f.s) % (W + 30)) + W + 30) % (W + 30) - 15;
+        const sy = at(f.y);
+        if (!wet(sy, 4)) continue;
+        const x = ((((f.x + t * f.v * f.s) % (W + 30)) + W + 30) % (W + 30)) - 15;
         const col = f.y > 1200 ? "rgba(255,95,210,0.5)" : "rgba(20,6,32,0.55)";
         const L = f.kind === 2 ? 9 : 6;
         rect(x, sy, L, f.kind === 1 ? 3 : 2, col);
         rect(x + (f.s > 0 ? -2 : L), sy - 1, 2, f.kind === 1 ? 5 : 4, col);
-        if (f.y > 1200) rect(x + (f.s > 0 ? L - 2 : 1), sy, 1, 1, "#fff"); // deep ones glow
+        if (f.y > 1200) rect(x + (f.s > 0 ? L - 2 : 1), sy, 1, 1, "#fff");
       }
-      // the sea floor, at the very bottom
-      const floor = 700 * 3 - camY + subY + 40;
-      if (floor < H) {
-        rect(0, floor, W, H - floor, "#05020a");
-        for (let x = 0; x < W; x += 9) rect(x, floor - (rnd(x) * 5) | 0, 5, 6, "#0c0518");
-        for (let x = 6; x < W; x += 31) rect(x, floor - 9 - ((rnd(x + 1) * 6) | 0), 2, 10, PINK);
+      // ---- the ship's crew: skeletons swimming ----
+      for (const k of skels) {
+        const sy = at(k.y) + Math.sin(t * 1.5 + k.x * 9) * 2;
+        if (!wet(sy, 10)) continue;
+        const x = seenX + ((((k.x * seenW + t * k.v * k.s) % (seenW + 20)) + seenW + 20) % (seenW + 20)) - 10;
+        const rows = SKELETON[Math.floor(t * 2 + k.x * 5) % 2];
+        rows.forEach((row, ry) => {
+          for (let rx = 0; rx < row.length; rx++) {
+            const ch = row[k.s > 0 ? rx : row.length - 1 - rx];
+            if (ch !== ".") rect(x + rx, sy + ry, 1, 1, ch === "w" ? "#efe6f4" : "#14061f");
+          }
+        });
       }
-      // THE PINK SUB (bobs a little; a headlight once it's dark)
-      const bob = Math.round(Math.sin(t * 2) * 1.5);
-      const sx = Math.round(upright ? W / 2 - 14 : seenX + seenW * 0.1), sy2 = subY + bob;
-      if (cam > 250) {
-        c.globalAlpha = 0.16;
-        for (let i = 0; i < 26; i++) rect(sx + 30 + i * 3, sy2 + 5 - i * 0.5, 3, 4 + i, "#fff0a8");
+      // ---- lost Pink Kart items drifting down ----
+      for (const j of junk) {
+        const sy = at(j.y + Math.sin(t * 0.7 + j.pic) * 4);
+        if (!wet(sy, 20)) continue;
+        spr(JUNK[j.pic], 0, 0, 96, 96, seenX + seenW * j.x + Math.sin(t * 0.5 + j.x * 7) * 3, sy, 20, 20);
+      }
+      // ---- ghost PINKMANE haunting the dark ----
+      for (const g of ghosts) {
+        const sy = at(g.y) + Math.sin(t * 1.1 + g.x * 8) * 3;
+        if (!wet(sy, 18)) continue;
+        const gx = seenX + seenW * g.x + Math.sin(t * 0.4 + g.x * 4) * 8;
+        // a faint glow: the same ghost, a pixel bigger all round, very see-through
+        c.globalAlpha = 0.12;
+        spr(GHOST, (Math.floor(t * 2 + g.x * 3) % 2) * 24, 0, 24, 35, gx - 1, sy - 1, 14, 19.5, g.flip);
+        c.globalAlpha = 0.5 + Math.sin(t * 3 + g.x * 11) * 0.15;
+        spr(GHOST, (Math.floor(t * 2 + g.x * 3) % 2) * 24, 0, 24, 35, gx, sy, 12, 17.5, g.flip);
         c.globalAlpha = 1;
       }
-      rect(sx + 4, sy2 + 2, 24, 10, "#ff46c8");
-      rect(sx + 2, sy2 + 4, 28, 6, "#ff46c8");
-      rect(sx + 4, sy2 + 2, 24, 2, "#ff9be8");
-      rect(sx + 4, sy2 + 10, 24, 2, "#b0208c");
-      rect(sx + 12, sy2 - 3, 8, 5, "#ff46c8"); // tower
-      rect(sx + 15, sy2 - 7, 2, 4, "#ffd6ef"); // periscope
-      rect(sx + 15, sy2 - 7, 5, 2, "#ffd6ef");
-      rect(sx + 20, sy2 + 4, 5, 5, "#12041c"); // window
-      rect(sx + 21, sy2 + 5, 2, 2, "#9fe8ff");
-      rect(sx + 10, sy2 + 5, 4, 4, "#12041c");
-      rect(sx + 11, sy2 + 6, 1, 1, "#9fe8ff");
-      rect(sx - 2, sy2 + 3, 4, 8, "#b0208c"); // tail
+      weed(false);
+      // ---- the sea floor: a sunken Pink Kart between the plants ----
+      const floor = at(700 * 3 + 40);
+      if (floor < H) {
+        rect(0, floor, W, H - floor, "#05020a");
+        for (let x = 0; x < W; x += 9) rect(x, floor - ((rnd(x) * 5) | 0), 5, 6, "#0c0518");
+        spr(KART, 2, 0, 116, 67, seenX + seenW * 0.55, floor - 14, 29, 17);
+        for (let i = 0; i < 3; i++) spr(PROPS, (3 + i) * 80, 0, 80, 128, seenX + seenW * (0.08 + i * 0.3), floor - 30, 18, 29, i === 1);
+      }
+      // ---- PINKMANE in the pink sub ----
+      const bob = Math.round(Math.sin(t * 2) * 1.5);
+      const sx = Math.round(upright ? W / 2 - 21 : seenX + seenW * 0.08), sy2 = subY - 6 + bob;
+      if (cam > 250) {
+        // the headlight once it's dark
+        c.globalAlpha = 0.14;
+        for (let i = 0; i < 28; i++) rect(sx + 44 + i * 3, sy2 + 11 - i * 0.5, 3, 4 + i, "#fff0a8");
+        c.globalAlpha = 1;
+      }
+      // PINKMANE (the third picture has the smoke coming off the joint), behind the glass
+      const frame = Math.floor(t * 1.6) % 4 === 3 ? 2 : Math.floor(t * 1.6) % 2;
+      spr(DUDE, frame * 24, 0, 24, 23, sx + 12, sy2 - 4, 12, 11.5);
+      // the glass dome
+      const gx = sx + 18, gy = sy2 + 8;
+      for (let dy = 0; dy <= 11; dy++) {
+        const hw = Math.round(Math.sqrt(11 * 11 - dy * dy));
+        rect(gx - hw, gy - dy, hw * 2, 1, "rgba(170,240,255,0.16)");
+        rect(gx - hw, gy - dy, 1, 1, "rgba(220,250,255,0.8)");
+        rect(gx + hw - 1, gy - dy, 1, 1, "rgba(220,250,255,0.8)");
+      }
+      rect(gx - 6, gy - 8, 2, 1, "#ffffff"); // a shine on the glass
+      rect(gx - 7, gy - 7, 1, 2, "#ffffff");
+      // the hull
+      rect(sx + 3, sy2 + 8, 36, 12, "#ff46c8");
+      rect(sx + 1, sy2 + 10, 40, 8, "#ff46c8");
+      rect(sx + 3, sy2 + 8, 36, 2, "#ff9be8");
+      rect(sx + 3, sy2 + 18, 36, 2, "#b0208c");
+      rect(sx + 41, sy2 + 12, 2, 4, "#ff46c8"); // nose
+      rect(sx + 30, sy2 + 12, 4, 4, "#12041c"); // porthole
+      rect(sx + 31, sy2 + 13, 2, 1, "#9fe8ff");
+      rect(sx + 8, sy2 + 13, 3, 3, "#12041c");
+      rect(sx + 9, sy2 + 13, 1, 1, "#9fe8ff");
+      rect(sx - 2, sy2 + 10, 4, 8, "#b0208c"); // tail
       const spin = Math.floor(t * 12) % 2;
-      rect(sx - 5, sy2 + (spin ? 2 : 5), 3, spin ? 10 : 4, "#ffd6ef"); // propeller
-      // bubbles from the propeller
+      rect(sx - 5, sy2 + (spin ? 9 : 12), 3, spin ? 10 : 4, "#ffd6ef"); // propeller
       for (let i = 0; i < 5; i++) {
         const bt = (t * 1.2 + i * 0.2) % 1;
-        rect(sx - 8 - bt * 14, sy2 + 6 - bt * 16 + Math.sin(i + t * 3) * 2, 2, 2, `rgba(255,255,255,${0.7 * (1 - bt)})`);
+        rect(sx - 8 - bt * 14, sy2 + 13 - bt * 16 + Math.sin(i + t * 3) * 2, 2, 2, `rgba(255,255,255,${0.7 * (1 - bt)})`);
+      }
+      // smoke bubbles leaving the top of the dome
+      for (let i = 0; i < 3; i++) {
+        const bt = (t * 0.5 + i / 3) % 1;
+        if (surface < sy2 - 4 - bt * 30) rect(gx + 2 + Math.sin(t * 2 + i * 2) * 2, sy2 - 4 - bt * 30, 2, 2, `rgba(230,220,240,${0.6 * (1 - bt)})`);
       }
       raf = requestAnimationFrame(draw);
     };
