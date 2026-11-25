@@ -3,6 +3,9 @@
 // Everything you see comes from the pictures in public/kart/ : swap a picture, the game changes.
 
 type Img = HTMLImageElement | HTMLCanvasElement;
+// DETAIL: pictures can be drawn at double detail (the items are 96×96 instead of 48×48, the plants 80×128 instead of
+// 40×64). They still show at the same size in the game, just with finer pixels. The game works it out from the size.
+const resOf = (im: Img) => (im as { pkRes?: number }).pkRes ?? 1;
 type TrackData = {
   size: number;
   center: [number, number][];
@@ -386,6 +389,8 @@ export class KartGame {
     const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", ...Object.keys(CARS).flatMap((c) => VIEWS.map((v) => `kart-${c}-${v}`)), ...ITEMS.map((i) => `item-${i}`)];
     const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n))]);
     this.packs = packs;
+    for (const it of ITEMS) (this.img[`item-${it}`] as { pkRes?: number }).pkRes = this.img[`item-${it}`].width / 48;
+    (this.img["props"] as { pkRes?: number }).pkRes = this.img["props"].height / 64;
     this.useTrack(0);
     // kart colours
     // skin 0 = the drawing as it is, skins 1 - 7 = the same kart in another colour
@@ -756,6 +761,7 @@ export class KartGame {
       px[i + 2] = Math.round(L * 0.42);
     }
     x.putImageData(d, 0, 0);
+    (c as { pkRes?: number }).pkRes = resOf(im);
     return c;
   }
 
@@ -1522,7 +1528,10 @@ export class KartGame {
     ctx.rect(ox, oy, UW * u, UH * u);
     ctx.clip();
     const me = this.me;
-    const pic = (im: Img, x: number, y: number, s: number, sx = 0, sw = im.width) => ctx.drawImage(im, sx, 0, sw, im.height, ox + x * u, oy + y * u, sw * s * u, im.height * s * u);
+    const pic = (im: Img, x: number, y: number, s: number, sx = 0, sw = im.width / resOf(im)) => {
+      const r = resOf(im);
+      ctx.drawImage(im, sx * r, 0, sw * r, im.height, ox + x * u, oy + y * u, sw * s * u, (im.height / r) * s * u);
+    };
 
     // blinded by MUTE
     if (me.blind > 0 && this.state === "race") {
@@ -1977,15 +1986,15 @@ export class KartGame {
         b.save();
         b.translate(Math.round(p.px), y + Math.round(h / 2));
         b.rotate(s.rot);
-        b.drawImage(s.img, s.sx, 0, s.sw, s.sh, -Math.round(w / 2), -Math.round(h / 2), Math.round(w), Math.round(h));
+        b.drawImage(s.img, s.sx * resOf(s.img), 0, s.sw * resOf(s.img), s.sh * resOf(s.img), -Math.round(w / 2), -Math.round(h / 2), Math.round(w), Math.round(h));
         b.restore();
       } else if (s.flip) {
         b.save();
         b.translate(x + Math.round(w), y);
         b.scale(-1, 1);
-        b.drawImage(s.img, s.sx, 0, s.sw, s.sh, 0, 0, Math.round(w), Math.round(h));
+        b.drawImage(s.img, s.sx * resOf(s.img), 0, s.sw * resOf(s.img), s.sh * resOf(s.img), 0, 0, Math.round(w), Math.round(h));
         b.restore();
-      } else b.drawImage(s.img, s.sx, 0, s.sw, s.sh, x, y, Math.round(w), Math.round(h));
+      } else b.drawImage(s.img, s.sx * resOf(s.img), 0, s.sw * resOf(s.img), s.sh * resOf(s.img), x, y, Math.round(w), Math.round(h));
       b.globalAlpha = 1;
     }
     // ---- the pixel burst at the bottom of a fall: a white flash, then squares flying apart
