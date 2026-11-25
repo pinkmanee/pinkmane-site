@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, SKIN_COLORS, drawOverScreen, drawStartScreen, makeArcade, rainbow, type Arcade, type ShopRow } from "./PinkShop";
+import { isPhoneOrTablet } from "./device";
 
 // PINK HEXAGON: walls close in on the middle, slip through the gaps with your little triangle. Survive as long as you can.
 //   hold ← → (or A D) / click wheel / hold the left or right half of the screen = go round
@@ -195,7 +196,7 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    const coarse = isPhoneOrTablet(); // a real phone or tablet (a computer with a touch screen still says CLICK)
     const isTouch = () => touchRef.current || coarse;
     const held = { ccw: false, cw: false };
     let touchSide = 0; // -1 = holding the left half, 1 = the right half

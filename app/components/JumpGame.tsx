@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, drawOverScreen, drawStartScreen, makeArcade, repaintPink, type Arcade, type ShopRow } from "./PinkShop";
+import { isPhoneOrTablet } from "./device";
 
 // PINK RUN: the very first game. Pinkmane runs, you jump over the spikes, speaker boxes and bats.
 //   SPACE / OK / ↑ / tap = jump. Press it again in the air = DOUBLE JUMP.
@@ -163,7 +164,7 @@ export default function JumpGame({ jumpSignal, fontFamily, muted, theme, touch =
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.imageSmoothingEnabled = false;
-    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    const coarse = isPhoneOrTablet(); // a real phone or tablet (a computer with a touch screen still says CLICK)
     const isTouch = () => touchRef.current || coarse;
 
     // ---------- the pictures: Pinkmane in every outfit, and a white outline for the dark look ----------

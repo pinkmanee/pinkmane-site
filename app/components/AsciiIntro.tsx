@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AsciiLayer, type AsciiStyle, type Warp } from "../../game/engine/ascii";
 import { DUDE } from "./Spiral";
+import { isPhoneOrTablet } from "./device";
 
 // THE INTRO: the first thing you see on pinkmane.site (once per visit).
 // Code rain falls, PINKMANE prints himself line by line in glowing text characters with the name under him,
@@ -263,7 +264,7 @@ export default function AsciiIntro() {
         ctx.globalAlpha = 0.55 * smooth(t / 0.6);
         ctx.fillStyle = "#cfc6ff";
         ctx.font = `bold 12px ${MONO}`;
-        ctx.fillText(window.matchMedia?.("(pointer: coarse)").matches ? "TAP TO SKIP" : "CLICK TO SKIP", W / 2, H - 22);
+        ctx.fillText(isPhoneOrTablet() ? "TAP TO SKIP" : "CLICK TO SKIP", W / 2, H - 22);
         ctx.globalAlpha = 1;
       }
 

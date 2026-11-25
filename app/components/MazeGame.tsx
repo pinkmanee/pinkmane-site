@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, SKIN_COLORS, drawOverScreen, drawStartScreen, makeArcade, type Arcade, type ShopRow } from "./PinkShop";
+import { isPhoneOrTablet } from "./device";
 
 // PINK MAZE: pac-man with Pinkmane's face. Eat every seed, the haters chase you, a WEED LEAF makes them scared (eat them!).
 //   ARROWS / W A S D / swipe ANYWHERE on a phone / click wheel = steer      SPACE / OK / tap = start
@@ -237,7 +238,7 @@ export default function MazeGame({ actionSignal, spinRef, fontFamily, muted, tou
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    const coarse = isPhoneOrTablet(); // a real phone or tablet (a computer with a touch screen still says CLICK)
     const isTouch = () => touchRef.current || coarse;
 
     let maze = MAZES[0];

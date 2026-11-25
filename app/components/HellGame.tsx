@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
+import { isPhoneOrTablet } from "./device";
 import {
   KIT,
   PAUSE_ROWS,
@@ -803,7 +804,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
     let canvasTouch = -1; // the finger that touched the game screen itself (other fingers are on the joystick / buttons)
     // a phone / tablet: the start screen says TAP. A laptop with a touch screen can say it's "touch" too,
     // so as soon as a real mouse / touchpad moves, it's a computer again (the crosshair shows on the menus as your pointer)
-    let touchy = (window.matchMedia?.("(pointer: coarse)").matches ?? false) && !document.documentElement.classList.contains("has-mouse");
+    let touchy = isPhoneOrTablet() && !document.documentElement.classList.contains("has-mouse");
     const onMouseSeen = (e: PointerEvent) => {
       if (e.pointerType === "mouse") touchy = false;
     };

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, SKIN_COLORS, drawOverScreen, drawStartScreen, makeArcade, rainbow, type Arcade, type ShopRow } from "./PinkShop";
+import { isPhoneOrTablet } from "./device";
 
 // PINK SNAKE: the snake smokes a joint and eats weed leaves. Every leaf = longer + faster.
 //   ARROWS / W A S D / swipe / click wheel = steer      SPACE / OK / tap = start
@@ -135,7 +136,7 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted, to
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    const coarse = isPhoneOrTablet(); // a real phone or tablet (a computer with a touch screen still says CLICK)
     const isTouch = () => touchRef.current || coarse;
 
     // ---------- state ----------

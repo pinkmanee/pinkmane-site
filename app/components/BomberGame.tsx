@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, SKIN_COLORS, silverGlow, drawOverScreen, drawStartScreen, drawText, makeArcade, type Arcade, type ShopRow } from "./PinkShop";
+import { isPhoneOrTablet } from "./device";
 
 // PINK BOMBER: Bomberman, PINKMANE style. Drop BOMBS, blow up the speaker boxes, blow up the piglets + haters.
 // When every enemy is gone THE STASH opens (it's hidden under one of the speakers): walk onto it = next level.
@@ -249,7 +250,7 @@ export default function BomberGame({ actionSignal, fontFamily, muted, touch = fa
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    const coarse = isPhoneOrTablet(); // a real phone or tablet (a computer with a touch screen still says CLICK)
     const isTouch = () => touchRef.current || coarse;
     const held = { left: false, right: false, up: false, down: false };
     // the direction pressed last wins (so turning a corner while holding two keys feels right)

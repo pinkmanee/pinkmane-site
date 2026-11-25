@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, SKIN_COLORS, silverGlow, drawOverScreen, drawStartScreen, drawText, makeArcade, type Arcade, type ShopRow } from "./PinkShop";
+import { isPhoneOrTablet } from "./device";
 
 // KONG BONG: Donkey Kong, PINKMANE style. BEARMANPIG sits at the top, throws speakers down the girders,
 // and after EVERY throw he hits his bong. Climb the ladders, jump over the speakers, reach THE STASH at the very top.
@@ -463,7 +464,7 @@ export default function KongGame({ actionSignal, fontFamily, muted, touch = fals
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    const coarse = isPhoneOrTablet(); // a real phone or tablet (a computer with a touch screen still says CLICK)
     const isTouch = () => touchRef.current || coarse;
     const held = { left: false, right: false, up: false, down: false };
 
