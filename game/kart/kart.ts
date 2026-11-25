@@ -335,7 +335,9 @@ export class KartGame {
     this.bctx.imageSmoothingEnabled = false;
     this.frame = this.bctx.createImageData(BW, BH - HORIZON);
     this.frame32 = new Uint32Array(this.frame.data.buffer);
-    this.touch = typeof window !== "undefined" && (window.location.search.includes("touch") || window.matchMedia("(pointer: coarse)").matches);
+    // the on-screen buttons are for phones and tablets only: a device whose MAIN input is a finger and that has no mouse.
+    // (A laptop with a touch screen still counts as a computer.) Touching the screen turns them on, pressing a key turns them off.
+    this.touch = typeof window !== "undefined" && (/[?&]touch\b/.test(window.location.search) || window.matchMedia("(hover: none) and (pointer: coarse)").matches);
   }
 
   // ------------------------------------------------------------ start / stop
@@ -455,6 +457,8 @@ export class KartGame {
       if (typing(e)) return;
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(k)) e.preventDefault();
+      // driving with the keyboard: the on-screen phone buttons go away
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "a", "s", "d", " "].includes(k)) this.touch = false;
       if (e.repeat) return;
       // the pause menu is open: up / down pick a row, Enter or Space choose, Esc closes it
       if (this.menuOpen) {
