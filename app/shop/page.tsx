@@ -364,7 +364,11 @@ export default function Shop() {
   useEffect(() => {
     const forced = new URLSearchParams(window.location.search).get("touch") !== null;
     const mq = window.matchMedia("(pointer: coarse)");
-    const update = () => setIsTouch(forced || mq.matches);
+    // the same check as the home page: a touch screen only counts on a real phone or tablet. A computer with a touch screen
+    // (or one Windows reports as "touch") keeps the gun. (iPads call themselves a Mac, but a Mac with a touch screen is an iPad)
+    const ua = navigator.userAgent;
+    const phoneOrTablet = /Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+    const update = () => setIsTouch(forced || (mq.matches && phoneOrTablet));
     update();
     mq.addEventListener?.("change", update);
     return () => mq.removeEventListener?.("change", update);
