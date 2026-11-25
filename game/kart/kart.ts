@@ -1750,6 +1750,47 @@ export class KartGame {
     }
 
     // ---- everything standing on the ground
+    // ---- THE FLIGHT PATH: where you fly, the way is marked in the air. Two dotted rails show the lane,
+    // and arrows down the middle point the way and run forwards. (Only on maps with a flying part.)
+    const altOf = this.track.alt;
+    if (altOf) {
+      const C = this.track.center, NC = C.length;
+      const run = Math.floor(performance.now() / 90);
+      const dot = (wx: number, wy: number, h: number, col: string, big: number) => {
+        const ex = wx - camX, ey = wy - camY;
+        const z = ex * dx + ey * dy;
+        if (z < 30 || z > 900) return;
+        const sc = FOCAL / z;
+        const size = Math.max(1, Math.round(big * sc));
+        b.fillStyle = col;
+        b.fillRect(Math.round(BW / 2 + (ex * rx + ey * ry) * sc - size / 2), Math.round(HORIZON + (camH - h) * sc - size / 2), size, size);
+      };
+      for (let i = 0; i < NC; i++) {
+        const h = altOf[i] || 0;
+        if (h < 6) continue;
+        const p = C[i], q = C[(i + 1) % NC];
+        let tx = q[0] - p[0], ty = q[1] - p[1];
+        const tl = Math.hypot(tx, ty) || 1;
+        tx /= tl;
+        ty /= tl;
+        const nx = -ty, ny = tx;
+        const lane = this.track.halfw[i] * 0.8;
+        // the rails: one light-blue dot each side
+        dot(p[0] + nx * lane, p[1] + ny * lane, h - 6, "#7ad8ff", 2.4);
+        dot(p[0] - nx * lane, p[1] - ny * lane, h - 6, "#7ad8ff", 2.4);
+        // the arrows: a "V" of dots pointing forwards, every 5th point; they light up one after the other
+        if (i % 5 === 0) {
+          const lit = (((i / 5 - run) % 3) + 3) % 3 === 0;
+          const col = lit ? "#ffffff" : "#ffe23c";
+          for (let k = 0; k <= 4; k++) {
+            const back = k * 4.5, out = k * 5;
+            dot(p[0] + tx * (12 - back) + nx * out, p[1] + ty * (12 - back) + ny * out, h - 6, col, lit ? 2.6 : 2);
+            if (k) dot(p[0] + tx * (12 - back) - nx * out, p[1] + ty * (12 - back) - ny * out, h - 6, col, lit ? 2.6 : 2);
+          }
+        }
+      }
+    }
+
     const list: Sprite[] = [];
     const bursts: { x: number; y: number; t: number; col: [number, number, number] }[] = [];
     const now = performance.now();
