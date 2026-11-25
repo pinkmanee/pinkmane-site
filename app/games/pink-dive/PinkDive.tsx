@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TIERS, type Prompt } from "../../../game/dive/prompts";
 import { BANDS, PER_DAY, SECONDS, bandOf, check, diveNumber, practicePrompts, promptsForDive, type Hit } from "../../../game/dive/daily";
+import { buzz } from "../../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 const PINK = "#ff5fd2";
 const INK = "#0b0614";
@@ -427,6 +428,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     const hit = check(p, typed);
     if (hit) lock(hit);
     else {
+      buzz("soft");
       setNote({ text: `"${typed.trim().toUpperCase().slice(0, 24)}" ISN'T ON THE LIST - TRY ANOTHER`, bad: true });
       setTyped("");
       beep(160, 110, 0.18, "square", 0.08);

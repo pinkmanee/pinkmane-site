@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, SKIN_COLORS, drawOverScreen, drawStartScreen, makeArcade, rainbow, type Arcade, type ShopRow } from "./PinkShop";
 import { isPhoneOrTablet } from "./device";
+import { buzz } from "../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // PINK HEXAGON: walls close in on the middle, slip through the gaps with your little triangle. Survive as long as you can.
 //   hold ← → (or A D) / click wheel / hold the left or right half of the screen = go round
@@ -345,6 +346,7 @@ export default function HexGame({ actionSignal, spinRef, fontFamily, muted, touc
     pressRef.current = press;
 
     const die = () => {
+      buzz();
       s.mode = "dying";
       s.t = 0;
       s.shake = 0.4;

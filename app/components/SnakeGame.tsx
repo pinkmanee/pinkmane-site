@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, SKIN_COLORS, drawOverScreen, drawStartScreen, makeArcade, rainbow, type Arcade, type ShopRow } from "./PinkShop";
 import { isPhoneOrTablet } from "./device";
+import { buzz } from "../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // PINK SNAKE: the snake smokes a joint and eats weed leaves. Every leaf = longer + faster.
 //   ARROWS / W A S D / swipe / click wheel = steer      SPACE / OK / tap = start
@@ -329,6 +330,7 @@ export default function SnakeGame({ actionSignal, spinRef, fontFamily, muted, to
     };
 
     const die = () => {
+      buzz();
       s.mode = "dying";
       s.t = 0;
       s.shake = 0.35;

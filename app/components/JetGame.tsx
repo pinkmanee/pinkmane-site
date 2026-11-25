@@ -21,6 +21,7 @@ import {
   silverShine,
   silverStep,
 } from "./PinkShop";
+import { buzz } from "../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // PINK JETPACK (DEMO): an endless side-scrolling jetpack game.
 // Pinkmane flies through the night city. His jetpack shoots WEED LEAVES downwards, that's what pushes him up.
@@ -719,6 +720,7 @@ export default function JetGame({ actionSignal, fontFamily, muted, touch = false
     };
 
     const die = (why: string, boom: boolean) => {
+      buzz();
       // SHIELD upgrade: it breaks instead of you
       if (s.mode === "running" && s.shield > 0) {
         s.shield--;

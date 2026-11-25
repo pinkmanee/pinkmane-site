@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, SKIN_COLORS, silverGlow, drawOverScreen, drawStartScreen, drawText, makeArcade, type Arcade, type ShopRow } from "./PinkShop";
 import { isPhoneOrTablet } from "./device";
+import { buzz } from "../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // PINK BOMBER: Bomberman, PINKMANE style. Drop BOMBS, blow up the speaker boxes, blow up the piglets + haters.
 // When every enemy is gone THE STASH opens (it's hidden under one of the speakers): walk onto it = next level.
@@ -684,6 +685,7 @@ export default function BomberGame({ actionSignal, fontFamily, muted, touch = fa
       if (s.mode === "dying") {
         if (s.t > 1.4) {
           s.lives -= 1;
+          buzz();
           if (s.lives <= 0) gameOver();
           else {
             buildLevel();

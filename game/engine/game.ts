@@ -12,6 +12,7 @@ import { AsciiLayer, PLAYER_STYLE, WORLD_STYLE, type Liquid, type Warp } from ".
 import { Camera } from "./camera";
 import { Input } from "./input";
 import { Terrain } from "./terrain";
+import { buzz } from "../buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 type LookName = "ascii" | "paper";
 const LOOK_KEY = "pinkrush-look"; // the look you picked is remembered
@@ -642,6 +643,7 @@ export class Game {
 
   // fell out of the level: back at the last flag you passed (or the start)
   private respawn() {
+    buzz();
     const cp = this.level.checkpoints?.[this.checkpoint];
     const [x, y] = cp ? [cp.x, cp.y] : this.level.spawn;
     this.player.respawn(x, y);

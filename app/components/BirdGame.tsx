@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, SKIN_COLORS, drawOverScreen, drawStartScreen, drawText, makeArcade, type Arcade, type ShopRow } from "./PinkShop";
 import { isPhoneOrTablet } from "./device";
+import { buzz } from "../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // PINK BIRD: flappy bird with a pink mohawk, flying between towers of speakers.
 //   SPACE / OK / ↑ / tap = flap
@@ -331,6 +332,7 @@ export default function BirdGame({ actionSignal, fontFamily, muted, touch = fals
     pressRef.current = press;
 
     const die = () => {
+      buzz();
       s.mode = "dying";
       s.t = 0;
       s.shake = 0.35;

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { reportScore } from "./Snippets"; // unreleased snippets: an infinite run that beats the target score unlocks one
 import { trace } from "./Trace"; // the phone flight recorder: writes down what happened before a crash (does nothing on a computer)
+import { buzz } from "../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 type Props = {
   // Goes up by 1 every time the player presses OK / Enter / Space (= jump)
@@ -5422,6 +5423,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
 
   const hurt = (pit = false) => {
     const s = state.current;
+    buzz();
     if (s.levelMode) s.hitsTaken += 1; // (any hit at all: it ends the NO-HIT star)
     const inFight = s.bossState === "fight";
     if (!pit && s.shield > 0) {
@@ -5493,6 +5495,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
       s.flashText = "TRY AGAIN!";
       return;
     }
+    buzz("end");
     reportScore("super", Math.floor(s.score));
     if (qualifies(Math.floor(s.score))) {
       s.mode = "entry";

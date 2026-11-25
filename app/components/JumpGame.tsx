@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, drawOverScreen, drawStartScreen, makeArcade, repaintPink, type Arcade, type ShopRow } from "./PinkShop";
 import { isPhoneOrTablet } from "./device";
+import { buzz } from "../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // PINK RUN: the very first game. Pinkmane runs, you jump over the spikes, speaker boxes and bats.
 //   SPACE / OK / ↑ / tap = jump. Press it again in the air = DOUBLE JUMP.
@@ -351,6 +352,7 @@ export default function JumpGame({ jumpSignal, fontFamily, muted, theme, touch =
     pressRef.current = press;
 
     const die = () => {
+      buzz();
       s.mode = "dying";
       s.t = 0;
       s.shake = 0.35;
@@ -505,6 +507,7 @@ export default function JumpGame({ jumpSignal, fontFamily, muted, theme, touch =
         if (!hit || s.invuln > 0) continue;
         if (s.shield) {
           s.shield = false;
+          buzz();
           s.invuln = 1;
           burst(o.x + o.w / 2, o.y + o.h / 2, 18, [GREEN, DARK_GREEN, PINK], 110);
           o.x = -100;

@@ -25,6 +25,7 @@ import {
   silverShine,
   silverStep,
 } from "./PinkShop";
+import { buzz } from "../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // PINK JUNGLE: an endless 3-lane jungle runner. Pinkmane runs down an old mossy temple path
 // and BEARMANPIG (half bear, half pig, half man) chases him.
@@ -1379,6 +1380,7 @@ export default function JungleGame({ actionSignal, spinRef, fontFamily, muted, t
     const stumble = (o: Obstacle) => {
       o.hit = true;
       if (s.invuln > 0) return;
+      buzz();
       const p = playerScreen();
       if (o.kind === "rock" && THEMES[themeIndexAt(o.at)].volcano) burst(p.x, p.y - 10, 16, ["#ffd24a", "#ff7a1a", "#e0301a"]);
       else if (o.kind === "rock") burst(p.x, p.y - 10, 14, ["#6b7d63", "#53634e", mossAt(o.at)[1]]);

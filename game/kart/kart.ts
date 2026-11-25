@@ -3,6 +3,7 @@
 // Everything you see comes from the pictures in public/kart/ : swap a picture, the game changes.
 
 import { KartSound } from "./sound";
+import { buzz } from "../buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // THE MUSIC IN PINK KART: which of your beats plays where (files in public/music). Change a file name to change the song.
 const MUSIC: Record<string, string> = {
@@ -1047,6 +1048,7 @@ export class KartGame {
         if (k.player) this.say("JUMP!", 0.8);
       }
       if (type === 3) {
+        if (k.player) buzz();
         k.fall = FALL_TIME + BURST_TIME;
         k.boost = 0;
         k.spin = 0;
@@ -1233,6 +1235,7 @@ export class KartGame {
 
   private hit(k: Kart, secs: number) {
     if (!this.mine(k) || k.left || k.safe > 0 || k.finished) return;
+    if (k.player) buzz();
     k.spin = SPIN_TIME;
     k.spinA = 0;
     k.boost = 0;

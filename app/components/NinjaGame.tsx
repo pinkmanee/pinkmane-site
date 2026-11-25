@@ -21,6 +21,7 @@ import {
   drawPauseMenu,
   pauseTapRow,
 } from "./PinkShop";
+import { buzz } from "../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // WEED NINJA: a weed slicing game. Weed nugs in all kinds of colours fly up from the bottom of the screen, you chop them in half
 // (and the kief falls out).
@@ -1334,6 +1335,7 @@ export default function NinjaGame({ actionSignal, fontFamily, muted, touch = fal
             s.misses.push({ x: Math.max(8, Math.min(W - 8, t.x)), life: 1.2 }); // (ZEN MODE: no lives lost)
           } else if (!t.bomb && s.mode === "running") {
             s.lives--;
+            buzz();
             s.misses.push({ x: Math.max(8, Math.min(W - 8, t.x)), life: 1.2 });
             sfx.miss();
             if (s.lives <= 0) gameOver("DROPPED 3!");

@@ -30,6 +30,7 @@ import {
   type ShopHooks,
   type ShopRow,
 } from "./PinkShop";
+import { buzz } from "../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // PINK HELL: a top-down 2D shooter, a bit like the old 90s demon shooters.
 // Pinkmane is stuck in a hell dungeon and the demons come out of the glowing portals in waves.
@@ -1267,6 +1268,7 @@ export default function HellGame({ actionSignal, spinRef, fontFamily, muted }: P
     const hurtPlayer = (dmg: number, fromX: number, fromY: number) => {
       if (s.mode !== "play") return;
       s.hp -= dmg;
+      buzz();
       s.hurt = 0.35;
       s.shake = Math.max(s.shake, 0.2);
       const a = Math.atan2(s.py - fromY, s.px - fromX);

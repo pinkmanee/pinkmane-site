@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { reportScore } from "./Snippets"; // unreleased snippets: a run that beats the target score unlocks one
+import { buzz } from "../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // ONLINE TOP 10 for the mini games. It looks exactly like PINKMANE VOID's Top 10:
 // pale green screen, GOLD 1st, SILVER 2nd, BRONZE 3rd, every row wiggles a little, a shine sweeps over the gold one,
@@ -157,6 +158,7 @@ export function ScorePanel({
     gameOver: (score, runTime) => {
       run.current = { score: Math.floor(score), runTime };
       reportScore(game, Math.floor(score));
+      buzz("end"); // the run is over: the long buzz (every mini game ends through here)
       viewOnly.current = false;
       setMessage("");
       go("loading");

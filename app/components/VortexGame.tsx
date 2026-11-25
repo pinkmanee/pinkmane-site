@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { ScorePanel, type ScoreApi } from "./Scoreboard";
 import { KIT, SKIN_COLORS, drawOverScreen, drawStartScreen, makeArcade, rainbow, type Arcade, type ShopRow } from "./PinkShop";
 import { isPhoneOrTablet } from "./device";
+import { buzz } from "../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // PINK VORTEX: breakout in a circle. Your paddle runs around the outside, the brick rings spin in the middle.
 //   click wheel / hold ↑ ↓ (or A D) / drag on the screen = move the paddle      SPACE / OK / tap = launch
@@ -395,6 +396,7 @@ export default function VortexGame({ actionSignal, spinRef, fontFamily, muted, t
     // the last ball is gone
     const loseLife = (x: number, y: number) => {
       s.lives -= 1;
+      buzz();
       s.wide = 0;
       s.leaves = [];
       if (s.lives <= 0) {
