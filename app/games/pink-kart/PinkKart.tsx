@@ -37,6 +37,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
   const [owner, setOwner] = useState("");
   const [stream, setStream] = useState(false);
   const [bots, setBots] = useState(true);
+  const [needLink, setNeedLink] = useState(false); // the song box only shows after a stream lobby asked for it
 
   // ---- start the game, read ?join=CODE and ?local
   useEffect(() => {
@@ -86,17 +87,24 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
     const n = cleanRacerName(name);
     if (!n) return setError("TYPE A NAME");
     if (mode === "join" && cleanCode(code).length !== 4) return setError("THE CODE IS 4 LETTERS");
-    if (link && !cleanMusicLink(link)) return setError("THAT LINK ISN'T SOUNDCLOUD, YOUTUBE OR SPOTIFY");
+    // the song link is only sent when the song box is showing (a stream lobby asked for it)
+    const song = mode === "join" && (needLink || local) ? link : "";
+    if (song && !cleanMusicLink(song)) return setError("THAT LINK ISN'T SOUNDCLOUD, YOUTUBE OR SPOTIFY");
     setBusy(true);
     try {
-      const s = await Session.open({ mode, name: n, link: link || undefined, code: cleanCode(code), stream, bots, owner: owner || undefined, local });
+      const s = await Session.open({ mode, name: n, link: song || undefined, code: cleanCode(code), stream, bots, owner: owner || undefined, local });
       remember();
       s.attach(game);
       sessionRef.current = s;
       s.subscribe((v) => setView(v));
       setScreen("online");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "SOMETHING WENT WRONG");
+      const msg = e instanceof Error ? e.message : "SOMETHING WENT WRONG";
+      if (mode === "join" && msg.includes("LINK") && !needLink) {
+        // a stream lobby: now the song box appears
+        setNeedLink(true);
+        setError("THIS IS A STREAM LOBBY: PASTE YOUR SONG LINK");
+      } else setError(msg);
     } finally {
       setBusy(false);
     }
@@ -269,7 +277,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
         {title("JOIN LOBBY")}
         {field("LOBBY CODE", code, (v) => setCode(cleanCode(v)), { max: 4, upper: true, place: "ABCD" })}
         {field("YOUR NAME", name, setName, { max: 12, upper: true, place: "NAME" })}
-        {field("YOUR SONG (NEEDED FOR STREAM LOBBIES)", link, setLink, { place: "SOUNDCLOUD / YOUTUBE / SPOTIFY LINK" })}
+        {(needLink || local) && field("YOUR SONG", link, setLink, { place: "SOUNDCLOUD / YOUTUBE / SPOTIFY LINK" })}
         {needsOwner && field("OWNER CODE (TO RACE AS PINKMANE)", owner, setOwner, { type: "password" })}
         {errorLine}
         <div style={{ display: "flex", gap: 10, marginTop: 16 }}>

@@ -43,9 +43,10 @@ export async function POST(req: Request) {
   const id = typeof body.id === "string" ? body.id : "";
   if (!/^[a-z0-9]{8,24}$/.test(id)) return fail(400, "BAD PLAYER ID");
 
-  const key = process.env.ABLY_API_KEY;
+  const key = process.env.ABLY_API_KEY?.trim();
   const redis = getRedis();
-  if (!key || !key.includes(":")) return fail(503, "ONLINE ISN'T SET UP YET (ABLY KEY)");
+  if (!key) return fail(503, "ABLY KEY MISSING (THE SITE CAN'T SEE IT)");
+  if (!key.includes(":")) return fail(503, "ABLY KEY LOOKS WRONG (COPY THE WHOLE KEY)");
   if (!redis) return fail(503, "ONLINE ISN'T SET UP YET (DATABASE)");
 
   const name = cleanRacerName(body.name);
