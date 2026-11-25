@@ -83,6 +83,11 @@ export async function POST(req: Request) {
   }
 
   try {
+    // One save every 10 seconds per visitor (checked first, so nothing else happens for someone spamming)
+    const ip = (req.headers.get("x-forwarded-for") || "local").split(",")[0].trim();
+    const allowed = await redis.set(`pinkrun:limit:${ip}`, 1, { nx: true, ex: 10 });
+    if (!allowed) return fail("slow down", 429);
+
     if (await redis.sismember(BANNED_KEY, clean)) return fail("pick another name");
 
     const owner = isOwner(ownerCode);
@@ -102,11 +107,6 @@ export async function POST(req: Request) {
         await redis.set(lockKey, deviceHash); // the name is yours now
       }
     }
-
-    // One save every 10 seconds per visitor
-    const ip = (req.headers.get("x-forwarded-for") || "local").split(",")[0].trim();
-    const allowed = await redis.set(`pinkrun:limit:${ip}`, 1, { nx: true, ex: 10 });
-    if (!allowed) return fail("slow down", 429);
 
     // Each name keeps only its best score
     const current = await redis.zscore(game.key, clean);

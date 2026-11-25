@@ -5967,6 +5967,18 @@ activeGame === "rush" ? (
         .beat-thump {
           scale: calc(1 + var(--kick, 0) * 0.004);
         }
+        /* phones and tablets: no thump, so the menu rows stay perfectly still under your finger */
+        @media (any-hover: none) {
+          .beat-thump {
+            scale: none;
+          }
+        }
+        /* a narrow window on a computer: the key legend would sit on top of the iPod, so it hides */
+        @media (max-width: 760px) {
+          .hh-keys.ipod-keys {
+            display: none;
+          }
+        }
       `}</style>
     </main>
   );

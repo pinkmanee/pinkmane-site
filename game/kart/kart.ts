@@ -103,6 +103,10 @@ type Pal = { fog: number[]; vfog: number[]; vdeep: number[]; farLine: number; fa
 const rgbOf = (c: number) => [c & 255, (c >> 8) & 255, (c >> 16) & 255];
 const abgr = (r: number, g: number, b: number) => (0xff000000 | (b << 16) | (g << 8) | r) >>> 0;
 const BOLD = 0.07; // how much fatter the game's letters are drawn (0 = normal)
+// the phone buttons that sit on the race picture: [x, y, width, height] in game pixels
+const PAUSE_BTN = [6, 22, 40, 24] as const;
+const RESET_BTN = [170, 104, 140, 30] as const;
+const inBox = (p: { x: number; y: number }, b: readonly [number, number, number, number]) => p.x >= b[0] && p.x <= b[0] + b[2] && p.y >= b[1] && p.y <= b[1] + b[3];
 const AIR_TIME = 0.9; // seconds in the air after a jump
 const FALL_TIME = 1.5; // seconds a kart falls (and tumbles) into the void...
 const BURST_TIME = 0.85; // ...then it bursts into pixels at the bottom, and after that it's put back
@@ -492,6 +496,18 @@ export class KartGame {
     const pd = (e: PointerEvent) => {
       if (e.pointerType === "touch") this.touch = true;
       const p = pos(e);
+      // PHONES: the PAUSE button (top left) and the BACK ON THE ROAD button (shows when you're lost) are checked first,
+      // so the same tap doesn't also steer or fire an item
+      if (this.touch && !this.menuOpen && (this.state === "race" || this.state === "count")) {
+        if (inBox(p, PAUSE_BTN)) {
+          this.openMenu();
+          return;
+        }
+        if (this.state === "race" && this.me.lost > 1 && inBox(p, RESET_BTN)) {
+          this.rescue(this.me);
+          return;
+        }
+      }
       this.pointers.set(e.pointerId, p);
       if (this.menuOpen) {
         // tap a row of the pause menu
@@ -502,7 +518,7 @@ export class KartGame {
         }
         this.pointers.delete(e.pointerId);
       } else if (this.state === "done" || (this.state === "title" && !this.overlay)) this.confirm();
-      else if (this.touch && p.x > UW / 2 && (p.y < 165 || p.x >= 350)) this.tapItem = true;
+      else if (this.touch && p.x > UW / 2 && (p.y < 165 || p.x >= UW - 62)) this.tapItem = true;
     };
     const pm = (e: PointerEvent) => {
       if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, pos(e));
@@ -573,13 +589,13 @@ export class KartGame {
     }
   }
 
-  // phone: the two arrows on the left steer, the right side is ITEM (top) and BRAKE (bottom)
+  // phone: the two arrows on the left steer; on the right, the far right edge is ITEM and the rest of the bottom is BRAKE
   private touchSteer() {
     let s = 0;
     let brake = false;
     for (const p of this.pointers.values()) {
       if (p.x < 200 && p.y > 90) s += p.x < 79 ? -1 : 1;
-      if (p.x >= UW / 2 && p.x < 350 && p.y >= 165) brake = true;
+      if (p.x >= UW / 2 && p.x < UW - 62 && p.y >= 165) brake = true;
     }
     return { s: clamp(s, -1, 1), brake };
   }
@@ -1601,6 +1617,18 @@ export class KartGame {
         ctx.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
         ctx.fillRect(ox + (mx + (k.x / S) * 70 - r) * u, oy + (my + (k.y / S) * 70 - r) * u, r * 2 * u, r * 2 * u);
       }
+      // phone: the PAUSE button, top left under LAP (pause = the menu with RESUME / RESTART / back to the games)
+      if (this.touch && this.state !== "done" && !this.menuOpen) {
+        const [px, py, pw, ph] = PAUSE_BTN;
+        ctx.fillStyle = "rgba(18,4,28,0.6)";
+        ctx.fillRect(ox + px * u, oy + py * u, pw * u, ph * u);
+        ctx.strokeStyle = "#ece6ff";
+        ctx.lineWidth = Math.max(1, u);
+        ctx.strokeRect(ox + px * u, oy + py * u, pw * u, ph * u);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(ox + (px + 14) * u, oy + (py + 6) * u, 4 * u, 12 * u);
+        ctx.fillRect(ox + (px + 22) * u, oy + (py + 6) * u, 4 * u, 12 * u);
+      }
       // phone buttons
       if (this.touch && this.state !== "done") {
         const btn = (label: string, x: number, y: number, bw: number, bh: number, on: boolean) => {
@@ -1613,8 +1641,9 @@ export class KartGame {
         const t = this.touchSteer();
         btn("<", 6, UH - 96, 70, 50, t.s < 0);
         btn(">", 82, UH - 96, 70, 50, t.s > 0);
-        btn("BRAKE", UW - 196, UH - 92, 62, 40, t.brake);
-        btn("ITEM", UW - 128, UH - 132, 46, 40, false);
+        // BRAKE and ITEM sit right at the right edge, under your right thumb
+        btn("BRAKE", UW - 128, UH - 92, 62, 40, t.brake);
+        btn("ITEM", UW - 58, UH - 132, 50, 40, false);
       }
     }
     if (this.state === "count") {
@@ -1632,7 +1661,18 @@ export class KartGame {
       text(this.touch ? "HOLD THE SCREEN ON 2" : "HOLD W / UP ON 2", UW / 2, by2 + 14, 6, "#fff", "center");
     }
     if (this.flashT > 0 && this.state === "race") text(this.flash, UW / 2, 74, 22, "#ffe23c", "center");
-    if (this.state === "race" && me.lost > 1) text("WRONG WAY? PRESS R", UW / 2, 120, 8, "#fff", "center");
+    if (this.state === "race" && me.lost > 1) {
+      if (this.touch) {
+        // phones have no R key: a button instead
+        const [bx, by, bw, bh] = RESET_BTN;
+        ctx.fillStyle = "rgba(255,70,200,0.8)";
+        ctx.fillRect(ox + bx * u, oy + by * u, bw * u, bh * u);
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = Math.max(1, u);
+        ctx.strokeRect(ox + bx * u, oy + by * u, bw * u, bh * u);
+        text("TAP: BACK ON THE ROAD", bx + bw / 2, by + bh / 2 - 4, 7, "#fff", "center");
+      } else text("WRONG WAY? PRESS R", UW / 2, 120, 8, "#fff", "center");
+    }
 
     if (this.state === "title" && !this.overlay) {
       ctx.fillStyle = "rgba(10,3,18,0.62)";

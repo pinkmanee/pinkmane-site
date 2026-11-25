@@ -410,13 +410,32 @@ export default function Shop() {
   };
 
   // Turn the PSP off and go back to the iPod home page (the 3 second POWERING OFF screen)
+  // The full 3 seconds the first time; after that (same visit) only 1 second. A tap or any key skips it.
+  const [exitSecs, setExitSecs] = useState(3);
   const exitShop = () => {
     if (exiting) return; // already powering off, don't start a second trip
+    let secs = 3;
+    try {
+      if (sessionStorage.getItem("pinkmane-shop-off-seen")) secs = 1;
+      sessionStorage.setItem("pinkmane-shop-off-seen", "1");
+    } catch {}
+    setExitSecs(secs);
     setConfirmExit(false);
     setExiting(true);
-    setTimeout(() => {
+    let gone = false;
+    const go = () => {
+      if (gone) return;
+      gone = true;
+      window.removeEventListener("pointerdown", go);
+      window.removeEventListener("keydown", go);
       router.push("/");
-    }, 3000);
+    };
+    setTimeout(go, secs * 1000);
+    // (wait a moment before listening, so the press that started it doesn't skip it straight away)
+    setTimeout(() => {
+      window.addEventListener("pointerdown", go);
+      window.addEventListener("keydown", go);
+    }, 250);
   };
 
   const openInstagram = () => {
@@ -764,7 +783,7 @@ export default function Shop() {
                 </div>
                 <div className="screen-overlay-loading">LOADING...</div>
                 <SegmentedBar
-                  duration={exiting ? 3 : 1.4}
+                  duration={exiting ? exitSecs : 1.4}
                   active={exiting || showBoot}
                 />
               </div>
