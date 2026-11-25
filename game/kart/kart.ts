@@ -21,13 +21,34 @@ type TrackData = {
   peaks?: [number, number][]; // mountain tops to dodge while flying
   rings?: [number, number, number][]; // rings to fly through for a boost: x, y, height
 };
-type TrackPack = { track: TrackData; ground: Uint32Array; gsize: number; gs: number; types: Uint8Array; mini: HTMLCanvasElement };
+type TrackPack = { track: TrackData; ground: Uint32Array; gsize: number; gs: number; types: Uint8Array; mini: HTMLCanvasElement; pal?: Pal };
 // THE TRACKS: each is trackN.json + trackN-ground.png + trackN-map.png in public/kart/
 export const TRACKS = [
-  { id: "track1", name: "NIGHT FIELD" },
-  { id: "track2", name: "VOID HIGHWAY" },
-  { id: "track3", name: "HIGH HILLS" },
+  { id: "track1", name: "NIGHT FIELD", hue: 0 },
+  { id: "track2", name: "VOID HIGHWAY", hue: -75 },
+  { id: "track3", name: "HIGH HILLS", hue: 68 },
 ];
+// EACH MAP HAS ITS OWN COLOURS. "hue" turns the colour wheel for that map's ground, sky and haze (in degrees):
+// 0 = the original pink and purple, -75 = cold blue, 68 = sunset orange and red. Change a number to recolour a map.
+// The karts, items, trees and the light-blue boost pads keep their own colours on every map.
+function hueMatrix(deg: number): number[] {
+  const a = (deg * Math.PI) / 180, c = Math.cos(a), n = Math.sin(a);
+  return [
+    0.213 + c * 0.787 - n * 0.213, 0.715 - c * 0.715 - n * 0.715, 0.072 - c * 0.072 + n * 0.928,
+    0.213 - c * 0.213 + n * 0.143, 0.715 + c * 0.285 + n * 0.14, 0.072 - c * 0.072 - n * 0.283,
+    0.213 - c * 0.213 - n * 0.787, 0.715 - c * 0.715 + n * 0.715, 0.072 + c * 0.928 + n * 0.072,
+  ];
+}
+const cap = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
+/** recolour one pixel (stored as alpha-blue-green-red). keepSun leaves yellow and orange alone, so the sun stays a sun */
+function tint(c: number, m: number[], keepSun = false): number {
+  const r = c & 255, g = (c >> 8) & 255, b = (c >> 16) & 255;
+  if (keepSun && r > 140 && g > 90 && g > b * 1.25 && r >= g * 0.9) return c;
+  return ((c & 0xff000000) | (cap(m[6] * r + m[7] * g + m[8] * b) << 16) | (cap(m[3] * r + m[4] * g + m[5] * b) << 8) | cap(m[0] * r + m[1] * g + m[2] * b)) >>> 0;
+}
+type Pal = { fog: number[]; vfog: number[]; vdeep: number[]; farLine: number; farDark: number; lip: number; side: number; rib: number; gDark: number; gMid: number; gTip: number; gBank: number; sky: HTMLCanvasElement; skyVoid: HTMLCanvasElement };
+const rgbOf = (c: number) => [c & 255, (c >> 8) & 255, (c >> 16) & 255];
+const abgr = (r: number, g: number, b: number) => (0xff000000 | (b << 16) | (g << 8) | r) >>> 0;
 const AIR_TIME = 0.9; // seconds in the air after a jump
 const FALL_TIME = 1.5; // seconds a kart falls (and tumbles) into the void...
 const BURST_TIME = 0.85; // ...then it bursts into pixels at the bottom, and after that it's put back
@@ -201,6 +222,7 @@ export class KartGame {
   private img: Record<string, HTMLImageElement> = {};
   private kartSkins: Record<string, HTMLCanvasElement>[] = [];
   private mini!: HTMLCanvasElement;
+  private pal!: Pal;
   private boom!: HTMLCanvasElement;
 
   private karts: Kart[] = [];
@@ -610,7 +632,44 @@ export class KartGame {
         }
       }
     nc.putImageData(nd, 0, 0);
+    // this map's own colours: turn the ground's colours (but not the boost pads: they stay light blue everywhere)
+    const hue = TRACKS.find((t) => t.id === id)?.hue ?? 0;
+    if (hue) {
+      const M = hueMatrix(hue), TH = S / 2, k = S / GZ / 2;
+      for (let y = 0; y < GZ; y++) {
+        const row = Math.min(TH - 1, (y * k) | 0) * TH;
+        for (let x = 0; x < GZ; x++) if (types[row + Math.min(TH - 1, (x * k) | 0)] !== 2) ground[y * GZ + x] = tint(ground[y * GZ + x], M);
+      }
+    }
     return { track, ground, gsize: GZ, gs: GZ / S, types, mini };
+  }
+
+  /** the sky, haze and edge colours of one map, turned to that map's hue */
+  private makePal(hue: number): Pal {
+    const M = hueMatrix(hue);
+    const sky = (name: string) => {
+      const im = this.img[name];
+      const c = document.createElement("canvas");
+      c.width = im.width;
+      c.height = im.height;
+      const x = c.getContext("2d", { willReadFrequently: true })!;
+      x.drawImage(im, 0, 0);
+      if (hue) {
+        const d = x.getImageData(0, 0, c.width, c.height);
+        const px = new Uint32Array(d.data.buffer);
+        for (let i = 0; i < px.length; i++) if (px[i] >>> 24) px[i] = tint(px[i], M, true);
+        x.putImageData(d, 0, 0);
+      }
+      return c;
+    };
+    const t = (c: number) => (hue ? tint(c, M) : c);
+    return {
+      fog: rgbOf(t(abgr(235, 50, 170))), vfog: rgbOf(t(abgr(52, 14, 84))), vdeep: rgbOf(t(abgr(6, 2, 14))),
+      farLine: t(0xff4a103a), farDark: t(0xff200914),
+      lip: t(SLAB_LIP), side: t(SLAB_SIDE), rib: t(SLAB_RIB),
+      gDark: t(GRASS_DARK), gMid: t(GRASS_MID), gTip: t(GRASS_TIP), gBank: t(GRASS_BANK),
+      sky: sky("sky"), skyVoid: sky("sky-void"),
+    };
   }
 
   private useTrack(i: number) {
@@ -622,6 +681,7 @@ export class KartGame {
     this.gs = p.gs;
     this.types = p.types;
     this.mini = p.mini;
+    this.pal = p.pal ?? (p.pal = this.makePal(TRACKS[this.trackNo].hue));
     this.zoneF = 0;
   }
 
@@ -1566,7 +1626,8 @@ export class KartGame {
     const zf = this.zoneF;
 
     // ---- sky: one full turn per picture, so it wraps around exactly once (one sun; in the void: one spiral)
-    const sky = this.img["sky"];
+    const pal = this.pal;
+    const sky = pal.sky;
     let off = (((ca / (Math.PI * 2)) * sky.width) % sky.width + sky.width) % sky.width;
     off = Math.round(off);
     const skyY = HORIZON + 4 - sky.height;
@@ -1575,7 +1636,7 @@ export class KartGame {
     b.drawImage(sky, -off, skyY);
     b.drawImage(sky, sky.width - off, skyY);
     if (zf > 0) {
-      const vs = this.img["sky-void"];
+      const vs = pal.skyVoid;
       b.globalAlpha = zf;
       b.fillRect(0, 0, BW, HORIZON);
       b.drawImage(vs, -off, skyY);
@@ -1593,7 +1654,7 @@ export class KartGame {
     const mask = this.mask, seed = this.seedMap;
     const outside = this.track.outside ?? 0; // what's past the edge of the map: more field (0) or the void (3)
     // far away the ground fades into the haze: pink over the field, deep purple in the void
-    const FOG_R = Math.round(235 + (52 - 235) * zf), FOG_G = Math.round(50 + (14 - 50) * zf), FOG_B = Math.round(170 + (84 - 170) * zf);
+    const FOG_R = Math.round(pal.fog[0] + (pal.vfog[0] - pal.fog[0]) * zf), FOG_G = Math.round(pal.fog[1] + (pal.vfog[1] - pal.fog[1]) * zf), FOG_B = Math.round(pal.fog[2] + (pal.vfog[2] - pal.fog[2]) * zf);
     for (let r = 0; r < rows; r++) {
       const z = (camH * FOCAL) / (r + 0.5);
       const stepX = (rx * z) / FOCAL, stepY = (ry * z) / FOCAL;
@@ -1602,7 +1663,7 @@ export class KartGame {
       const f256 = (fog * 256) | 0, inv = 256 - f256;
       // THE VOID has no ground: it's the haze at the horizon, getting darker towards your feet
       const vd = Math.min(1, r / 70);
-      const voidC = 0xff000000 | (Math.round(FOG_B + (14 - FOG_B) * vd) << 16) | (Math.round(FOG_G + (2 - FOG_G) * vd) << 8) | Math.round(FOG_R + (6 - FOG_R) * vd);
+      const voidC = 0xff000000 | (Math.round(FOG_B + (pal.vdeep[2] - FOG_B) * vd) << 16) | (Math.round(FOG_G + (pal.vdeep[1] - FOG_G) * vd) << 8) | Math.round(FOG_R + (pal.vdeep[0] - FOG_R) * vd);
       let o = r * BW;
       for (let x = 0; x < BW; x++, o++) {
         const ix = (wx * gs) | 0, iy = (wy * gs) | 0;
@@ -1621,7 +1682,7 @@ export class KartGame {
           if (inside) {
             c = G[iy * S + ix];
             if (t) field = 0;
-          } else c = ((ix % 96) + 96) % 96 < 3 || ((iy % 96) + 96) % 96 < 3 ? 0xff4a103a : 0xff200914; // past the map: more dark field
+          } else c = ((ix % 96) + 96) % 96 < 3 || ((iy % 96) + 96) % 96 < 3 ? pal.farLine : pal.farDark; // past the map: more dark field
           if (f256) {
             const cr = ((c & 255) * inv + FOG_R * f256) >> 8;
             const cg = (((c >> 8) & 255) * inv + FOG_G * f256) >> 8;
@@ -1650,7 +1711,7 @@ export class KartGame {
         if (here === above) continue;
         if (here === 2 || above === 2) {
           if (here === 2)
-            for (let k = 0; k < thick && r + k < rows; k++) out[o + k * BW] = k === 0 ? SLAB_LIP : (seed[o - BW] & 3) === 0 ? SLAB_RIB : SLAB_SIDE;
+            for (let k = 0; k < thick && r + k < rows; k++) out[o + k * BW] = k === 0 ? pal.lip : (seed[o - BW] & 3) === 0 ? pal.rib : pal.side;
           continue;
         }
         if (z > 620) continue; // too far away to see blades
@@ -1661,9 +1722,9 @@ export class KartGame {
         if (!here) {
           // field behind the road: a dark bank facing you, grass on top of it
           const bank = Math.max(1, Math.round(tall * 0.35));
-          for (let k = 0; k < bank && r + k < rows; k++) out[o + k * BW] = GRASS_BANK;
+          for (let k = 0; k < bank && r + k < rows; k++) out[o + k * BW] = pal.gBank;
         }
-        for (let k = 1; k <= h && r - k >= 0; k++) out[o - k * BW] = k >= h ? GRASS_TIP : k >= h - 1 && h > 3 ? GRASS_MID : GRASS_DARK;
+        for (let k = 1; k <= h && r - k >= 0; k++) out[o - k * BW] = k >= h ? pal.gTip : k >= h - 1 && h > 3 ? pal.gMid : pal.gDark;
       }
     }
     b.putImageData(this.frame, 0, HORIZON);
