@@ -13,6 +13,10 @@ import { PER_DAY, byName, diveNumber, liveDepth, promptsForDive } from "../../..
 
 export const dynamic = "force-dynamic";
 
+// (switched off on the live site while PINK DIVE is hidden: see DIVE_PUBLIC in app/games/pink-dive/page.tsx)
+const DIVE_PUBLIC = false;
+const off = () => !DIVE_PUBLIC && process.env.NODE_ENV !== "development";
+
 const KEEP = 4 * 86400;
 const BUCKET = 20; // the curve counts scores in steps of 20
 
@@ -43,6 +47,7 @@ function better(total: number, hist: Record<string, number>, players: number) {
 }
 
 export async function GET(req: Request) {
+  if (off()) return fail("not found", 404);
   const redis = getRedis();
   if (!redis) return fail("offline", 503);
   const dive = Number(new URL(req.url).searchParams.get("dive")) || diveNumber();
@@ -54,6 +59,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  if (off()) return fail("not found", 404);
   const redis = getRedis();
   if (!redis) return fail("offline", 503);
   let body: { dive?: unknown; device?: unknown; answers?: unknown };
