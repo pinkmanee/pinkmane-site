@@ -27,6 +27,75 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
   const [view, setView] = useState<View | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const navRef = useRef<HTMLDivElement>(null);
+  const screenRef = useRef<Screen>("menu");
+  screenRef.current = screen;
+
+  // THE MENUS WORK FROM THE KEYBOARD, like the iPod: W A S D or the arrows move the highlight, ENTER presses it,
+  // BACKSPACE goes back a page (from the first page: back to the site's game list).
+  // While you're typing in a box, the letters type as normal: use the UP / DOWN arrows or ENTER to leave the box.
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      const box = navRef.current;
+      if (!box || e.ctrlKey || e.metaKey || e.altKey) return;
+      const all: HTMLElement[] = [];
+      box.querySelectorAll<HTMLElement>("button:not(:disabled), input, a[href]").forEach((el) => {
+        if (el.offsetParent !== null) all.push(el);
+      });
+      if (!all.length) return;
+      const here = document.activeElement as HTMLElement | null;
+      const cur = here && all.includes(here) ? here : null;
+      const typing = cur?.tagName === "INPUT" && (cur as HTMLInputElement).type !== "checkbox";
+      const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      let dir = "";
+      if (k === "ArrowUp" || (!typing && k === "w")) dir = "up";
+      else if (k === "ArrowDown" || (!typing && k === "s") || (typing && k === "Enter")) dir = "down";
+      else if (!typing && (k === "ArrowLeft" || k === "a")) dir = "left";
+      else if (!typing && (k === "ArrowRight" || k === "d")) dir = "right";
+      if (k === "Backspace" && (!typing || !(cur as HTMLInputElement).value)) {
+        e.preventDefault();
+        const sc = screenRef.current;
+        if (sc === "create" || sc === "join") {
+          setError("");
+          setScreen("menu");
+        } else if (sc === "menu") document.querySelector<HTMLElement>("[data-kart-back]")?.click();
+        return;
+      }
+      if (!dir) return;
+      e.preventDefault();
+      if (!cur) {
+        // nothing is highlighted yet: start on the first box to fill in, or else the first big button (SOLO RACE on the first page)
+        (all.find((el) => el.tagName === "INPUT") ?? all.find((el) => el.tagName === "BUTTON" && !el.hasAttribute("data-map")) ?? all[0]).focus();
+        return;
+      }
+      const mid = (el: HTMLElement) => {
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      };
+      const c = mid(cur);
+      let best: HTMLElement | null = null, score = Infinity;
+      for (const el of all) {
+        if (el === cur) continue;
+        const m = mid(el), dx = m.x - c.x, dy = m.y - c.y;
+        let sc2 = Infinity;
+        if (dir === "up" && dy < -6) sc2 = -dy * 4 + Math.abs(dx);
+        if (dir === "down" && dy > 6) sc2 = dy * 4 + Math.abs(dx);
+        if (dir === "left" && dx < -6 && Math.abs(dy) < 14) sc2 = -dx;
+        if (dir === "right" && dx > 6 && Math.abs(dy) < 14) sc2 = dx;
+        if (sc2 < score) {
+          score = sc2;
+          best = el;
+        }
+      }
+      if (best) {
+        best.focus();
+        best.scrollIntoView({ block: "nearest" });
+      }
+    };
+    // "true": hear the key before the text boxes do (they keep their keys away from the game)
+    window.addEventListener("keydown", down, true);
+    return () => window.removeEventListener("keydown", down, true);
+  }, []);
   const [copied, setCopied] = useState("");
   const [local, setLocal] = useState(false);
   // the forms (the name and link are remembered for next time)
@@ -169,7 +238,23 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
 
   // ---------------------------------------------------------------- pieces of the menus
   const font = `${pixelFont}, ui-monospace, monospace`;
-  const btn = (label: string, onClick: () => void, opts: { big?: boolean; off?: boolean; dim?: boolean } = {}) => (
+  // THE LITTLE PICTURES ON THE MENU BUTTONS, drawn dot by dot. "#" = a dark dot, "o" = a white dot (the flame hair), "." = nothing.
+  // SOLO = one racer, CREATE = a group and a plus, JOIN = a group and an arrow. Change the dots here to redraw them.
+  const RACER = [".o.o.o.", ".ooooo.", ".#####.", "#######", "#..#..#", "#######", ".#####.", "..###..", ".#####.", "#######"];
+  const PLUS = [".......", ".......", ".......", "...#...", "...#...", ".#####.", "...#...", "...#...", ".......", "......."];
+  const ARROW = [".......", ".......", ".......", "...#...", "....#..", "######.", "....#..", "...#...", ".......", "......."];
+  const ICONS: Record<string, string[][]> = { solo: [RACER], create: [RACER, RACER, RACER, PLUS], join: [ARROW, RACER, RACER, RACER] };
+  const icon = (kind: string) => {
+    const parts = ICONS[kind] ?? [];
+    const D = 3; // how big one dot is
+    const w = parts.length * 8 - 1;
+    return (
+      <svg width={w * D} height={10 * D} viewBox={`0 0 ${w} 10`} shapeRendering="crispEdges" aria-hidden="true" style={{ flex: "none" }}>
+        {parts.map((g, n) => g.map((row, y) => row.split("").map((ch, x) => (ch === "." ? null : <rect key={`${n}-${y}-${x}`} x={n * 8 + x} y={y} width={1} height={1} fill={ch === "o" ? "#ffffff" : INK} />))))}
+      </svg>
+    );
+  };
+  const btn = (label: string, onClick: () => void, opts: { big?: boolean; off?: boolean; dim?: boolean; icon?: string } = {}) => (
     <button
       onClick={onClick}
       disabled={opts.off}
@@ -184,8 +269,13 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
         cursor: opts.off ? "default" : "pointer",
         width: opts.big ? "100%" : undefined,
         letterSpacing: 1,
+        display: opts.icon ? "flex" : undefined,
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 14,
       }}
     >
+      {opts.icon && icon(opts.icon)}
       {label}
     </button>
   );
@@ -258,6 +348,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
         {TRACKS.map((t, i) => (
           <button
             key={t.id}
+            data-map
             onClick={onPick ? () => onPick(i) : undefined}
             disabled={!onPick}
             style={{
@@ -296,12 +387,12 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
         {title("PINK KART", local ? "LOCAL TEST MODE" : undefined)}
         {maps(track, pickTrack)}
         <div style={{ display: "grid", gap: 10 }}>
-          {btn("SOLO RACE", solo, { big: true })}
-          {btn("CREATE LOBBY", () => (setError(""), setScreen("create")), { big: true })}
-          {btn("JOIN LOBBY", () => (setError(""), setScreen("join")), { big: true })}
+          {btn("SOLO RACE", solo, { big: true, icon: "solo" })}
+          {btn("CREATE LOBBY", () => (setError(""), setScreen("create")), { big: true, icon: "create" })}
+          {btn("JOIN LOBBY", () => (setError(""), setScreen("join")), { big: true, icon: "join" })}
         </div>
         <div style={{ fontSize: 7, marginTop: 16, lineHeight: 1.9, opacity: 0.75, textAlign: "center" }}>
-          ARROWS / WASD DRIVE · SPACE ITEM · R BACK ON THE ROAD
+          W A S D + ENTER: MENU · BACKSPACE: BACK<br />ARROWS / WASD DRIVE · SPACE ITEM · R BACK ON THE ROAD
           <br />
           HOLD GAS WHEN 2 SHOWS = ROCKET START
         </div>
@@ -476,13 +567,17 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
   const racing = screen === "none" || (screen === "online" && inRace);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#07060c", overflow: "hidden", touchAction: "none", userSelect: "none", fontFamily: font }}>
+    <div style={{ position: "fixed", inset: 0, background: "#07060c", overflow: "hidden", touchAction: "none", userSelect: "none", fontFamily: font }} className="pk-root">
       <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%", imageRendering: "pixelated" }} aria-label="PINK KART" />
-      <div style={{ touchAction: "auto", userSelect: "text" }}>{overlay}</div>
+      {/* the highlight for keyboard play, and slightly fatter letters everywhere */}
+      <style>{`.pk-nav button:focus, .pk-nav input:focus, .pk-nav a:focus { outline: 3px solid #ffffff !important; outline-offset: 2px; }
+.pk-root, .pk-root button, .pk-root input { -webkit-text-stroke: 0.5px currentColor; }`}</style>
+      <div ref={navRef} className="pk-nav" style={{ touchAction: "auto", userSelect: "text" }}>{overlay}</div>
       {/* back to the main site, straight into its game list (hidden while racing: it would cover the lap counter) */}
       {!racing && (
       <Link
         href="/"
+        data-kart-back
         onClick={() => {
           try {
             sessionStorage.setItem("pinkmane-open-games", "1");

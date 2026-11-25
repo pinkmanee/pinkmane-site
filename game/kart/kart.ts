@@ -49,6 +49,7 @@ function tint(c: number, m: number[], keepSun = false): number {
 type Pal = { fog: number[]; vfog: number[]; vdeep: number[]; farLine: number; farDark: number; lip: number; side: number; rib: number; gDark: number; gMid: number; gTip: number; gBank: number; sky: HTMLCanvasElement; skyVoid: HTMLCanvasElement };
 const rgbOf = (c: number) => [c & 255, (c >> 8) & 255, (c >> 16) & 255];
 const abgr = (r: number, g: number, b: number) => (0xff000000 | (b << 16) | (g << 8) | r) >>> 0;
+const BOLD = 0.07; // how much fatter the game's letters are drawn (0 = normal)
 const AIR_TIME = 0.9; // seconds in the air after a jump
 const FALL_TIME = 1.5; // seconds a kart falls (and tumbles) into the void...
 const BURST_TIME = 0.85; // ...then it bursts into pixels at the bottom, and after that it's put back
@@ -1419,6 +1420,8 @@ export class KartGame {
       ctx.fillText(s, ox + (x + size * 0.14) * u, oy + (y + size * 0.14) * u);
       ctx.fillStyle = col;
       ctx.fillText(s, ox + x * u, oy + y * u);
+      // BOLD: the same letters once more, a hair to the right. Set BOLD to 0 for the thin letters, bigger = fatter.
+      if (BOLD) ctx.fillText(s, ox + x * u + Math.max(1, size * u * BOLD), oy + y * u);
     };
     if (!this.ready) {
       text(this.loadError ? "COULD NOT LOAD THE GAME" : "LOADING...", UW / 2, UH / 2 - 6, 12, "#ff46c8", "center");
