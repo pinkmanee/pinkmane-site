@@ -829,7 +829,12 @@ export class KartGame {
     const [cx, cy] = C[j];
     const [nx, ny] = C[(j + 1) % N];
     k.a = Math.atan2(ny - cy, nx - cx);
-    const side = this.track.spawnOff ? this.track.spawnOff[j] ?? 0 : 0;
+    // where the road splits around a hole: put it on one of the two sides (its own lane's side). If the hole starts just
+    // ahead, it goes on that side already, not in the middle (it used to land right in front of the hole and fall again)
+    const offs = this.track.spawnOff;
+    let side = offs ? offs[j] ?? 0 : 0;
+    if (offs && !side) for (let d = 1; d <= 10; d++) side = Math.max(side, offs[(j + d) % N] ?? 0);
+    if (side && k.lane < 0) side = -side;
     k.x = cx - Math.sin(k.a) * side;
     k.y = cy + Math.cos(k.a) * side;
     k.vx = k.vy = k.speed = 0;
@@ -898,11 +903,33 @@ export class KartGame {
         // their lane; where the road splits around a hole they pick a side and stay on it
         const hole = this.track.spawnOff?.[ti] ?? 0;
         const w = hole ? (k.lane < 0 ? -hole : hole) : Math.max(0, this.track.halfw[ti] - 20) * k.lane;
-        const px = tx - Math.sin(ta) * w, py = ty + Math.cos(ta) * w;
+        let px = tx - Math.sin(ta) * w, py = ty + Math.cos(ta) * w;
+        // on the floating road, close to the edge: forget the lane, head for the middle of the road just ahead, and ease off
+        const edgeGap = this.track.halfw[k.idx] - k.off;
+        const nearEdge = !!this.track.zone?.[k.idx] && k.air <= 0 && edgeGap < 12;
+        if (nearEdge) {
+          [px, py] = C[(k.idx + 5) % N];
+        }
+        // where the road splits around a hole: a bot drifting toward the hole picks the side it's already on and heads there
+        const holeAhead = Math.max(this.track.spawnOff?.[k.idx] ?? 0, this.track.spawnOff?.[(k.idx + 6) % N] ?? 0);
+        const nearHole = holeAhead > 0 && k.air <= 0 && !nearEdge && k.off < 40;
+        if (nearHole) {
+          const [cx, cy] = C[k.idx], [dx2, dy2] = C[(k.idx + 1) % N];
+          const da = Math.atan2(dy2 - cy, dx2 - cx);
+          const side = (k.x - cx) * -Math.sin(da) + (k.y - cy) * Math.cos(da);
+          const sgn = Math.abs(side) > 2 ? Math.sign(side) : k.lane < 0 ? -1 : 1;
+          k.lane = sgn * Math.max(0.2, Math.abs(k.lane));
+          const [fx, fy] = C[(k.idx + 5) % N], [gx, gy] = C[(k.idx + 6) % N];
+          const fa = Math.atan2(gy - fy, gx - fx);
+          px = fx - Math.sin(fa) * 58 * sgn;
+          py = fy + Math.cos(fa) * 58 * sgn;
+        }
         let want = wrapAngle(Math.atan2(py - k.y, px - k.x) - k.a);
         if (k.blind > 0) want += Math.sin(this.clock * 7 + k.skin) * 0.5;
-        steer = clamp(want * 3, -1, 1);
+        steer = clamp(want * (nearEdge || nearHole ? 4 : 3), -1, 1);
         gas = Math.abs(want) > 0.7 ? 0.55 : 1;
+        if (nearEdge) gas = Math.min(gas, edgeGap < 6 ? 0.3 : 0.6);
+        if (nearHole) gas = Math.min(gas, k.off < 30 ? 0.3 : 0.7);
         if (Math.random() < 0.004) k.lane = (Math.random() * 2 - 1) * 0.45;
         // on the floating road they lift off the gas before a sharp corner
         if (this.track.zone?.[k.idx] && k.air <= 0) {
@@ -940,6 +967,8 @@ export class KartGame {
       if (k.air > 0) {
         k.air -= dt;
         steer *= 0.3; // not much steering in the air
+        // a kart in the air keeps its jump speed (a bump or an item mid-air used to drop it into the gap)
+        k.speed = Math.max(k.speed, 265);
       }
       // FLYING: over the hills the kart grows wings and rises to the flight path's height (which goes up and down)
       const under = this.typeAt(k.x, k.y);
@@ -953,7 +982,10 @@ export class KartGame {
       if (type === 4) {
         // the jump: everybody gets launched fast enough to make it across
         k.air = AIR_TIME;
-        k.speed = Math.max(k.speed, 250);
+        k.speed = Math.max(k.speed, 265);
+        // (straight away, not after the usual little slide, so a slow kart still clears the gap)
+        k.vx = Math.cos(k.a) * k.speed;
+        k.vy = Math.sin(k.a) * k.speed;
         if (k.player) this.say("JUMP!", 0.8);
       }
       if (type === 3) {

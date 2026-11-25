@@ -1178,6 +1178,29 @@ export default function Home() {
     return () => mq.removeEventListener?.("change", update);
   }, []);
   const [handheldBoot, setHandheldBoot] = useState(false);
+  // TURN YOUR PHONE: a one-time card the first time you start a game with the phone upright. It goes away when you turn the
+  // phone, or tap PLAY UPRIGHT, and never comes back (remembered on the phone). After that only the small text hint shows.
+  const [turnSeen, setTurnSeen] = useState(true);
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem("pinkmane-turn-seen")) setTurnSeen(false);
+    } catch {}
+  }, []);
+  const seeTurn = () => {
+    setTurnSeen(true);
+    try {
+      localStorage.setItem("pinkmane-turn-seen", "1");
+    } catch {}
+  };
+  useEffect(() => {
+    if (turnSeen) return;
+    const mq = window.matchMedia("(orientation: landscape)");
+    const on = () => {
+      if (mq.matches && playing) seeTurn(); // they turned it: lesson learned
+    };
+    mq.addEventListener?.("change", on);
+    return () => mq.removeEventListener?.("change", on);
+  }, [turnSeen, playing]);
   // "CONTROL W THESE!" arrows pointing at the key legend, for 5 seconds after Pinkmane Void starts
   const [keyTip, setKeyTip] = useState(false);
   // START SCREEN: the iPod shows LOADING..., then the trippy PINKMANE picture with CLICK TO START.
@@ -3578,6 +3601,18 @@ activeGame === "rush" ? (
           )}
 
           <div className="tp-rotate">TURN YOUR PHONE SIDEWAYS FOR A BIGGER SCREEN</div>
+          {!gamePicker && !turnSeen && (
+            <div className="tp-turn" role="dialog" aria-label="Turn your phone sideways">
+              <div className="tp-turn-phone" aria-hidden="true">
+                <span />
+              </div>
+              <div className="tp-turn-title">TURN YOUR PHONE</div>
+              <div className="tp-turn-sub">sideways = a much bigger screen</div>
+              <button className="tp-small tp-turn-btn" onClick={seeTurn}>
+                PLAY UPRIGHT
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -4422,6 +4457,67 @@ activeGame === "rush" ? (
         }
         .tp-rotate {
           display: none;
+        }
+        /* the one-time TURN YOUR PHONE card (only while the phone is upright) */
+        .tp-turn {
+          display: none;
+        }
+        @media (orientation: portrait) {
+          .tp-turn {
+            display: flex;
+            position: fixed;
+            inset: 0;
+            z-index: 40;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            padding: 24px;
+            text-align: center;
+            color: #fff;
+            background: rgba(14, 4, 20, 0.92);
+          }
+        }
+        .tp-turn-phone {
+          width: 54px;
+          height: 92px;
+          border: 4px solid #ff5fd2;
+          border-radius: 10px;
+          box-shadow: 4px 4px 0 #000;
+          position: relative;
+          animation: tpTurn 2.2s ease-in-out infinite;
+        }
+        .tp-turn-phone span {
+          position: absolute;
+          left: 50%;
+          bottom: 6px;
+          width: 12px;
+          height: 4px;
+          margin-left: -6px;
+          background: #ff5fd2;
+        }
+        @keyframes tpTurn {
+          0%, 20% { rotate: 0deg; }
+          55%, 80% { rotate: -90deg; }
+          100% { rotate: 0deg; }
+        }
+        .tp-turn-title {
+          font-size: 14px;
+          color: #ff8ff0;
+          text-shadow: 2px 2px 0 #000;
+        }
+        .tp-turn-sub {
+          font-size: 8px;
+          line-height: 1.7;
+          opacity: 0.85;
+        }
+        .tp-turn-btn {
+          margin-top: 8px;
+          width: auto !important;
+          padding: 0 14px;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .tp-turn-phone { animation: none; rotate: -90deg; }
         }
         /* Upright phones: game across the top, small buttons in a row above it, thumb buttons at the bottom */
         @media (orientation: portrait) {
