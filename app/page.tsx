@@ -192,6 +192,7 @@ const ITEM_ICONS: Record<string, string> = {
   "Pink Hell": "/icons/pinkhell.webp",
   "Pink Rush": "/icons/pinkrush.webp",
   "Pink Kart": "/icons/pinkkart.webp",
+  "Pink Dive": "/icons/pinkdive.webp",
   Back: "/icons/arrow.webp",
 };
 
@@ -316,7 +317,7 @@ const GAME_DATA = {
 // (public/previews/<file>.gif, a few seconds recorded from the real game) with what it is and how to play.
 // The order here = the order on the PSP. Rename / reorder freely; "name" must match ITEM_ICONS for the icon.
 // link = the game has its own page: picking it opens that page (PINK KART: pinkmane.site/games/pink-kart)
-type GameId = "pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle" | "hell" | "jet" | "ninja" | "kong" | "bomber" | "rush" | "kart";
+type GameId = "pinkrun" | "vortex" | "snake" | "bird" | "hex" | "maze" | "super" | "jungle" | "hell" | "jet" | "ninja" | "kong" | "bomber" | "rush" | "kart" | "dive";
 // mini: true = the game lives one step deeper, in MINI GAMES (the last row of the game list)
 const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; how: string; psp: boolean; link?: string; mini?: boolean }[] = [
   {
@@ -335,6 +336,15 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     how: "arrows = drive · space = use your item · hold gas when 2 shows = rocket start",
     psp: true,
     link: "/games/pink-kart",
+  },
+  {
+    name: "Pink Dive",
+    id: "dive",
+    preview: "/previews/pinkdive.webp",
+    blurb: "NEW · DAILY. The daily word dive: 7 prompts, 25 seconds each, the same for everyone. Name a fish, a rapper, a Simpsons character... the RARER your answer, the DEEPER your pink sub sinks. See how deep you got next to today's other divers, and share it.",
+    how: "type an answer · enter = send · rare answers sink deeper",
+    psp: true,
+    link: "/games/pink-dive",
   },
   {
     name: "Pink Rush",

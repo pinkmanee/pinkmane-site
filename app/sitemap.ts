@@ -8,5 +8,5 @@ export default function sitemap(): MetadataRoute.Sitemap {
     changeFrequency: "weekly" as const,
     priority,
   });
-  return [page("", 1), page("/shop", 0.8), page("/games/pink-kart", 0.6), page("/games/pink-rush", 0.6)];
+  return [page("", 1), page("/shop", 0.8), page("/games/pink-kart", 0.6), page("/games/pink-dive", 0.7), page("/games/pink-rush", 0.6)];
 }
