@@ -2376,13 +2376,14 @@ export class KartGame {
     // big things standing around: ghost ships and tentacles (GHOST SHIP BAY), speakers and equalizer towers (808 TEMPLE)
     for (const d of this.track.decor ?? []) {
       if (d[2] === "ship") list.push({ img: this.img["ghostship"], sx: 0, sw: 72, sh: 46, x: d[0], y: d[1], k: d[3], lift: -5 + Math.sin(now / 700 + d[0]) * 3, flip: d[0] % 2 === 0, shadow: false });
-      else if (d[2] === "speaker") list.push({ img: this.img["speaker"], sx: beat < 0.2 ? 40 : 0, sw: 40, sh: 56, x: d[0], y: d[1], k: d[3], lift: 0, flip: false, shadow: true });
-      else if (d[2] === "gate") list.push({ img: this.img["gate"], sx: beat < 0.2 ? 120 : 0, sw: 120, sh: 96, x: d[0], y: d[1], k: d[3], lift: 0, flip: false, shadow: false });
-      else if (d[2] === "pillar") list.push({ img: this.img["pillar"], sx: beat < 0.2 ? 30 : 0, sw: 30, sh: 90, x: d[0], y: d[1], k: d[3], lift: 0, flip: false, shadow: false });
+      else if (d[2] === "speaker") list.push({ img: this.img["speaker"], sx: beat < 0.2 ? 80 : 0, sw: 80, sh: 112, x: d[0], y: d[1], k: d[3] / 2, lift: 0, flip: false, shadow: true });
+      // (808 TEMPLE's speakers, towers, gates and pillars are 3D renders at double detail: public/kart/speaker.png etc.)
+      else if (d[2] === "gate") list.push({ img: this.img["gate"], sx: beat < 0.2 ? 240 : 0, sw: 240, sh: 192, x: d[0], y: d[1], k: d[3] * 0.7, lift: 0, flip: false, shadow: false });
+      else if (d[2] === "pillar") list.push({ img: this.img["pillar"], sx: beat < 0.2 ? 60 : 0, sw: 60, sh: 180, x: d[0], y: d[1], k: d[3] * 0.38, lift: 0, flip: false, shadow: false });
       else if (d[2] === "eq") {
         // loud right on the beat, then dropping; every tower a little different
         const lvl = Math.max(0, Math.min(7, Math.round(7 * Math.pow(1 - beat, 1.3)) - (d[0] % 3) + (beat > 0.5 && beat < 0.62 ? 2 : 0)));
-        list.push({ img: this.img["eq"], sx: lvl * 32, sw: 32, sh: 64, x: d[0], y: d[1], k: d[3], lift: 0, flip: d[1] % 2 === 0, shadow: true });
+        list.push({ img: this.img["eq"], sx: lvl * 64, sw: 64, sh: 128, x: d[0], y: d[1], k: d[3] / 2, lift: 0, flip: d[1] % 2 === 0, shadow: true });
       } else if (d[2] === "tentacle") list.push({ img: this.img["tentacle"], sx: (Math.floor(now / 380 + d[1]) % 2) * 24, sw: 24, sh: 64, x: d[0], y: d[1], k: d[3], lift: -6, flip: d[1] % 2 === 0, shadow: false });
     }
     // the slapping tentacles
