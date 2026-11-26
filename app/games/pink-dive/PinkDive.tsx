@@ -98,13 +98,42 @@ function useBeeps() {
 //     ~110-320  the weed forest (the plants from Pink Kart, public/kart/props.png)
 //     ~250-450  skeletons swimming around (the ship's crew)
 //     ~380-560  lost Pink Kart items drifting down (skull bomb, lightning bolt, the eye, a sigil)
-//     ~500+     ghost PINKMANE (public/game/pinkdude-ghost.png) haunting the dark
+//     ~215-475  PINKMANE scuba divers swimming past
+//     ~500+     PINKMANE in full armoured hard-hat diving suits, down in the deep
 //     the floor: a sunken Pink Kart between the weed plants
 // (the numbers are scores: 1 point = 3 pixels of water)
 const SKELETON = [
   ["..www..", ".wkwkw.", "..www..", "...w...", "w.www.w", ".wwwww.", "...w...", "..www..", "..w.w..", ".w...w."],
   ["..www..", ".wkwkw.", "..www..", "...w...", "..www..", ".wwwww.", "w..w..w", "..www..", "..w.w..", "..w.w.."],
 ];
+// PINKMANE DIVERS (13 wide, drawn pixel by pixel, facing right). Letters = colours, see DIVER_COL.
+// SCUBA: wetsuit with pink stripes, goggles, a tank on his back, fins, and his pink mohawk sticking up.
+// ARMOR (the deep ones): a full copper hard-hat diving suit, his face behind the round porthole, the mohawk on top.
+const SCUBA = [
+  "....p.p......", "...ppppp.....", "..kkkkkkk.TT.", "..kyyyyyk.tT.", "..kgggggk.tT.", "..kgwggyk.tT.", "..kyyrrrk.tT.",
+  "...kkkkkr.tT.", ".kbbbbbbbktT.", "kbbBbbbBbbkk.", "kb.bbbbb.bk..", "yk.bbbbb.ky..", "...bBbbBb....", "...bb.bbb....",
+  "...bb..bb....", "..ffk..kff...", ".fff....fff..",
+];
+const ARMOR = [
+  "......p......", ".....ppp.....", "....kpppk....", "...kcccccc...", "..kcccooocck.", ".kccoyyyyocck", "kCcoygwggyocC",
+  "kCcoyyyyyyocC", ".kccoyrryocck", "..kccooocck..", "...kCcccCk...", ".kssssssssk..", "kssSssssSssk.", "ks.sssssss.sk",
+  "GG.sSsssSs.GG", "GG.LLLLLLL.GG", "...sssksss...", "...sss.sss...", "...sSs.sSs...", "...sss.sss...", "..DDDk.kDDD..",
+  ".DDDD...DDDD.",
+];
+const DIVER_COL: Record<string, string> = {
+  k: "#12041c", y: "#ffd84a", p: "#ff46c8", g: "#7ae0ff", w: "#ffffff", r: "#3a2a40", b: "#1c1832", B: "#ff46c8",
+  t: "#a8a8c0", T: "#6c6c86", f: "#3ad0e0", c: "#e2803a", C: "#9c4a1e", o: "#ffc77a", s: "#d4702e", S: "#8e3e18",
+  G: "#3ab4cc", L: "#6ad8ee", D: "#3ab4cc",
+};
+// THE ZONES of the sea (in points: 1 point = 10 m). A dotted line with the name where each starts; in between, a faint
+// line every 100 m. Crossing into a new zone flashes its name.
+const ZONES: [number, string][] = [
+  [25, "THE SHALLOWS"], [55, "SUNLIGHT ZONE"], [90, "PINK REEF"], [120, "WEED FOREST"], [160, "KUSH KELP"], [200, "THE HAZE"],
+  [240, "TWILIGHT ZONE"], [270, "SKELETON CREW"], [310, "SHIPWRECK ALLEY"], [350, "DEAD MAN'S DRIFT"], [385, "KART GRAVEYARD"],
+  [420, "MIDNIGHT ZONE"], [460, "THE DEEP END"], [500, "DIVERS DOWN"], [540, "THE ABYSS"], [580, "PRESSURE ZONE"],
+  [620, "HADAL ZONE"], [660, "THE TRENCH"], [700, "ROCK BOTTOM"],
+];
+
 function Sea({ depth, font }: { depth: number; font: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const target = useRef(depth);
@@ -125,7 +154,6 @@ function Sea({ depth, font }: { depth: number; font: string }) {
       return im;
     };
     const DUDE = load("/game/pinkdude.png");
-    const GHOST = load("/game/pinkdude-ghost.png");
     const SHIP = load("/game/ghostship.png");
     const PROPS = load("/kart/props.png");
     const KART = load("/kart/kart-mane-side.png");
@@ -157,7 +185,18 @@ function Sea({ depth, font }: { depth: number; font: string }) {
     const weeds = Array.from({ length: 16 }, (_, i) => ({ y: 330 + i * 40 + rnd(i + 500) * 20, left: i % 2 === 0, pic: 3 + (i % 3), off: rnd(i + 600), back: i % 4 === 3 }));
     const skels = Array.from({ length: 7 }, (_, i) => ({ y: 760 + i * 80 + rnd(i + 700) * 40, x: rnd(i + 710), v: 3 + rnd(i + 720) * 5, s: i % 2 ? 1 : -1 }));
     const junk = Array.from({ length: 6 }, (_, i) => ({ y: 1150 + i * 85, x: 0.15 + rnd(i + 800) * 0.7, pic: i % 4 }));
-    const ghosts = Array.from({ length: 4 }, (_, i) => ({ y: 1520 + i * 150, x: 0.2 + rnd(i + 900) * 0.6, flip: i % 2 === 1 }));
+    const scubas = Array.from({ length: 6 }, (_, i) => ({ y: 650 + i * 130 + rnd(i + 900) * 50, x: rnd(i + 910), v: 2 + rnd(i + 920) * 3, s: i % 2 ? 1 : -1 }));
+    const armors = Array.from({ length: 5 }, (_, i) => ({ y: 1500 + i * 130 + rnd(i + 930) * 40, x: 0.15 + rnd(i + 940) * 0.7, flip: i % 2 === 1 }));
+    // draw a diver from its letters (1 letter = 1 pixel), mirrored when going left
+    const diver = (rows: string[], x: number, y: number, flip: boolean) => {
+      rows.forEach((row, ry) => {
+        for (let rx = 0; rx < row.length; rx++) {
+          const ch = row[flip ? row.length - 1 - rx : rx];
+          if (ch !== ".") rect(x + rx, y + ry, 1, 1, DIVER_COL[ch] ?? "#fff");
+        }
+      });
+    };
+    let lastZone = -1, flashName = "", flashAt = -10;
     const rect = (x: number, y: number, w: number, h: number, col: string) => {
       c.fillStyle = col;
       c.fillRect(Math.round(x), Math.round(y), w, h);
@@ -259,36 +298,76 @@ function Sea({ depth, font }: { depth: number; font: string }) {
         if (!wet(sy, 20)) continue;
         spr(JUNK[j.pic], 0, 0, 96, 96, seenX + seenW * j.x + Math.sin(t * 0.5 + j.x * 7) * 3, sy, 20, 20);
       }
-      // ---- ghost PINKMANE haunting the dark ----
-      for (const g of ghosts) {
-        const sy = at(g.y) + Math.sin(t * 1.1 + g.x * 8) * 3;
-        if (!wet(sy, 18)) continue;
-        const gx = seenX + seenW * g.x + Math.sin(t * 0.4 + g.x * 4) * 8;
-        // a faint glow: the same ghost, a pixel bigger all round, very see-through
-        c.globalAlpha = 0.12;
-        spr(GHOST, (Math.floor(t * 2 + g.x * 3) % 2) * 24, 0, 24, 35, gx - 1, sy - 1, 14, 19.5, g.flip);
-        c.globalAlpha = 0.5 + Math.sin(t * 3 + g.x * 11) * 0.15;
-        spr(GHOST, (Math.floor(t * 2 + g.x * 3) % 2) * 24, 0, 24, 35, gx, sy, 12, 17.5, g.flip);
-        c.globalAlpha = 1;
+      // ---- PINKMANE divers: scuba gear in the middle of the sea, full armoured hard-hat suits down in the deep ----
+      for (const d of scubas) {
+        const sy = at(d.y) + Math.sin(t * 1.3 + d.x * 9) * 2;
+        if (!wet(sy, 17)) continue;
+        const x = seenX + ((((d.x * seenW + t * d.v * d.s) % (seenW + 30)) + seenW + 30) % (seenW + 30)) - 15;
+        diver(SCUBA, x, sy, d.s < 0);
+        for (let i = 0; i < 3; i++) {
+          const bt = (t * 0.8 + i / 3 + d.x) % 1; // bubbles from the regulator
+          rect(x + (d.s < 0 ? 4 : 8) + Math.sin(t * 3 + i) , sy + 6 - bt * 22, 1, 1, `rgba(220,245,255,${0.8 * (1 - bt)})`);
+        }
+      }
+      for (const d of armors) {
+        const sy = at(d.y) + Math.sin(t * 0.7 + d.x * 8) * 1.5; // heavy: they bob slowly
+        if (!wet(sy, 22)) continue;
+        const ax = seenX + seenW * d.x + Math.sin(t * 0.25 + d.x * 4) * 6;
+        diver(ARMOR, ax, sy, d.flip);
+        for (let i = 0; i < 4; i++) {
+          const bt = (t * 0.6 + i / 4 + d.x) % 1; // bubbles out of the helmet
+          rect(ax + 6 + Math.sin(t * 2 + i * 2) * 2, sy - 1 - bt * 30, i % 2 ? 1 : 2, i % 2 ? 1 : 2, `rgba(220,245,255,${0.7 * (1 - bt)})`);
+        }
       }
       weed(false);
-      // ---- THE DEPTH ZONES: a dotted line where each zone starts, with its name and depth on the right (the same zones
-      // as your final rank: PLANKTON, SCHOOL FISH, RARE, DEEP CUT, ONE IN A MILLION, game/dive/daily.ts BANDS)
-      c.textAlign = "right";
+      // ---- THE DEPTH LINES: a faint dotted line every 100 m (with its depth on the left), and a brighter one with the
+      // name where each ZONE starts (on the right)
       c.textBaseline = "bottom";
       c.font = `5px ${font}, monospace`;
-      BANDS.forEach((band, i) => {
-        if (i === 0) return;
-        const ly = Math.round(at(band.from * 3));
+      const fromPts = Math.max(1, Math.floor((camY - subY) / 3)), toPts = Math.ceil((camY - subY + H) / 3);
+      for (let pts = fromPts; pts <= Math.min(720, toPts); pts++) {
+        if (pts % 10) continue;
+        const ly = Math.round(at(pts * 3));
+        if (ly < 3 || ly > H - 1 || ly < surface + 4) continue;
+        for (let x = Math.round(seenX) + 2; x < seenX + seenW - 2; x += 6) rect(x, ly, 2, 1, "rgba(255,255,255,0.13)");
+        c.textAlign = "left";
+        c.fillStyle = "rgba(255,255,255,0.32)";
+        c.fillText(`-${(pts * 10).toLocaleString("en-US")} m`, seenX + 3, ly - 1);
+      }
+      ZONES.forEach(([pts, name], i) => {
+        const ly = Math.round(at(pts * 3));
         if (ly < 4 || ly > H - 1 || ly < surface + 4) return;
-        const col = TIERS[Math.min(TIERS.length - 1, i)].color;
-        for (let x = Math.round(seenX) + 4; x < seenX + seenW - 4; x += 5) rect(x, ly, 3, 1, "rgba(255,255,255,0.32)");
-        c.globalAlpha = 0.8;
+        const col = ["#9fe8ff", "#56c8ff", "#ff5fd2", "#b77cff", "#ffd84a"][i % 5];
+        for (let x = Math.round(seenX) + 4; x < seenX + seenW - 4; x += 5) rect(x, ly, 3, 1, "rgba(255,255,255,0.38)");
         rect(seenX + seenW - 6, ly - 6, 3, 3, col);
-        c.fillStyle = "rgba(255,255,255,0.75)";
-        c.fillText(`${band.name} · -${(band.from * 10).toLocaleString("en-US")} m`, seenX + seenW - 9, ly - 2);
-        c.globalAlpha = 1;
+        c.textAlign = "right";
+        c.fillStyle = "rgba(255,255,255,0.8)";
+        c.fillText(`${name} · -${(pts * 10).toLocaleString("en-US")} m`, seenX + seenW - 9, ly - 2);
       });
+      // crossing into a new zone: its name flashes big at the top for a moment
+      const zoneNow = ZONES.reduce((z, [pts], i) => (cam >= pts ? i : z), -1);
+      if (zoneNow !== lastZone) {
+        if (zoneNow > lastZone && zoneNow >= 0 && lastZone >= -1 && t > 1) {
+          flashName = ZONES[zoneNow][1];
+          flashAt = t;
+        }
+        lastZone = zoneNow;
+      }
+      const ft = t - flashAt;
+      if (ft < 2.6) {
+        c.globalAlpha = ft < 0.3 ? ft / 0.3 : ft > 2 ? (2.6 - ft) / 0.6 : 1;
+        c.textAlign = "center";
+        c.textBaseline = "top";
+        c.font = `7px ${font}, monospace`;
+        c.fillStyle = "#12041c";
+        c.fillText(flashName, seenX + seenW / 2 + 1, 9);
+        c.fillStyle = "#ffffff";
+        c.fillText(flashName, seenX + seenW / 2, 8);
+        c.font = `4px ${font}, monospace`;
+        c.fillStyle = "#9fe8ff";
+        c.fillText("NOW ENTERING", seenX + seenW / 2, 2);
+        c.globalAlpha = 1;
+      }
       // ---- the sea floor: a sunken Pink Kart between the plants ----
       const floor = at(700 * 3 + 40);
       if (floor < H) {
@@ -426,7 +505,9 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   const [typed, setTyped] = useState("");
   const [left, setLeft] = useState(SECONDS);
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null);
-  const [sugg, setSugg] = useState<Hit[]>([]); // "DID YOU MEAN ...?" after a word that didn't count
+  const [sugg, setSugg] = useState<Hit[]>([]);
+  const [canGo, setCanGo] = useState(false); // the answer card is up and waiting for you to carry on
+  const nextRef = useRef<(() => void) | null>(null); // "DID YOU MEAN ...?" after a word that didn't count
   const [reveal, setReveal] = useState<Hit | "none" | null>(null); // the answer card between two prompts
   const [result, setResult] = useState<Result | null>(null);
   const [copied, setCopied] = useState(false);
@@ -548,8 +629,11 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     if (hit) [0, 1, 2].slice(0, 1 + Math.min(2, hit.tier)).forEach((i) => beep(500 + hit.tier * 120 + i * 160, 500 + hit.tier * 120 + i * 160, 0.1, "square", 0.1, i * 0.08));
     else beep(180, 70, 0.4, "sawtooth", 0.1);
     const isPractice = practice, d = dive, n = at;
-    window.setTimeout(
-      () => {
+    // the answer card stays up (enjoy it) until you type, press a key or tap: then the next prompt starts
+    window.setTimeout(() => setCanGo(true), hit ? 700 : 500);
+    nextRef.current = () => {
+        nextRef.current = null;
+        setCanGo(false);
         setReveal(null);
         setTyped("");
         if (n + 1 >= PER_DAY) finish(all, isPractice, d);
@@ -559,10 +643,27 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
           setLeft(SECONDS);
           window.setTimeout(() => inputRef.current?.focus(), 30);
         }
-      },
-      hit ? 1500 : 1100,
-    );
+    };
   };
+  const goOn = () => {
+    if (canGo && nextRef.current) nextRef.current();
+  };
+  // typing (any letter) or ENTER / SPACE carries on; the letter you typed becomes the start of your next answer
+  useEffect(() => {
+    if (screen !== "play" || !reveal || !canGo) return;
+    const key = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const letter = e.key.length === 1 && e.key !== " " ? e.key : "";
+      if (!letter && e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      const last = at + 1 >= PER_DAY; // (after the last one comes the results screen: nothing to type there)
+      goOn();
+      if (letter && !last) setTyped(letter);
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, reveal, canGo, at]);
 
   // the 25 second clock
   useEffect(() => {
@@ -711,9 +812,11 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
           <h2 className="pd-q">{p.q}</h2>
           {reveal ? (
             reveal === "none" ? (
-              <div className="pd-reveal pd-miss">NO ANSWER · 0 m</div>
+              <div className="pd-reveal pd-miss" onClick={goOn}>
+                NO ANSWER · 0 m
+              </div>
             ) : (
-              <div className="pd-reveal" style={{ borderColor: TIERS[reveal.tier].color, color: TIERS[reveal.tier].color }}>
+              <div className="pd-reveal" onClick={goOn} style={{ borderColor: TIERS[reveal.tier].color, color: TIERS[reveal.tier].color }}>
                 <div className="pd-reveal-a">{reveal.answer}</div>
                 <div>
                   {TIERS[reveal.tier].name} · -{reveal.depth * 10} m
@@ -754,6 +857,12 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
             </form>
           )}
           <div className={`pd-note ${note?.bad ? "pd-bad" : ""}`}>{note ? note.text : reveal ? "" : "ONE ANSWER COUNTS"}</div>
+          {reveal && canGo && (
+            <button className="pd-btn pd-next-btn" onClick={goOn}>
+              {at + 1 >= PER_DAY ? "SEE HOW DEEP ▶" : "DIVE ON ▶"}
+              <span className="pd-next-hint">or just start typing</span>
+            </button>
+          )}
           {!reveal && sugg.length > 0 && (
             <div className="pd-sugg">
               {sugg.map((h) => (
@@ -881,6 +990,9 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         @keyframes pdShake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
         .pd-sugg { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: -4px 0 8px; }
         .pd-sugg-btn { font-size: 9px; padding: 8px 10px; background: #3a1850; border-color: ${PINK}; }
+        .pd-next-btn { margin-top: 2px; background: #d63cc8; animation: pdPop 0.25s ease-out; }
+        .pd-next-hint { display: block; margin-top: 6px; font-size: 6px; color: rgba(255, 255, 255, 0.75); }
+        .pd-reveal { cursor: pointer; }
         .pd-skip { font-family: inherit; font-size: 7px; color: rgba(255, 255, 255, 0.6); background: none; border: none; cursor: pointer; padding: 6px; text-decoration: underline; }
         .pd-reveal { border: 3px solid; padding: 12px 8px; font-size: 9px; line-height: 2; background: rgba(0, 0, 0, 0.35); animation: pdPop 0.25s ease-out; }
         .pd-reveal-a { font-size: 14px; color: #fff; }
