@@ -2686,8 +2686,26 @@ export class KartGame {
       // (808 TEMPLE's speakers, towers, gates and pillars are 3D renders at double detail: public/kart/speaker.png etc.)
       // TATRA TRIP: mountain goats up on the rock (now and then one looks up from grazing), a bear sitting at the forest edge
       // (sniffing the air), and the log cabin with smoke coming out of its chimney
-      else if (d[2] === "goat") list.push({ far: true, img: this.img["goat"], sx: Math.floor(now / 2600 + d[0] * 0.37) % 3 === 0 ? 0 : 24, sw: 24, sh: 20, x: d[0], y: d[1], k: 1.8, lift: -1, flip: d[1] % 2 === 0, shadow: false });
-      else if (d[2] === "bear") list.push({ img: this.img["bear"], sx: Math.floor(now / 900 + d[0]) % 4 === 0 ? 30 : 0, sw: 30, sh: 30, x: d[0], y: d[1], k: 0.95, lift: -1, flip: false, shadow: true });
+      else if (d[2] === "goat" || d[2] === "bear") {
+        // they walk back and forth along the slope (d[3] = which way), slowing down at each end; a goat stops to graze
+        // there, a bear sits down for a rest before it walks back
+        const goat = d[2] === "goat";
+        const range = goat ? 55 : 85, speed = goat ? 0.13 : 0.09;
+        const ph = (now / 1000) * speed + d[0] * 0.013;
+        const off = Math.sin(ph) * range, vel = Math.cos(ph);
+        const wx = d[0] + Math.cos(d[3]) * off, wy = d[1] + Math.sin(d[3]) * off;
+        const walking = Math.abs(vel) > (goat ? 0.35 : 0.3);
+        // facing: which way it's going across the screen
+        const right = (Math.cos(d[3]) * rx + Math.sin(d[3]) * ry) * vel > 0;
+        const step = Math.floor(now / (goat ? 230 : 320)) % 2;
+        if (goat) {
+          const fr = walking ? 2 + step : Math.floor(now / 1800 + d[0]) % 3 === 0 ? 0 : 1;
+          list.push({ far: true, img: this.img["goat"], sx: fr * 24, sw: 24, sh: 20, x: wx, y: wy, k: 1.8, lift: -1, flip: right, shadow: false });
+        } else {
+          const fr = walking ? 2 + step : Math.floor(now / 900 + d[0]) % 4 === 0 ? 1 : 0;
+          list.push({ img: this.img["bear"], sx: fr * 40, sw: 40, sh: 30, x: wx, y: wy, k: 0.95, lift: -1, flip: walking ? !right : false, shadow: true });
+        }
+      }
       else if (d[2] === "cabin") list.push({ far: true, img: this.img["cabin"], sx: Math.floor(now / 500) % 2 ? 120 : 0, sw: 120, sh: 100, x: d[0], y: d[1], k: d[3], lift: -3, flip: false, shadow: false });
       else if (d[2] === "pine") list.push({ img: this.img["pine"], sx: 0, sw: 40, sh: 64, x: d[0], y: d[1], k: d[3] * 0.55, lift: -2, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "alp") list.push({ far: true, img: this.img["alp"], sx: 0, sw: 240, sh: 200, x: d[0], y: d[1], k: d[3] / 2.6, lift: -10, flip: d[0] % 2 === 0, shadow: false });
