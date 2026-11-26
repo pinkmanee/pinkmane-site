@@ -46,6 +46,7 @@ type TrackData = {
   smokeRings?: [number, number][]; // HOTBOX HIGHWAY: smoke rings floating over the road; drive through one = a boost
   terrain?: boolean; // A REAL MOUNTAIN (TATRA TRIP): the land has its own height map (trackN-height.png) and is drawn by the terrain renderer
   tgrid?: number; // how many squares across that height map is
+  grass?: number[][]; // the grass along the road on a mountain map: dark, middle, tip colours (r, g, b)
   painted?: boolean; // the ground picture already has the land's colours and light painted in (TATRA TRIP): keep them as they are
   hill?: number[]; // HILLS: how high the road is at every centre point (0 = flat; the land around follows, fading out)
   slaps?: [number, number][]; // SLAPPING TENTACLES (SMOKE OCEAN): [centre point, which side it comes from: 1 / -1]
@@ -2210,10 +2211,16 @@ export class KartGame {
     const fog = this.pal.fog;
     const [fogAt, fogLen] = this.track.fog ?? [900, 4200];
     const occ = this.occ, shade = this.shade;
+    // THE GRASS along the road's edges: where the line of sight crosses from road to grass (or back), a tuft of blades
+    // stands up there, taller than the road, swaying in the wind
+    const types = this.types, TH = this.track.size / 2, pal = this.pal, sway = performance.now() / 1000;
+    const roadish = (t: number) => t === 1 || t === 2 || t === 4;
+    const gc = this.track.grass, abgrOf = (c: number[]) => 0xff000000 | (c[2] << 16) | (c[1] << 8) | c[0];
+    const gDark = gc ? abgrOf(gc[0]) : pal.gDark, gMid = gc ? abgrOf(gc[1]) : pal.gMid, gTip = gc ? abgrOf(gc[2]) : pal.gTip;
     for (let x = 0; x < BW; x++) {
       const k = (x - BW / 2) / FOCAL;
       const vx = dx + rx * k, vy = dy + ry * k;
-      let ybuf = BH, lv = 0, z = 4, zp = 4, syp = 1e6, hp = -1e6;
+      let ybuf = BH, lv = 0, z = 4, zp = 4, syp = 1e6, hp = -1e6, tPrev = -1;
       while (z < TERRAIN_FAR && ybuf > 0) {
         const wx = camX + vx * z, wy = camY + vy * z;
         // the height here (blended between the 4 nearest squares)
@@ -2248,6 +2255,24 @@ export class KartGame {
             out[y * BW + x] = c;
           }
           ybuf = yi;
+        }
+        // the grass edge
+        if (z < 700) {
+          const tx = (wx | 0) >> 1, ty = (wy | 0) >> 1;
+          const t = tx >= 0 && ty >= 0 && tx < TH && ty < TH ? types[ty * TH + tx] : 0;
+          if (tPrev >= 0 && t !== tPrev && (roadish(t) !== roadish(tPrev)) && t !== 3 && tPrev !== 3) {
+            const seedG = ((tx >> 1) * 7 + (ty >> 1) * 13) & 255;
+            const wave = 0.72 + 0.28 * Math.sin(sway * 3.6 + seedG * 0.7 + x * 0.06);
+            const tall = Math.max(1, Math.min(14, Math.round(((GRASS_TALL * 1.6 * FOCAL) / z) * (0.5 + (seedG & 7) / 10) * wave)));
+            const base = Math.min(ybuf, yi + 1);
+            for (let k = 1; k <= tall; k++) {
+              const yy = base - k;
+              if (yy < 0) break;
+              out[yy * BW + x] = k >= tall ? gTip : k >= tall - 2 && tall > 3 ? gMid : gDark;
+            }
+            ybuf = Math.max(0, Math.min(ybuf, base - tall));
+          }
+          tPrev = t;
         }
         zp = z;
         syp = sy;
