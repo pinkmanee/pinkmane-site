@@ -18,6 +18,16 @@ export const MAX_RACERS = 8; // karts in one race
 export const MIN_GRID = 6; // with BOTS on, empty seats are filled with bots up to this many karts
 const MAX_LOBBY = 60; // people in a lobby at once (the rest get "LOBBY FULL")
 const BOT_NAMES = ["808", "SERUM", "VOID", "HEX", "KONG", "JUNGLE", "BOMBER"];
+// the drivers a player can pick (the same ids as DRIVERS in kart.ts); yours is remembered on this device
+const DRIVER_IDS = ["mane", "tomb"];
+const cleanCar = (c: unknown) => (typeof c === "string" && DRIVER_IDS.includes(c) ? c : "mane");
+const myDriver = () => {
+  try {
+    return cleanCar(localStorage.getItem("pinkkart-driver"));
+  } catch {
+    return "mane";
+  }
+};
 
 export type LobbyPlayer = { id: string; name: string; host: boolean; link?: string };
 export type Winner = { name: string; link?: string; time: number | null };
@@ -36,7 +46,7 @@ export type View = {
   winner: Winner | null; // stream mode: the fastest player (and their link, the song to play)
 };
 
-type Info = { name: string; link?: string; seen: number };
+type Info = { name: string; link?: string; seen: number; car?: string };
 
 const newId = () => {
   let s = "";
@@ -125,7 +135,7 @@ export class Session {
     this.lobbyWire.onPacket = (p) => this.packet(p);
     this.lobbyWire.onStatus = (live) => this.set({ live });
     if (isHost) {
-      this.info.set(myId, { name: myName, seen: Date.now() });
+      this.info.set(myId, { name: myName, seen: Date.now(), car: myDriver() });
       this.line = [myId];
       this.lDirty = true;
     } else window.setTimeout(() => this.hi(), 300);
@@ -199,7 +209,7 @@ export class Session {
     const racers = this.line.filter((id) => this.info.has(id)).slice(0, MAX_RACERS);
     // shuffle the grid (the host isn't always at the front)
     const order = [...racers].sort(() => Math.random() - 0.5);
-    const seats: Seat[] = order.map((id, i) => ({ id, name: this.info.get(id)!.name, skin: i, bot: false }));
+    const seats: Seat[] = order.map((id, i) => ({ id, name: this.info.get(id)!.name, skin: i, bot: false, car: this.info.get(id)!.car ?? "mane" }));
     if (this.view.bots)
       for (let i = seats.length, b = 0; i < MIN_GRID; i++, b++) seats.push({ id: `bot${b}`, name: BOT_NAMES[b % BOT_NAMES.length], skin: i, bot: true });
     this.lobbyWire.send("go", { s: seats, t: this.view.track });
@@ -328,7 +338,7 @@ export class Session {
     return raw
       .slice(0, MAX_RACERS)
       .filter((s): s is Seat => !!s && typeof (s as Seat).id === "string" && typeof (s as Seat).skin === "number")
-      .map((s) => ({ id: s.id.slice(0, 24), name: cleanRacerName(s.name) || "?", skin: Math.max(0, Math.min(7, Math.floor(s.skin))), bot: !!s.bot }));
+      .map((s) => ({ id: s.id.slice(0, 24), name: cleanRacerName(s.name) || "?", skin: Math.max(0, Math.min(7, Math.floor(s.skin))), bot: !!s.bot, car: cleanCar(s.car) }));
   }
 
   // (everybody but the host) the host's list of who's in
@@ -361,7 +371,7 @@ export class Session {
     const name = cleanRacerName(d.name) || "?";
     const link = this.view.stream ? cleanMusicLink(d.link) ?? undefined : undefined;
     if (this.view.stream && !link) return; // stream mode: no link, no entry
-    this.info.set(id, { name, link, seen: now });
+    this.info.set(id, { name, link, seen: now, car: cleanCar(d.car) });
     if (!this.line.includes(id)) this.line.push(id);
     if (!known || known.name !== name || known.link !== link) {
       this.refreshPlayers();
@@ -404,7 +414,7 @@ export class Session {
 
   private hi() {
     this.lastHi = Date.now();
-    this.lobbyWire.send("hi", { name: this.myName, link: this.myLink });
+    this.lobbyWire.send("hi", { name: this.myName, link: this.myLink, car: myDriver() });
   }
 
   // twice a second

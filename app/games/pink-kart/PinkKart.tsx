@@ -9,7 +9,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { KartGame, TRACKS, type Difficulty } from "../../../game/kart/kart";
+import { DRIVERS, KartGame, TRACKS, isDriver, type Difficulty } from "../../../game/kart/kart";
 import GamepadBridge from "../../components/GamepadBridge"; // game controllers: A = gas, B = brake, X = item, START = pause
 import { Session, MAX_RACERS, type View } from "../../../game/kart/online";
 import { cleanCode, cleanMusicLink, cleanRacerName, musicSite } from "../../../game/kart/links";
@@ -241,7 +241,49 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
       localStorage.setItem("pinkkart-difficulty", d);
     } catch {}
   };
+  // WHO YOU DRIVE AS: remembered on this device (online, the lobby tells everyone else too)
+  const [driver, setDriver] = useState("mane");
+  useEffect(() => {
+    try {
+      const d = localStorage.getItem("pinkkart-driver");
+      if (isDriver(d)) setDriver(d);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    if (gameRef.current) gameRef.current.driver = driver;
+  }, [driver]);
+  const pickDriver = (d: string) => {
+    setDriver(d);
+    try {
+      localStorage.setItem("pinkkart-driver", d);
+    } catch {}
+  };
+  // each driver's little portrait: the front view of their kart, cut out of its 3D sheet (16 views x 9 pictures)
+  const PORTRAIT: Record<string, { file: string; w: number; h: number }> = {
+    mane: { file: "/kart/kart3d-mane.png", w: 864, h: 1344 },
+    tomb: { file: "/kart/kart3d-tomb.png", w: 864, h: 1600 },
+  };
+  const portrait = (id: string) => {
+    const p = PORTRAIT[id];
+    const fw = p.w / 9, fh = p.h / 16, k = 0.62;
+    return (
+      <span
+        aria-hidden="true"
+        style={{
+          display: "block",
+          width: fw * k,
+          height: fh * k,
+          margin: "0 auto 4px",
+          backgroundImage: `url(${p.file})`,
+          backgroundSize: `${p.w * k}px ${p.h * k}px`,
+          backgroundPosition: `${-fw * 3 * k}px ${-fh * 8 * k}px`,
+          imageRendering: "pixelated",
+        }}
+      />
+    );
+  };
   const solo = () => {
+    if (gameRef.current) gameRef.current.driver = driver;
     gameRef.current?.startSolo(track, diff);
     setScreen("none");
   };
@@ -425,6 +467,32 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
       <>
         {title("PINK KART", local ? "LOCAL TEST MODE" : undefined)}
         {maps(track, pickTrack)}
+        {/* who you drive as */}
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${DRIVERS.length}, 1fr)`, gap: 8, marginBottom: 8 }} aria-label="Driver">
+          {DRIVERS.map((d) => (
+            <button
+              key={d.id}
+              onClick={() => pickDriver(d.id)}
+              aria-pressed={driver === d.id}
+              style={{
+                fontFamily: font,
+                fontSize: 10,
+                padding: "6px 6px 8px",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "flex-end",
+                color: driver === d.id ? INK : PALE,
+                background: driver === d.id ? PINK : "transparent",
+                border: `2px solid ${driver === d.id ? PINK : PALE}`,
+                boxShadow: driver === d.id ? `0 3px 0 ${PALE}` : "none",
+                cursor: "pointer",
+              }}
+            >
+              {portrait(d.id)}
+              {d.name}
+            </button>
+          ))}
+        </div>
         {/* how good the computer racers are (solo races) */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 10 }} aria-label="Difficulty">
           {(["EASY", "MEDIUM", "HARD"] as Difficulty[]).map((d) => (

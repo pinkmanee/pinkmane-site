@@ -198,7 +198,15 @@ const LAPS = 3;
 // To add a new drawn kart: put its 3 pictures in public/kart/, add it here, and give it to a racer in BOTS.
 const CARS: Record<string, { k: number }> = {
   mane: { k: 0.25 }, // with the camera 65 behind, your own kart is drawn at exactly its drawn size
+  tomb: { k: 0.25 }, // TOMBFELL the backwood wizard (kart3d-tomb.png), in his own colours
 };
+// THE DRIVERS you can pick (the kart menu). "mane" comes in a colour per racer; the others always look like themselves.
+// To add one: render its 3D kart sheet into public/kart/kart3d-<id>.png, add it to CARS and here.
+export const DRIVERS: { id: string; name: string }[] = [
+  { id: "mane", name: "PINKMANE" },
+  { id: "tomb", name: "TOMBFELL" },
+];
+export const isDriver = (id: unknown): id is string => typeof id === "string" && DRIVERS.some((d) => d.id === id);
 const KART_ANGLES = 16; // the 3D kart is drawn from this many angles all the way around
 // the slapping tentacles' rhythm (seconds): waiting, then rearing up (warning) until SLAP_DOWN, lying across the road, sliding back
 const SLAP_CYCLE = 3.4, SLAP_RISE = 1.2, SLAP_DOWN = 2.0, SLAP_BACK = 2.7;
@@ -267,7 +275,7 @@ const BOTS: { name: string; car: string; color: [number, number, number] }[] = [
 const skinColor = (skin: number): [number, number, number] => (skin === 0 ? [255, 70, 200] : BOTS[(skin - 1) % BOTS.length].color);
 
 // ---------------- ONLINE: what the game and the lobby (game/kart/online.ts) say to each other
-export type Seat = { id: string; name: string; skin: number; bot: boolean };
+export type Seat = { id: string; name: string; skin: number; bot: boolean; car?: string };
 export type ResultRow = { id: string; name: string; time: number | null; bot: boolean };
 export type ItemEvent = { id: string; k: number; kind: ItemName; x: number; y: number; vx: number; vy: number; h?: number };
 export interface OnlineLink {
@@ -402,6 +410,8 @@ export class KartGame {
   private types!: Uint8Array;
   private img: Record<string, HTMLImageElement> = {};
   private kartSkins: Record<string, HTMLCanvasElement>[] = [];
+  private carSkins: Record<string, Record<string, HTMLCanvasElement>> = {}; // the drivers with their own look (TOMBFELL)
+  driver = "mane"; // who you drive as (picked in the kart menu)
   private seaHt = new Uint8Array(0);
   private seaCol = new Uint32Array(0); // SMOKE OCEAN: each sea pixel's own colour (the waves are drawn from it)
   private seaTop = new Int16Array(BW); // SMOKE OCEAN: per column, how high the nearer waves already reach // SMOKE OCEAN: how high the smoke stands at each pixel of the ground picture
@@ -568,7 +578,7 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", "smokering", "puff", "alp", "cave", "crystal", "pine", "goat", "bear", "cabin", ...ITEMS.map((i) => `item-${i}`)];
+    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", "smokering", "puff", "alp", "cave", "crystal", "pine", "goat", "bear", "cabin", "kart3d-tomb", ...ITEMS.map((i) => `item-${i}`)];
     const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n)), this.loadTrip()]);
     this.packs = packs;
     for (const it of ITEMS) (this.img[`item-${it}`] as { pkRes?: number }).pkRes = this.img[`item-${it}`].width / 48;
@@ -592,6 +602,21 @@ export class KartGame {
       }
       return set;
     });
+    // the drivers with their own look: their sheet cut into the 16 views, not recoloured
+    for (const d of DRIVERS) {
+      if (d.id === "mane" || !this.img[`kart3d-${d.id}`]) continue;
+      const sheet = this.img[`kart3d-${d.id}`];
+      const fh = sheet.height / KART_ANGLES;
+      const set: Record<string, HTMLCanvasElement> = {};
+      for (let i = 0; i < KART_ANGLES; i++) {
+        const v = document.createElement("canvas");
+        v.width = sheet.width;
+        v.height = fh;
+        v.getContext("2d")!.drawImage(sheet, 0, i * fh, sheet.width, fh, 0, 0, sheet.width, fh);
+        set[`a${i}`] = v;
+      }
+      this.carSkins[d.id] = set;
+    }
     // the explosion: 6 clean frames side by side (a ball of fire that opens into a ring)
     const BF = 64;
     this.boom = document.createElement("canvas");
@@ -826,8 +851,10 @@ export class KartGame {
       const a = Math.atan2(ny - cy, nx - cx);
       const side = (i % 2 ? 1 : -1) * 16;
       const player = i === 5;
+      // when you drive as PINKMANE, the first computer racer is TOMBFELL (and when you're TOMBFELL, he's you)
+      const tombBot = !player && i === 0 && this.driver !== "tomb";
       this.karts.push({
-        name: player ? "YOU" : BOTS[i].name,
+        name: player ? "YOU" : tombBot ? "TOMBFELL" : BOTS[i].name,
         player,
         id: "",
         ctl: player ? "me" : "bot",
@@ -835,7 +862,7 @@ export class KartGame {
         left: false,
         buf: [],
         skin: player ? 0 : i + 1,
-        car: player ? "mane" : BOTS[i].car,
+        car: player ? (CARS[this.driver] ? this.driver : "mane") : tombBot ? "tomb" : BOTS[i].car,
         rev: -1,
         stall: 0,
         x: cx - Math.sin(a) * side,
@@ -1703,7 +1730,7 @@ export class KartGame {
         left: false,
         buf: [],
         skin: st.skin,
-        car: "mane",
+        car: st.car && CARS[st.car] ? st.car : "mane",
         rev: -1,
         stall: 0,
         x: cx - Math.sin(a) * side,
@@ -2664,7 +2691,7 @@ export class KartGame {
       // which of the 16 views of the 3D kart: 0 = from behind, 4 / 12 = from the sides, 8 = from the front
       const STEP = (Math.PI * 2) / KART_ANGLES;
       const angle = (((Math.round(rel / STEP) * KART_DIR) % KART_ANGLES) + KART_ANGLES) % KART_ANGLES;
-      const im = this.kartSkins[k.skin][`a${angle}`];
+      const im = (this.carSkins[k.car] ?? this.kartSkins[k.skin])[`a${angle}`];
       const fw = im.width / 9;
       // flames only while boosting, or while revving on the start line
       const fire = k.boost > 0 || (this.state === "count" && k.rev >= 0);
