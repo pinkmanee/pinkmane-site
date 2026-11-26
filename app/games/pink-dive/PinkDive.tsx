@@ -536,11 +536,28 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, reveal, at, slots]);
 
-  const submit = () => {
-    if (screen !== "play" || reveal) return;
+  const checking = useRef(false);
+  const submit = async () => {
+    if (screen !== "play" || reveal || checking.current) return;
     const p = prompts[at];
     if (!p || !typed.trim()) return;
-    const hit = check(p, typed);
+    let hit = check(p, typed);
+    if (!hit) {
+      // not on our lists: ask THE BIG LOOKUP (the server checks it on Wikidata, app/api/dive + game/dive/lookup.ts)
+      checking.current = true;
+      setNote({ text: "CHECKING...", bad: false });
+      const here = at;
+      try {
+        const ctrl = new AbortController();
+        const timer = window.setTimeout(() => ctrl.abort(), 5000);
+        const r = await fetch(`/api/dive?look=${encodeURIComponent(p.id)}&q=${encodeURIComponent(typed.trim().slice(0, 50))}`, { signal: ctrl.signal });
+        window.clearTimeout(timer);
+        const j = r.ok ? ((await r.json()) as { answer?: string | null }) : null;
+        if (j?.answer) hit = { answer: j.answer, tier: 3, depth: TIERS[3].depth };
+      } catch {}
+      checking.current = false;
+      if (lockedAt.current === here) return; // the clock ran out while checking
+    }
     if (hit) lock(hit);
     else {
       // didn't count: keep what was typed (so a typo is quick to fix) and offer the closest answers to tap
@@ -662,7 +679,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
               className="pd-form"
               onSubmit={(e) => {
                 e.preventDefault();
-                submit();
+                void submit();
               }}
             >
               <input

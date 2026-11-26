@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getRedis, hash } from "../scores/shared";
-import { PER_DAY, byName, diveNumber, liveDepth, promptsForDive } from "../../../game/dive/daily";
+import { PER_DAY, byName, diveNumber, liveDepth, norm, promptsForDive, type Hit } from "../../../game/dive/daily";
+import { PROMPTS, TIERS } from "../../../game/dive/prompts";
+import { RULES, wikidataLookup } from "../../../game/dive/lookup";
 
 // PINK DIVE: today's answers from everyone (same database as the scoreboards).
 //   POST /api/dive  { dive, device, answers: [7 answers or null] }
@@ -9,6 +11,9 @@ import { PER_DAY, byName, diveNumber, liveDepth, promptsForDive } from "../../..
 //        one everybody gave sinks less (game/dive/daily.ts, liveDepth). One dive per device per day; sending it again just
 //        returns your result.
 //   GET  /api/dive?dive=12  -> { players, hist }   (for the curve on the results screen)
+//   GET  /api/dive?look=fish&q=bluefin+trevally -> { answer: "bluefin trevally" | null }
+//        THE BIG LOOKUP: an answer that isn't on our lists gets checked on Wikidata (game/dive/lookup.ts). If it's real and
+//        fits, it counts as a DEEP CUT. The result is remembered for 30 days, so the final count (POST) can trust it.
 // Everything about a dive is deleted after 4 days.
 
 export const dynamic = "force-dynamic";
@@ -46,11 +51,42 @@ function better(total: number, hist: Record<string, number>, players: number) {
   return Math.max(0, Math.min(100, Math.round(((below + Math.max(0, same - 1) / 2) / (players - 1)) * 100)));
 }
 
+// ---- THE BIG LOOKUP (remembered in the database, so each word is only asked about once a month)
+const LOOK_KEEP = 30 * 86400;
+const DEEP = 3; // the tier an answer found this way gets: DEEP CUT
+async function lookUp(promptId: string, typed: string): Promise<string | null> {
+  if (!RULES[promptId] || !PROMPTS.some((p) => p.id === promptId)) return null;
+  const k = norm(typed);
+  if (k.length < 2 || k.length > 50) return null;
+  const redis = getRedis();
+  const key = `dive:look:${promptId}:${k}`;
+  try {
+    const saved = redis ? await redis.get<string>(key) : null;
+    if (typeof saved === "string") return saved || null;
+  } catch {}
+  const found = await wikidataLookup(promptId, typed);
+  try {
+    if (redis) {
+      await redis.set(key, found ?? "", { ex: LOOK_KEEP });
+      if (found) await redis.set(`dive:look:${promptId}:${norm(found)}`, found, { ex: LOOK_KEEP });
+    }
+  } catch {}
+  return found;
+}
+const deepHit = (answer: string): Hit => ({ answer: answer.toUpperCase(), tier: DEEP, depth: TIERS[DEEP].depth });
+
 export async function GET(req: Request) {
   if (off()) return fail("not found", 404);
+  const params = new URL(req.url).searchParams;
+  const look = params.get("look");
+  if (look) {
+    const q = params.get("q") ?? "";
+    const found = await lookUp(look, q);
+    return NextResponse.json({ answer: found ? deepHit(found).answer : null });
+  }
   const redis = getRedis();
   if (!redis) return fail("offline", 503);
-  const dive = Number(new URL(req.url).searchParams.get("dive")) || diveNumber();
+  const dive = Number(params.get("dive")) || diveNumber();
   try {
     return NextResponse.json(await curve(redis, dive));
   } catch {
@@ -78,10 +114,17 @@ export async function POST(req: Request) {
 
   // only answers that are really on the list count (the server checks them again)
   const prompts = promptsForDive(dive);
-  const hits = prompts.map((p, i) => {
-    const a = (body.answers as unknown[])[i];
-    return typeof a === "string" && a.length <= 60 ? byName(p, a) : null;
-  });
+  const hits = await Promise.all(
+    prompts.map(async (p, i) => {
+      const a = (body.answers as unknown[])[i];
+      if (typeof a !== "string" || a.length > 60) return null;
+      const listed = byName(p, a);
+      if (listed) return listed;
+      // not on our lists: was it found by THE BIG LOOKUP? (remembered, or asked again)
+      const found = await lookUp(p.id, a);
+      return found ? deepHit(found) : null;
+    }),
+  );
 
   try {
     const devKey = `dive:${dive}:dev:${hash(device).slice(0, 32)}`;

@@ -3,6 +3,8 @@
 
 import { PROMPTS, TIERS, type Prompt } from "./prompts";
 import { MORE } from "./more";
+import { MORE2 } from "./more2";
+import { MORE3 } from "./more3";
 
 /** DIVE #1 is this day (UTC). Every day after is the next number. */
 export const LAUNCH = Date.UTC(2026, 10, 26);
@@ -78,7 +80,7 @@ export function indexOf(p: Prompt): Map<string, Hit> {
   let m = indexes.get(p.id);
   if (m) return m;
   m = new Map();
-  const lines: string[][] = [p.t, MORE[p.id] ?? []];
+  const lines: string[][] = [p.t, MORE[p.id] ?? [], MORE2[p.id] ?? [], MORE3[p.id] ?? []];
   for (const tiers of lines)
     tiers.forEach((line, tier) => {
       for (const entry of line.split(",")) {
@@ -133,13 +135,27 @@ function typoDistance(a: string, b: string, max: number): number {
 /** how many mistakes a word of this length may have */
 const allowance = (len: number) => (len <= 2 ? 0 : len === 3 ? 0.5 : len <= 5 ? 1 : len <= 8 ? 1.5 : len <= 12 ? 2 : 3);
 
+// words people add around an answer that don't change it: "mt everest", "lake como", "salmon fish", "pug dog", "the beatles band"
+const BEFORE = /^(mount|mt|mont|monte|lake|loch|lago|river|rio|isle of|island of|isla|cape|dj|mc|saint|st|sankt)\s+/;
+const AFTER = /\s+(fish|bird|dog|breed|puppy|cat|snake|lizard|bug|insect|fruit|berry|veg|vegetable|cheese|pasta|noodles|topping|pizza|candy|bar|chocolate|strain|weed|river|lake|sea|ocean|bay|gulf|mountain|mountains|mount|range|peak|volcano|island|islands|isle|band|group|crew|song|track|movie|film|anime|series|show|cartoon|character|pokemon|state|country|city)$/;
 function variants(typed: string): string[] {
   const k = norm(typed);
   if (!k) return [];
-  const tries = [k, k.replace(/ /g, "")];
-  if (k.endsWith("es")) tries.push(k.slice(0, -2));
-  if (k.endsWith("s")) tries.push(k.slice(0, -1));
-  else tries.push(k + "s");
+  const bases = new Set([k]);
+  // take the extra words off, both ends, as long as something is left
+  let x = k;
+  for (let i = 0; i < 2; i++) {
+    const y = x.replace(BEFORE, "").replace(AFTER, "");
+    if (y && y !== x) bases.add((x = y));
+  }
+  const tries: string[] = [];
+  for (const b of bases) {
+    tries.push(b, b.replace(/ /g, ""));
+    if (b.endsWith("ies")) tries.push(b.slice(0, -3) + "y");
+    if (b.endsWith("es")) tries.push(b.slice(0, -2));
+    if (b.endsWith("s")) tries.push(b.slice(0, -1));
+    else tries.push(b + "s");
+  }
   return tries;
 }
 
@@ -165,6 +181,23 @@ export function check(p: Prompt, typed: string): Hit | null {
   for (const t of variants(typed)) {
     const hit = m.get(t);
     if (hit) return hit;
+  }
+  // a kind of something that's on the list: "atlantic salmon" -> SALMON, "giant red tortoise" -> TORTOISE (scores like it)
+  const words = norm(typed).split(" ");
+  // an extra word at the end: "granny smith apple" -> GRANNY SMITH, "black widow spider" -> BLACK WIDOW
+  for (let i = 1; i < words.length && i <= 2; i++) {
+    const front = words.slice(0, words.length - i).join(" ");
+    if (front.length < 4 || !front.includes(" ")) break;
+    const hit = m.get(front) ?? m.get(front.replace(/ /g, ""));
+    if (hit) return hit;
+  }
+  for (let i = 1; i < words.length && i <= 2; i++) {
+    const rest = words.slice(i).join(" ");
+    if (rest.length < 3) break;
+    for (const t of variants(rest)) {
+      const hit = m.get(t);
+      if (hit) return hit;
+    }
   }
   const close = near(p, typed, 0);
   if (!close.length) return null;

@@ -3,7 +3,7 @@
 // Everything you see comes from the pictures in public/kart/ : swap a picture, the game changes.
 
 import { KartSound } from "./sound";
-import { cobblePixel, fieldPixel, makePsyProps, makePsySky, makeTempleWall, plankPixel, psyColours, tilePixel, waterPixel, type PsyTheme } from "./psy"; // the psychedelic look
+import { cobblePixel, fieldPixel, makePsyProps, makePsySky, makeTempleWall, plankPixel, psyColours, seaHeight, tilePixel, waterPixel, type PsyTheme } from "./psy"; // the psychedelic look
 import { buzz } from "../buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // THE MUSIC IN PINK KART: which of your beats plays where (files in public/music). Change a file name to change the song.
@@ -35,7 +35,8 @@ type TrackData = {
   zone?: number[]; // for every centre point: 0 = the field, 1 = the void
   spawnIdx?: number[]; // where a kart is put back after falling (before the jump if it fell into the gap)
   spawnOff?: number[]; // ...and how far to the side (the split has a hole in the middle)
-  water?: boolean; // the "void" around the road is the sea (SMOKE OCEAN): it's drawn as a sea of puffy smoke
+  water?: boolean; // the "void" around the road is the sea (SMOKE OCEAN): it's drawn as rolling waves
+  seaSplit?: number; // SMOKE OCEAN: west of this x the sea is water, east of it the waves are smoke
   fallText?: string; // what it says when you fall off (default: INTO THE VOID)
   decor?: [number, number, string, number][]; // big things standing around: [x, y, "ship" | "tentacle" | "speaker" | "eq", size]
   beat?: { bpm: number; at: number }; // the map song's tempo and where its first beat is (s): speakers and equalizers move on it
@@ -176,6 +177,7 @@ const UH = 270;
 const HORIZON = 100;
 const FOCAL = 260;
 const CAM_H = 34;
+const SMOKE_TALL = 9; // SMOKE OCEAN: how high the waves rise (world units; a kart is about 19 tall)
 const CAM_BACK = 65; // how far the camera sits behind your kart
 const PITCH_UP = 60; // HILLS: how far the camera may tilt down over a crest (pixels the horizon moves up)
 const MAX_ROWS = BH - HORIZON + PITCH_UP; // the most ground rows there can be on screen
@@ -384,6 +386,7 @@ export class KartGame {
   private types!: Uint8Array;
   private img: Record<string, HTMLImageElement> = {};
   private kartSkins: Record<string, HTMLCanvasElement>[] = [];
+  private seaHt = new Uint8Array(0); // SMOKE OCEAN: how high the smoke stands at each pixel of the ground picture
   private mini!: HTMLCanvasElement;
   private pal!: Pal;
   private boom!: HTMLCanvasElement;
@@ -1224,7 +1227,7 @@ export class KartGame {
         k.boost = 0;
         k.spin = 0;
         k.spinA = 0;
-        if (k.player) this.say(this.track.fallText ?? "INTO THE VOID", 1);
+        if (k.player) this.say(this.track.seaSplit ? (k.x < this.track.seaSplit ? "SPLASH!" : "POOF!") : (this.track.fallText ?? "INTO THE VOID"), 1);
         continue;
       }
 
@@ -2260,7 +2263,11 @@ export class KartGame {
     const outside = this.track.outside ?? 0; // what's past the edge of the map: more field (0) or the void (3)
     // far away the ground fades into the haze: pink over the field, deep purple in the void
     const FOG_R = Math.round(pal.fog[0] + (pal.vfog[0] - pal.fog[0]) * zf), FOG_G = Math.round(pal.fog[1] + (pal.vfog[1] - pal.fog[1]) * zf), FOG_B = Math.round(pal.fog[2] + (pal.vfog[2] - pal.fog[2]) * zf);
-    const water = !!this.track.water, seaT = performance.now() / 1000;
+    const water = !!this.track.water, seaT = performance.now() / 1000, seaSplit = this.track.seaSplit ?? 0;
+    // SMOKE OCEAN: how high the smoke stands at each pixel (filled in below, used for the smoke waves)
+    if (water && this.seaHt.length !== out.length) this.seaHt = new Uint8Array(out.length);
+    const seaHt = this.seaHt;
+    if (water) seaHt.fill(0);
     const [fogAt, fogLen] = this.track.fog ?? [500, 2600]; // (HOTBOX HIGHWAY: thick smoke, so the haze starts close)
     for (let r = 0; r < rows; r++) {
       const z = rowZ[r];
@@ -2278,12 +2285,15 @@ export class KartGame {
         let field = 1;
         let t = outside;
         const inside = ix >= 0 && iy >= 0 && ix < S && iy < S;
-        if (inside) t = types[(iy >> 1) * TH + (ix >> 1)];
+        if (inside) t = types[((wy | 0) >> 1) * TH + ((wx | 0) >> 1)];
         if (t === 3) {
           field = 2;
           if (water) {
             // the sea: moving waves, fading into the haze far away
-            c = waterPixel(wx, wy, seaT);
+            // west: water, east: smoke (mixed pixel by pixel over a wide band, so the change is soft)
+            const sm = seaSplit ? (wx - seaSplit) / 420 + 0.5 : 1;
+            c = waterPixel(wx, wy, seaT, sm >= 1 || (sm > 0 && ((((wx | 0) * 73856093) ^ ((wy | 0) * 19349663)) & 1023) < sm * 1024));
+            seaHt[o] = (seaHeight() * 255) | 0;
             if (f256) {
               const cr = ((c & 255) * inv + FOG_R * f256) >> 8;
               const cg = (((c >> 8) & 255) * inv + FOG_G * f256) >> 8;
@@ -2360,6 +2370,30 @@ export class KartGame {
         for (let k = 1; k <= h && r - k >= 0; k++) out[o - k * BW] = k >= h ? pal.gTip : k >= h - 1 && h > 3 ? pal.gMid : pal.gDark;
       }
     }
+    // ---- SMOKE WAVES (SMOKE OCEAN): every bit of smoke stands up out of the sea by its height, far rows first, so nearer
+    // waves hide the ones (and the road) behind them. Its top edge catches the light.
+    if (water)
+      for (let r = 1; r < rows; r++) {
+        const z = rowZ[r];
+        const scale = (SMOKE_TALL * FOCAL) / z;
+        if (scale < 0.6) continue;
+        const row = r * BW;
+        for (let x = 0; x < BW; x++) {
+          const o = row + x;
+          const h = seaHt[o];
+          if (!h) continue;
+          const up = Math.min(20, Math.round((h / 255) * scale));
+          if (up < 1) continue;
+          const c = out[o];
+          const cr = c & 255, cg = (c >> 8) & 255, cb = (c >> 16) & 255;
+          // the side of the wave is in shadow at the bottom and lights up towards its rounded top
+          for (let k = 1; k <= up && r - k >= 0; k++) {
+            const f = k === up ? 1.18 : 0.72 + 0.3 * (k / up);
+            out[o - k * BW] = 0xff000000 | (Math.min(255, (cb * f) | 0) << 16) | (Math.min(255, (cg * f) | 0) << 8) | Math.min(255, (cr * f) | 0);
+            mask[o - k * BW] = 2;
+          }
+        }
+      }
     b.putImageData(this.frame, 0, hz, 0, 0, BW, rows);
 
     // ---- BASS DROP: a ring of dots racing outwards over the ground
@@ -2440,8 +2474,8 @@ export class KartGame {
         }
       }
       let rel = wrapAngle(k.a + k.spinA - ca);
-      // your own kart: the camera swings after it a moment late, so while you steer you see it turn a little (a bit more than really)
-      if (k === me && k.spin <= 0) rel = clamp(rel * 1.8, -0.5, 0.5);
+      // your own kart is always seen straight from behind (it stays put on screen): only its front wheels turn when you steer
+      if (k === me && k.spin <= 0) rel = 0;
       // which of the 16 views of the 3D kart: 0 = from behind, 4 / 12 = from the sides, 8 = from the front
       const STEP = (Math.PI * 2) / KART_ANGLES;
       const angle = (((Math.round(rel / STEP) * KART_DIR) % KART_ANGLES) + KART_ANGLES) % KART_ANGLES;

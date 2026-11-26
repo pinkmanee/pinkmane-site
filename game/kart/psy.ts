@@ -6,7 +6,7 @@
 //     mixed with PINKMANE's own weed plants (from props.png)
 // Each map picks a theme in TRACKS (game/kart/kart.ts): psy: "candy" | "glitter" | "lava" | "ocean" | "gold".
 //   - 808 TEMPLE ("gold"): black marble tiles with gold seams for the road (tilePixel)
-//   - SMOKE OCEAN: the puffy grey smoke sea (waterPixel) and wooden planks for the road (plankPixel)
+//   - SMOKE OCEAN: the rolling sea, half water and half smoke (waterPixel) and wooden planks for the road (plankPixel)
 
 export type PsyTheme = "candy" | "glitter" | "lava" | "ocean" | "gold" | "smoke" | "alpine";
 type RGB = [number, number, number];
@@ -185,47 +185,37 @@ export function cobblePixel(theme: PsyTheme, x: number, y: number, shade: number
   return abgr([Math.max(0, Math.min(255, c[0])), Math.max(0, Math.min(255, c[1])), Math.max(0, Math.min(255, c[2]))]);
 }
 
-// ---------------------------------------------------------------- the SMOKE OCEAN (the map over "water"): x/y = world, t = seconds
-// Grey, puffy smoke instead of waves: two layers of soft blobs drifting past each other. Each puff is lit from the far
-// side (the top of a puff is bright, the dip between two puffs is dark), in a few chunky steps of grey with a hint of lilac.
-const SMOKE_DARK: RGB = [44, 40, 56], SMOKE_MID: RGB = [128, 122, 140], SMOKE_LIGHT: RGB = [226, 222, 234];
-const SMOKE_RAMP = Array.from({ length: 9 }, (_, i) => abgr(i < 5 ? mix(SMOKE_DARK, SMOKE_MID, i / 4) : mix(SMOKE_MID, SMOKE_LIGHT, (i - 4) / 4)));
-// one layer of round puffs: each square of the grid has one puff in it (at a random spot, a random size). Returns how high
-// the smoke is here (0 = in a dip between puffs, 1 = the top of a puff) and how much this spot faces the light.
-let puffH = 0, puffLit = 0;
-function puffs(x: number, y: number, cell: number, seed: number) {
-  const gx = Math.floor(x / cell), gy = Math.floor(y / cell);
-  let best = 0, lit = 0;
-  for (let j = -1; j <= 1; j++)
-    for (let i = -1; i <= 1; i++) {
-      const hh = hash(gx + i + seed, gy + j - seed);
-      const cx = (gx + i + 0.15 + ((hh & 255) / 255) * 0.7) * cell, cy = (gy + j + 0.15 + (((hh >> 8) & 255) / 255) * 0.7) * cell;
-      const r = cell * (0.55 + (((hh >> 16) & 255) / 255) * 0.4);
-      const dx = (x - cx) / r, dy = (y - cy) / r;
-      const d2 = dx * dx + dy * dy;
-      if (d2 >= 1) continue;
-      const h = Math.sqrt(1 - d2); // a dome
-      if (h > best) {
-        best = h;
-        lit = -(dx + dy) * 0.7; // the light comes from the far side
-      }
-    }
-  puffH = best;
-  puffLit = lit;
+// ---------------------------------------------------------------- the SEA of SMOKE OCEAN: x/y = world, t = seconds
+// Rolling waves: two swells running across each other (bent a little by slow noise), with sharp bright crests and dark
+// troughs, travelling across the sea. The same waves are drawn as WATER (west half of the map) and as SMOKE (east half):
+// the smoke ones are greyer, softer and puffier on top. waterPixel also leaves how high the wave is (seaHeight), so the
+// game can make the waves stand up out of the sea.
+const WATER_RAMP = [[10, 16, 44], [16, 30, 74], [22, 50, 112], [30, 80, 150], [44, 122, 186], [86, 186, 220], [170, 236, 248], [236, 252, 255]].map((c) => abgr(c as RGB));
+const SMOKE_RAMP = [[40, 36, 52], [62, 58, 76], [88, 84, 104], [118, 114, 134], [150, 146, 166], [186, 182, 200], [218, 214, 230], [244, 242, 250]].map((c) => abgr(c as RGB));
+let seaH = 0;
+export function waterPixel(x: number, y: number, t: number, smoke = false): number {
+  const n = noise(x / 150 + t * 0.03, y / 150);
+  // the big swell and a smaller cross swell (phase = how far along the wave this spot is)
+  const a = (x * 0.55 + y * 0.83) / 21 - t * 1.6 + n * 5;
+  const b = (x * 0.92 - y * 0.38) / 11 - t * 2.3 + n * 2.6;
+  const sa = Math.sin(a), sb = Math.sin(b);
+  // sharp crests, wide troughs: the top of each sine is squeezed
+  const ca = sa > 0 ? sa * sa * (2 - sa) : sa * 0.7;
+  let h = 0.44 + 0.42 * ca + 0.1 * sb;
+  // smoke: soft puffs riding on the waves
+  if (smoke) h += (noise(x / 38 - t * 0.3, y / 38 + t * 0.2) - 0.5) * 0.22;
+  else h += (noise(x / 14 - t * 0.5, y / 14) - 0.5) * 0.06; // little ripples
+  h = h < 0 ? 0 : h > 1 ? 1 : h;
+  // the side of a wave facing the light is bright (the slope of the swells, worked out from the sines)
+  const lit = Math.cos(a) * (sa > 0 ? 1.4 : 0.8) * 0.9 + Math.cos(b) * 0.3;
+  let level = h * 4.2 + lit * 1.7 + 0.9;
+  if (!smoke && h > 0.95 && lit > 0.2 && (hash((x >> 1) + Math.floor(t * 3) * 131, y >> 1) & 7) < 2) level = 7.4; // foam on the crests
+  seaH = h;
+  const ramp = smoke ? SMOKE_RAMP : WATER_RAMP;
+  return ramp[level < 0 ? 0 : level > 7 ? 7 : level | 0];
 }
-export function waterPixel(x: number, y: number, t: number): number {
-  // big slow puffs, with smaller ones drifting over them a bit faster
-  puffs(x + t * 7, y + t * 3, 70, 11);
-  const bigH = puffH, bigLit = puffLit;
-  puffs(x - t * 11 + 500, y + t * 5, 30, 77);
-  let h = bigH, lit = bigLit;
-  if (puffH * 0.85 > bigH * 0.7) {
-    h = puffH * 0.85;
-    lit = puffLit;
-  }
-  const level = 1.2 + h * 4.2 + lit * 2.6;
-  return SMOKE_RAMP[Math.max(0, Math.min(8, Math.floor(level)))];
-}
+/** how high the wave is at the spot waterPixel just drew (0 - 1), for the waves standing up */
+export const seaHeight = () => seaH;
 
 // ---------------------------------------------------------------- the wooden road (planks): key = the road picture's colour key
 const WOOD_A: RGB = [132, 80, 122], WOOD_B: RGB = [108, 64, 108];
