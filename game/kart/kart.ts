@@ -12,7 +12,7 @@ const MUSIC: Record<string, string> = {
   track1: "/music/beat-2.mp3", // NIGHT FIELD
   track2: "/music/beat-3.mp3", // VOID HIGHWAY
   track3: "/music/beat-5.mp3", // HIGH HILLS
-  track4: "/music/06.mp3", // GHOST SHIP BAY
+  track4: "/music/06.mp3", // SMOKE OCEAN
   track6: "/music/09.mp3", // HOTBOX HIGHWAY
   track7: "/music/10.mp3", // TATRA TRIP
   track5: "/music/05.mp3", // 808 TEMPLE (its speakers bounce on this song's beat: "beat" in track5.json)
@@ -35,7 +35,7 @@ type TrackData = {
   zone?: number[]; // for every centre point: 0 = the field, 1 = the void
   spawnIdx?: number[]; // where a kart is put back after falling (before the jump if it fell into the gap)
   spawnOff?: number[]; // ...and how far to the side (the split has a hole in the middle)
-  water?: boolean; // the "void" around the road is the sea (GHOST SHIP BAY): it's drawn as moving water
+  water?: boolean; // the "void" around the road is the sea (SMOKE OCEAN): it's drawn as a sea of puffy smoke
   fallText?: string; // what it says when you fall off (default: INTO THE VOID)
   decor?: [number, number, string, number][]; // big things standing around: [x, y, "ship" | "tentacle" | "speaker" | "eq", size]
   beat?: { bpm: number; at: number }; // the map song's tempo and where its first beat is (s): speakers and equalizers move on it
@@ -44,7 +44,7 @@ type TrackData = {
   fog?: [number, number]; // how thick the haze is: [where it starts, how far until it's full] (default [500, 2600])
   smokeRings?: [number, number][]; // HOTBOX HIGHWAY: smoke rings floating over the road; drive through one = a boost
   hill?: number[]; // HILLS: how high the road is at every centre point (0 = flat; the land around follows, fading out)
-  slaps?: [number, number][]; // SLAPPING TENTACLES (GHOST SHIP BAY): [centre point, which side it comes from: 1 / -1]
+  slaps?: [number, number][]; // SLAPPING TENTACLES (SMOKE OCEAN): [centre point, which side it comes from: 1 / -1]
   outside?: number; // what's past the edge of the map (3 = void)
   alt?: number[]; // the flying part: how high the karts fly at every centre point (0 = on the ground)
   peaks?: [number, number][]; // mountain tops to dodge while flying
@@ -58,7 +58,7 @@ const ALL_TRACKS = [
   { id: "track1", name: "NIGHT FIELD", hue: 0, road: "cobble", psy: "candy" },
   { id: "track2", name: "VOID HIGHWAY", hue: -75, road: "neon", psy: "glitter" },
   { id: "track3", name: "HIGH HILLS", hue: 68, greenPlants: true, road: "cobble", psy: "lava" },
-  { id: "track4", name: "GHOST SHIP BAY", hue: 0, road: "planks", psy: "ocean" },
+  { id: "track4", name: "SMOKE OCEAN", hue: 0, road: "planks", psy: "ocean" },
   { id: "track5", name: "808 TEMPLE", hue: 0, road: "tiles", psy: "gold", wip: true },
   { id: "track6", name: "HOTBOX HIGHWAY", hue: 0, road: "cobble", psy: "smoke", wip: true },
   { id: "track7", name: "TATRA TRIP", hue: 0, road: "cobble", psy: "alpine", wip: true },
@@ -1456,7 +1456,7 @@ export class KartGame {
     this.online?.sendGone(t.id);
   }
 
-  // ------------------------------------------------------------ THE SLAPPING TENTACLES (GHOST SHIP BAY)
+  // ------------------------------------------------------------ THE SLAPPING TENTACLES (SMOKE OCEAN)
   // Each one waits beside the road, rears up (its shadow darkens across the road: the warning), SLAMS down across the
   // road, then slides back into the water. Caught under it = you spin out. Jumping over it or being past it = safe.
   // Every tentacle is on its own beat of the same rhythm, so they don't all slap at once.
@@ -2488,7 +2488,7 @@ export class KartGame {
     // where we are in the beat: 0 = right on it .. 1 = just before the next one (follows the song when it's playing)
     const bt = this.track.beat, mt = this.snd.musicTime();
     const beat = bt ? (((((mt >= 0 ? mt : now / 1000) - bt.at) * bt.bpm) / 60) % 1 + 1) % 1 : 0;
-    // big things standing around: ghost ships and tentacles (GHOST SHIP BAY), speakers and equalizer towers (808 TEMPLE)
+    // big things standing around: ghost ships and tentacles (SMOKE OCEAN), speakers and equalizer towers (808 TEMPLE)
     for (const d of this.track.decor ?? []) {
       if (d[2] === "ship") list.push({ img: this.img["ghostship"], sx: 0, sw: 72, sh: 46, x: d[0], y: d[1], k: d[3], lift: -5 + Math.sin(now / 700 + d[0]) * 3, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "speaker") list.push({ img: this.img["speaker"], sx: beat < 0.2 ? 80 : 0, sw: 80, sh: 112, x: d[0], y: d[1], k: d[3] / 2, lift: 0, flip: false, shadow: true });
