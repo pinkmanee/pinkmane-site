@@ -134,7 +134,7 @@ function roadPixel(style: string, c: number, x: number, y: number, psy?: PsyThem
   return 0;
 }
 
-type Pal = { fog: number[]; vfog: number[]; vdeep: number[]; farLine: number; farDark: number; lip: number; side: number; rib: number; gDark: number; gMid: number; gTip: number; gBank: number; sky: HTMLCanvasElement; skyVoid: HTMLCanvasElement; skyTop?: string; props: Img };
+type Pal = { fog: number[]; vfog: number[]; vdeep: number[]; farLine: number; farDark: number; lip: number; side: number; rib: number; gDark: number; gMid: number; gTip: number; gBank: number; sky: HTMLCanvasElement; skyVoid: HTMLCanvasElement; skyTop?: string; trip?: boolean; props: Img };
 const rgbOf = (c: number) => [c & 255, (c >> 8) & 255, (c >> 16) & 255];
 const abgr = (r: number, g: number, b: number) => (0xff000000 | (b << 16) | (g << 8) | r) >>> 0;
 const BOLD = 0.07; // how much fatter the game's letters are drawn (0 = normal)
@@ -490,9 +490,43 @@ export class KartGame {
     });
   }
 
+  // the trippy PINKMANE picture from the main page (inside 808 TEMPLE the sky turns into it). Never stops the game loading.
+  private tripImg: HTMLImageElement | null = null;
+  private loadTrip() {
+    return new Promise<void>((res) => {
+      const im = new Image();
+      im.onload = () => {
+        this.tripImg = im;
+        res();
+      };
+      im.onerror = () => res();
+      im.src = "/bg/mode4.jpg";
+    });
+  }
+  private makeTripSky(W: number, H: number): HTMLCanvasElement | null {
+    const im = this.tripImg;
+    if (!im) return null;
+    const c = document.createElement("canvas");
+    c.width = W;
+    c.height = H;
+    const x = c.getContext("2d")!;
+    // the picture, tiled all the way round; every other copy mirrored so the joins don't show
+    const th = H, tw = Math.round((im.width / im.height) * th);
+    for (let i = 0, px = 0; px < W; i++, px += tw) {
+      x.save();
+      if (i % 2) {
+        x.translate(px + tw, 0);
+        x.scale(-1, 1);
+        x.drawImage(im, 0, 0, tw, th);
+      } else x.drawImage(im, px, 0, tw, th);
+      x.restore();
+    }
+    return c;
+  }
+
   private async load() {
     const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", ...ITEMS.map((i) => `item-${i}`)];
-    const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n))]);
+    const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n)), this.loadTrip()]);
     this.packs = packs;
     for (const it of ITEMS) (this.img[`item-${it}`] as { pkRes?: number }).pkRes = this.img[`item-${it}`].width / 48;
     (this.img["props"] as { pkRes?: number }).pkRes = this.img["props"].height / 64;
@@ -896,13 +930,15 @@ export class KartGame {
       const A = (c: number[]) => abgr(c[0], c[1], c[2]);
       const sk = this.img["sky"];
       const psySky = makePsySky(psy, sk.width, sk.height); // (the void parts of a map use the same sky)
-      const inside = indoors ? makeTempleWall(sk.width, sk.height) : psySky; // a map with a building: its walls
+      // a map with a building (808 TEMPLE): inside, the sky turns into the trippy picture (wobbling, see drawWorld)
+      const tripSky = indoors ? this.makeTripSky(sk.width, sk.height) : null;
+      const inside = tripSky ?? (indoors ? makeTempleWall(sk.width, sk.height) : psySky);
       return {
         fog: P.fog, vfog: rgbOf(t(abgr(52, 14, 84))), vdeep: rgbOf(t(abgr(6, 2, 14))),
         farLine: A(P.field[2].map((v) => v * 0.45)), farDark: A(P.field[0]),
         lip: t(SLAB_LIP), side: t(SLAB_SIDE), rib: t(SLAB_RIB),
         gDark: A(P.grass[0]), gMid: A(P.grass[1]), gTip: A(P.grass[2]), gBank: A(P.grass[3]),
-        sky: psySky, skyVoid: inside, skyTop: `rgb(${P.sky[0].join(",")})`,
+        sky: psySky, skyVoid: inside, skyTop: `rgb(${P.sky[0].join(",")})`, trip: !!tripSky,
         props: makePsyProps(psy, this.img["props"], greenPlants),
       };
     }
@@ -2116,8 +2152,30 @@ export class KartGame {
       const vs = pal.skyVoid;
       b.globalAlpha = zf;
       b.fillRect(0, 0, BW, hz);
-      b.drawImage(vs, -off, skyY);
-      b.drawImage(vs, vs.width - off, skyY);
+      if (pal.trip) {
+        // THE TRIP: the picture wobbles like liquid (every pair of rows slides sideways on its own wave)...
+        const t = performance.now() / 1000;
+        for (let y = 0; y < vs.height; y += 2) {
+          const sx = ((((-off + Math.sin(y * 0.11 + t * 2.4) * 7 + Math.sin(y * 0.045 - t * 1.6) * 5) % vs.width) - vs.width) % vs.width);
+          for (let k = 0; sx + k * vs.width < BW; k++) b.drawImage(vs, 0, y, vs.width, 2, sx + k * vs.width, skyY + y, vs.width, 2);
+        }
+        if (skyY > 0) {
+          b.fillStyle = "#14061e";
+          b.fillRect(0, 0, BW, skyY);
+        }
+        // ...and flashes pink on the beat of the song
+        const bt = this.track.beat, mt = this.snd.musicTime();
+        const ph = bt ? (((((mt >= 0 ? mt : t) - bt.at) * bt.bpm) / 60) % 1 + 1) % 1 : 1;
+        if (ph < 0.18) {
+          b.globalAlpha = zf * 0.28 * (1 - ph / 0.18);
+          b.fillStyle = "#ff5fd2";
+          b.fillRect(0, 0, BW, hz);
+        }
+        b.globalAlpha = zf;
+      } else {
+        b.drawImage(vs, -off, skyY);
+        b.drawImage(vs, vs.width - off, skyY);
+      }
       b.globalAlpha = 1;
     }
 
