@@ -652,10 +652,13 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
           } catch {}
         }}
         style={{
+          // (below the phone's status bar and notch, and on top of the menu, so a thumb can always reach it)
           position: "absolute",
-          left: 12,
-          top: 10,
-          padding: "6px 10px",
+          left: "max(12px, env(safe-area-inset-left))",
+          top: "max(10px, env(safe-area-inset-top))",
+          zIndex: 30,
+          padding: "10px 12px",
+          touchAction: "manipulation",
           fontFamily: font,
           fontSize: 9,
           textShadow: `1px 1px 0 ${INK}`,
@@ -675,7 +678,8 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
           style={{
             position: "absolute",
             left: "50%",
-            bottom: 8,
+            bottom: "max(8px, env(safe-area-inset-bottom))",
+            zIndex: 30,
             transform: "translateX(-50%)",
             padding: "6px 10px",
             fontFamily: font,

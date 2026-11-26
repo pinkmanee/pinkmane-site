@@ -3020,6 +3020,7 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     levelMusicIdxRef.current = idx;
     const a = new Audio(list[idx].file);
     a.volume = levelMusicVolRef.current;
+    a.muted = levelMusicVolRef.current === 0;
     a.muted = mutedRef.current;
     a.dataset.src = list[idx].file;
     levelMusicRef.current = a;
@@ -3082,7 +3083,11 @@ export default function SuperGame({ actionSignal, spinRef, fontFamily, muted, to
     const d = (e as CustomEvent<unknown>).detail;
     if (d && typeof d === "object" && typeof (d as { volume?: unknown }).volume === "number") {
       levelMusicVolRef.current = Math.max(0, Math.min(1, (d as { volume: number }).volume));
-      if (levelMusicRef.current) levelMusicRef.current.volume = levelMusicVolRef.current;
+      if (levelMusicRef.current) {
+        levelMusicRef.current.volume = levelMusicVolRef.current;
+        // (an iPhone ignores a song's volume, but it does listen to "muted": so the page's mute button works there too)
+        levelMusicRef.current.muted = levelMusicVolRef.current === 0;
+      }
       return;
     }
     if (!levelMusicOnRef.current) return;

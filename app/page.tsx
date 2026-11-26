@@ -1345,6 +1345,21 @@ export default function Home() {
   const volGainRef = useRef<GainNode | null>(null);
   const volumeRef = useRef(0.5);
   const volumeLockedRef = useRef(false); // true = this browser ignores the song's own volume (iPhone / iPad)
+  const mutedRef = useRef(false); // the mute button (kept here too, so the sound engine and the games always know it)
+  // THE ONE PLACE THE MUSIC'S LOUDNESS IS SET (the slider and the mute button both come here).
+  // Once the music runs through the sound engine, its volume knob does it (the only thing an iPhone listens to) and the
+  // song itself stays at full; before that, the song's own volume does it. Muting also mutes the song itself, and a
+  // game's level song (PINKMANE VOID) is told too.
+  const applyLoudness = () => {
+    const audio = songRef.current, knob = volGainRef.current;
+    const vol = volumeRef.current, muted = mutedRef.current;
+    if (audio) {
+      audio.muted = muted;
+      audio.volume = knob ? 1 : vol;
+    }
+    if (knob) knob.gain.value = muted ? 0 : vol;
+    window.dispatchEvent(new CustomEvent("pinkmane-level-control", { detail: { volume: muted ? 0 : vol, muted } }));
+  };
   // The whole page; the beat clock writes the beat values onto it
   const mainRef = useRef<HTMLElement>(null);
   // The beat numbers, shared with the liquid background
@@ -1548,7 +1563,7 @@ export default function Home() {
       }
       // first time a level song shows up: give it your volume
       if (song && wasOff) {
-        window.dispatchEvent(new CustomEvent("pinkmane-level-control", { detail: { volume: songRef.current?.volume ?? 0.5 } }));
+        window.dispatchEvent(new CustomEvent("pinkmane-level-control", { detail: { volume: mutedRef.current ? 0 : volumeRef.current, muted: mutedRef.current } }));
       }
     };
     window.addEventListener("pinkmane-level-song", onLevelSong);
@@ -1770,13 +1785,9 @@ export default function Home() {
 
   const toggleMute = () => {
     setVolTipFade(true); // they found it: hide the volume tip
-    setIsMuted((prev) => {
-      const next = !prev;
-      if (songRef.current) {
-        songRef.current.muted = next;
-      }
-      return next;
-    });
+    mutedRef.current = !mutedRef.current;
+    setIsMuted(mutedRef.current);
+    applyLoudness();
   };
 
   // The iPod screen: LOADING..., then the trippy picture (CLICK TO START), then the menu after the first click
@@ -1996,10 +2007,12 @@ export default function Home() {
         const source = ctx.createMediaElementSource(audio);
         // what you hear goes out through a volume knob (only turned on iPhones, where the song's own volume does nothing)
         const vol = ctx.createGain();
-        vol.gain.value = volumeLockedRef.current ? volumeRef.current : 1;
         source.connect(vol);
         vol.connect(ctx.destination);
         volGainRef.current = vol;
+        // from now on this knob sets the loudness (and the song itself plays at full)
+        vol.gain.value = mutedRef.current ? 0 : volumeRef.current;
+        audio.volume = 1;
         // a side copy goes to the listener (it's never heard)
         const node = ctx.createAnalyser();
         node.fftSize = 2048;
@@ -2404,10 +2417,7 @@ export default function Home() {
     setVolTipFade(true); // they found it: hide the volume tip
     setVolume(value);
     volumeRef.current = value;
-    if (songRef.current) songRef.current.volume = value;
-    // iPhone: the song's own volume is ignored, so turn the sound engine's knob
-    if (volumeLockedRef.current && volGainRef.current) volGainRef.current.gain.value = value;
-    window.dispatchEvent(new CustomEvent("pinkmane-level-control", { detail: { volume: value } }));
+    applyLoudness();
     try {
       localStorage.setItem("pinkmane-volume", String(value));
     } catch {}
@@ -2970,6 +2980,19 @@ activeGame === "rush" ? (
             aria-label="Music volume"
             className="volume-slider"
             onChange={(e) => changeVolume(Number(e.target.value))}
+            // FINGERS: touch anywhere on the slider and drag (a phone's own slider only moves if you hit its tiny knob)
+            onPointerDown={(e) => {
+              if (e.pointerType === "mouse") return;
+              e.preventDefault();
+              e.currentTarget.setPointerCapture(e.pointerId);
+              const r = e.currentTarget.getBoundingClientRect();
+              changeVolume(Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * 20) / 20);
+            }}
+            onPointerMove={(e) => {
+              if (e.pointerType === "mouse" || !e.currentTarget.hasPointerCapture(e.pointerId)) return;
+              const r = e.currentTarget.getBoundingClientRect();
+              changeVolume(Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * 20) / 20);
+            }}
             onPointerUp={(e) => e.currentTarget.blur()}
             onTouchEnd={(e) => e.currentTarget.blur()}
           />
@@ -6108,6 +6131,7 @@ activeGame === "rush" ? (
           margin: 0;
           cursor: pointer;
           accent-color: #d63cc8;
+          touch-action: none; /* (the finger drags the slider, not the page) */
         }
 
         .mute-btn {
