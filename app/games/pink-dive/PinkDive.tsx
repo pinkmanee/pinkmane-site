@@ -102,6 +102,12 @@ function useBeeps() {
 //     ~500+     PINKMANE in full armoured hard-hat diving suits, down in the deep
 //     the floor: a sunken Pink Kart between the weed plants
 // (the numbers are scores: 1 point = 3 pixels of water)
+// the little fish (facing right): a proper fish shape, rounded body, forked tail, an eye near the front
+const FISH = [
+  ["....xx....", "x..xxxxx..", "xxxxxxxxox", "x..xxxxx..", ".....x...."],
+  ["...xx...", "x.xxxxx.", "xxxxxxox", "x.xxxx..", "....x..."],
+  ["....xxx.....", "x..xxxxxxx..", "xxxxxxxxxxox", "xxxxxxxxxxx.", "x..xxxxxx...", ".....xx....."],
+];
 const SKELETON = [
   ["..www..", ".wkwkw.", "..www..", "...w...", "w.www.w", ".wwwww.", "...w...", "..www..", "..w.w..", ".w...w."],
   ["..www..", ".wkwkw.", "..www..", "...w...", "..www..", ".wwwww.", "w..w..w", "..www..", "..w.w..", "..w.w.."],
@@ -125,13 +131,11 @@ const DIVER_COL: Record<string, string> = {
   t: "#a8a8c0", T: "#6c6c86", f: "#3ad0e0", c: "#e2803a", C: "#9c4a1e", o: "#ffc77a", s: "#d4702e", S: "#8e3e18",
   G: "#3ab4cc", L: "#6ad8ee", D: "#3ab4cc",
 };
-// THE ZONES of the sea (in points: 1 point = 10 m). A dotted line with the name where each starts; in between, a faint
-// line every 100 m. Crossing into a new zone flashes its name.
+// THE ZONES of the sea (in points: 1 point = 10 m), about 700 m apart. A dotted line with the name where each starts; in
+// between, a faint line every 100 m. Crossing into a new zone flashes its name.
 const ZONES: [number, string][] = [
-  [25, "THE SHALLOWS"], [55, "SUNLIGHT ZONE"], [90, "PINK REEF"], [120, "WEED FOREST"], [160, "KUSH KELP"], [200, "THE HAZE"],
-  [240, "TWILIGHT ZONE"], [270, "SKELETON CREW"], [310, "SHIPWRECK ALLEY"], [350, "DEAD MAN'S DRIFT"], [385, "KART GRAVEYARD"],
-  [420, "MIDNIGHT ZONE"], [460, "THE DEEP END"], [500, "DIVERS DOWN"], [540, "THE ABYSS"], [580, "PRESSURE ZONE"],
-  [620, "HADAL ZONE"], [660, "THE TRENCH"], [700, "ROCK BOTTOM"],
+  [40, "SUNLIGHT ZONE"], [110, "WEED FOREST"], [180, "THE HAZE"], [250, "TWILIGHT ZONE"], [320, "SHIPWRECK ALLEY"],
+  [390, "KART GRAVEYARD"], [460, "MIDNIGHT ZONE"], [530, "THE ABYSS"], [600, "HADAL ZONE"], [680, "THE TRENCH"],
 ];
 
 function Sea({ depth, font }: { depth: number; font: string }) {
@@ -274,10 +278,14 @@ function Sea({ depth, font }: { depth: number; font: string }) {
         if (!wet(sy, 4)) continue;
         const x = ((((f.x + t * f.v * f.s) % (W + 30)) + W + 30) % (W + 30)) - 15;
         const col = f.y > 1200 ? "rgba(255,95,210,0.5)" : "rgba(20,6,32,0.55)";
-        const L = f.kind === 2 ? 9 : 6;
-        rect(x, sy, L, f.kind === 1 ? 3 : 2, col);
-        rect(x + (f.s > 0 ? -2 : L), sy - 1, 2, f.kind === 1 ? 5 : 4, col);
-        if (f.y > 1200) rect(x + (f.s > 0 ? L - 2 : 1), sy, 1, 1, "#fff");
+        const rows = FISH[f.kind];
+        rows.forEach((row, ry) => {
+          for (let rx = 0; rx < row.length; rx++) {
+            const ch = row[f.s > 0 ? rx : row.length - 1 - rx];
+            if (ch === "x") rect(x + rx, sy + ry - 2, 1, 1, col);
+            else if (ch === "o") rect(x + rx, sy + ry - 2, 1, 1, f.y > 1200 ? "#fff" : "rgba(255,230,250,0.6)");
+          }
+        });
       }
       // ---- the ship's crew: skeletons swimming ----
       for (const k of skels) {
