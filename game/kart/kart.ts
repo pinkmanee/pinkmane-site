@@ -71,10 +71,12 @@ export const TRACKS = ALL_TRACKS.filter((t) => !(t as { wip?: boolean }).wip || 
 // SOLO DIFFICULTY: how the computer racers drive. speed = their top speed, chase = how much faster they get when
 // you're ahead of them, wait = how much they ease off when they're far ahead of you, items = how soon they use an item.
 export type Difficulty = "EASY" | "MEDIUM" | "HARD";
-const DIFFICULTY: Record<Difficulty, { speed: number; chase: number; wait: number; items: number }> = {
-  EASY: { speed: 0.9, chase: 1.0, wait: 0.85, items: 1.8 },
-  MEDIUM: { speed: 1.0, chase: 1.07, wait: 0.9, items: 1.0 }, // (how it always was)
-  HARD: { speed: 1.06, chase: 1.12, wait: 0.97, items: 0.6 },
+// floor = HARD only: no racer is slower than this (so they're ALL fast, not just the best one); pull = how much harder
+// they chase the further you get ahead (on top of chase, up to +pull at a big lead).
+const DIFFICULTY: Record<Difficulty, { speed: number; chase: number; wait: number; items: number; floor: number; pull: number }> = {
+  EASY: { speed: 0.9, chase: 1.0, wait: 0.85, items: 1.8, floor: 0, pull: 0 },
+  MEDIUM: { speed: 1.0, chase: 1.07, wait: 0.9, items: 1.0, floor: 0, pull: 0 }, // (how it always was)
+  HARD: { speed: 1.1, chase: 1.12, wait: 1.0, items: 0.35, floor: 0.97, pull: 0.3 },
 };
 // EACH MAP HAS ITS OWN COLOURS. "hue" turns the colour wheel for that map's ground, sky and haze (in degrees):
 // 0 = the original pink and purple, -75 = cold blue, 68 = sunset orange and red. Change a number to recolour a map.
@@ -1233,11 +1235,12 @@ export class KartGame {
 
       // ---- speed
       const df = DIFFICULTY[this.online ? "MEDIUM" : this.difficulty];
-      let top = MAX_SPEED * (k.player ? 1 : k.skill * df.speed);
-      if (!k.player && !k.finished) {
+      const human = k.player || k === this.me; // (your kart, even while the autopilot drives it)
+      let top = MAX_SPEED * (human ? 1 : Math.max(df.floor, k.skill) * df.speed);
+      if (!human && !k.finished) {
         const gap = k.total - this.me.total;
         if (gap > 55) top *= df.wait;
-        if (gap < -55) top *= df.chase;
+        if (gap < -55) top *= df.chase * (1 + Math.min(df.pull, (-gap - 55) / 900));
         if (k.blind > 0) top *= 0.8;
       }
       if (type === 0 || type === 6) top *= 0.42; // off the road (6 = painted ground like the vinyl record: slow too, so it's no shortcut)
