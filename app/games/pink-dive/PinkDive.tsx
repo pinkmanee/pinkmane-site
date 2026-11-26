@@ -21,6 +21,8 @@ const INK = "#0b0614";
 const SAVE_KEY = "pinkdive-save";
 const SEEN_KEY = "pinkdive-seen"; // the prompts you've had lately (practice picks ones you haven't)
 const SOUND_KEY = "pinkmane-dive-sound";
+const VOL_KEY = "pinkmane-dive-vol"; // how loud the beeps are (0-1)
+const OPTS_KEY = "pinkmane-dive-options"; // the other settings from the ESC menu
 const DEVICE_KEY = "pinkrun-device"; // the same "you" as the scoreboards
 
 type Slot = { answer: string | null; tier: number; depth: number }; // tier -1 = no answer
@@ -46,14 +48,18 @@ const metres = (score: number) => `-${(score * 10).toLocaleString("en-US")} m`;
 function useBeeps() {
   const ctxRef = useRef<AudioContext | null>(null);
   const [on, setOn] = useState(true);
+  const [level, setLevel] = useState(0.8);
   useEffect(() => {
     try {
       setOn(localStorage.getItem(SOUND_KEY) !== "off");
+      const v = parseFloat(localStorage.getItem(VOL_KEY) ?? "");
+      if (v >= 0 && v <= 1) setLevel(v);
     } catch {}
   }, []);
   const beep = useCallback(
     (from: number, to: number, dur: number, type: OscillatorType = "square", vol = 0.12, delay = 0) => {
-      if (!on) return;
+      if (!on || level <= 0) return;
+      vol *= level;
       try {
         if (!ctxRef.current) {
           const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -77,7 +83,7 @@ function useBeeps() {
         o.stop(t + dur + 0.05);
       } catch {}
     },
-    [on],
+    [on, level],
   );
   const toggle = () => {
     setOn((v) => {
@@ -87,7 +93,14 @@ function useBeeps() {
       return !v;
     });
   };
-  return { on, toggle, beep };
+  const setVolume = (v: number) => {
+    const n = Math.round(Math.max(0, Math.min(1, v)) * 10) / 10;
+    setLevel(n);
+    try {
+      localStorage.setItem(VOL_KEY, String(n));
+    } catch {}
+  };
+  return { on, toggle, beep, level, setVolume };
 }
 
 // ---------------------------------------------------------------- the sea (canvas)
@@ -525,7 +538,29 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const deadline = useRef(0);
   const lockedAt = useRef(-1); // the prompt that's already been answered (so the clock can't end it twice)
-  const { on: soundOn, toggle: toggleSound, beep } = useBeeps();
+  const { on: soundOn, toggle: toggleSound, beep, level, setVolume } = useBeeps();
+  // THE ESC MENU (ESC, or the MENU button on phones): pauses the clock and hides the prompt (no peeking), and holds the settings
+  const [menu, setMenu] = useState(false);
+  const [row, setRow] = useState(0);
+  const [help, setHelp] = useState(false); // HOW TO PLAY shown inside the menu
+  const [confirmQuit, setConfirmQuit] = useState(false);
+  const [opts, setOpts] = useState({ spellHelp: true, bigText: false, clockBeeps: true });
+  const pausedLeft = useRef(-1); // seconds that were left on the clock when the menu opened
+  useEffect(() => {
+    try {
+      const o = JSON.parse(localStorage.getItem(OPTS_KEY) || "null");
+      if (o && typeof o === "object") setOpts((d) => ({ ...d, ...o }));
+    } catch {}
+  }, []);
+  const setOpt = (k: keyof typeof opts) => {
+    setOpts((o) => {
+      const n = { ...o, [k]: !o[k] };
+      try {
+        localStorage.setItem(OPTS_KEY, JSON.stringify(n));
+      } catch {}
+      return n;
+    });
+  };
 
   // today's dive; if you already dove today, straight to your result
   useEffect(() => {
@@ -688,18 +723,18 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
 
   // the 25 second clock
   useEffect(() => {
-    if (screen !== "play" || reveal) return;
+    if (screen !== "play" || reveal || menu) return;
     const id = window.setInterval(() => {
       const s = Math.max(0, (deadline.current - Date.now()) / 1000);
       setLeft((prev) => {
-        if (Math.ceil(s) !== Math.ceil(prev) && s <= 5 && s > 0) beep(880, 880, 0.05, "square", 0.05);
+        if (opts.clockBeeps && Math.ceil(s) !== Math.ceil(prev) && s <= 5 && s > 0) beep(880, 880, 0.05, "square", 0.05);
         return s;
       });
       if (s <= 0) lock(null);
     }, 100);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, reveal, at, slots]);
+  }, [screen, reveal, at, slots, menu, opts.clockBeeps]);
 
   const checking = useRef(false);
   const submit = async () => {
@@ -727,7 +762,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     else {
       // didn't count: keep what was typed (so a typo is quick to fix) and offer the closest answers to tap
       buzz("soft");
-      const close = suggest(p, typed);
+      const close = opts.spellHelp ? suggest(p, typed) : [];
       setSugg(close);
       setNote({ text: close.length ? "NOT QUITE - DID YOU MEAN:" : `"${typed.trim().toUpperCase().slice(0, 24)}" ISN'T ON THE LIST - FIX IT OR TRY ANOTHER`, bad: true });
       beep(160, 110, 0.18, "square", 0.08);
@@ -749,6 +784,116 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     return () => window.removeEventListener("keydown", key);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);
+
+  // ---------------- the ESC menu
+  const openMenu = () => {
+    if (screen === "play" && !reveal) pausedLeft.current = Math.max(0, (deadline.current - Date.now()) / 1000);
+    else pausedLeft.current = -1;
+    inputRef.current?.blur();
+    setRow(0);
+    setHelp(false);
+    setConfirmQuit(false);
+    setMenu(true);
+    beep(400, 300, 0.08, "square", 0.06);
+  };
+  const closeMenu = () => {
+    if (pausedLeft.current >= 0) {
+      deadline.current = Date.now() + pausedLeft.current * 1000; // the clock carries on where it stopped
+      setLeft(pausedLeft.current);
+    }
+    pausedLeft.current = -1;
+    setMenu(false);
+    beep(300, 400, 0.08, "square", 0.06);
+    if (screen === "play" && !reveal) window.setTimeout(() => inputRef.current?.focus(), 30);
+  };
+  // quitting: a daily dive ends right there (the prompts you didn't get to count as 0 m, so it stays fair),
+  // a practice dive just goes back to the start
+  const quitDive = () => {
+    setMenu(false);
+    pausedLeft.current = -1;
+    nextRef.current = null;
+    setCanGo(false);
+    setReveal(null);
+    if (practice) {
+      setScreen("intro");
+      return;
+    }
+    const all = [...slots];
+    while (all.length < PER_DAY) all.push({ answer: null, tier: -1, depth: 0 });
+    setSlots(all);
+    finish(all, false, dive);
+  };
+  type Row = { label: string; value?: string; act: () => void; side?: (d: number) => void };
+  const rows: Row[] = [
+    { label: "RESUME", act: closeMenu },
+    { label: "SOUND", value: soundOn ? "ON" : "OFF", act: toggleSound, side: () => toggleSound() },
+    {
+      label: "VOLUME",
+      value: `${"■".repeat(Math.round(level * 10))}${"□".repeat(10 - Math.round(level * 10))}`,
+      act: () => setVolume(level >= 1 ? 0 : level + 0.1),
+      side: (d) => setVolume(level + d * 0.1),
+    },
+    { label: "SPELL HELP", value: opts.spellHelp ? "ON" : "OFF", act: () => setOpt("spellHelp"), side: () => setOpt("spellHelp") },
+    { label: "CLOCK BEEPS", value: opts.clockBeeps ? "ON" : "OFF", act: () => setOpt("clockBeeps"), side: () => setOpt("clockBeeps") },
+    { label: "BIG TEXT", value: opts.bigText ? "ON" : "OFF", act: () => setOpt("bigText"), side: () => setOpt("bigText") },
+    { label: "HOW TO PLAY", act: () => setHelp((h) => !h) },
+  ];
+  if (screen === "play")
+    rows.push({
+      label: practice ? "QUIT PRACTICE" : confirmQuit ? "SURE? ENDS TODAY'S DIVE" : "END DIVE",
+      act: () => (practice || confirmQuit ? quitDive() : setConfirmQuit(true)),
+    });
+  rows.push({
+    label: "← BACK TO GAMES",
+    act: () => {
+      try {
+        sessionStorage.setItem("pinkmane-open-games", "1");
+      } catch {}
+      window.location.href = "/";
+    },
+  });
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const rowRef = useRef(row);
+  rowRef.current = row;
+  // ESC opens / closes it. While it's open it takes every key first (so typing doesn't carry on behind it):
+  // UP / DOWN pick, ENTER / SPACE press, LEFT / RIGHT change a setting
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (menu) closeMenu();
+        else openMenu();
+        return;
+      }
+      if (!menu) return;
+      e.stopImmediatePropagation();
+      const list = rowsRef.current, r = Math.min(rowRef.current, list.length - 1);
+      if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") {
+        e.preventDefault();
+        setRow((r + 1) % list.length);
+        setConfirmQuit(false);
+        beep(600, 600, 0.03, "square", 0.04);
+      } else if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
+        e.preventDefault();
+        setRow((r - 1 + list.length) % list.length);
+        setConfirmQuit(false);
+        beep(600, 600, 0.03, "square", 0.04);
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "a" || e.key === "d" || e.key === "A" || e.key === "D") {
+        e.preventDefault();
+        list[r].side?.(e.key === "ArrowLeft" || e.key === "a" || e.key === "A" ? -1 : 1);
+        beep(700, 700, 0.03, "square", 0.04);
+      } else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        list[r].act();
+        beep(800, 800, 0.04, "square", 0.05);
+      }
+    };
+    window.addEventListener("keydown", key, { capture: true });
+    return () => window.removeEventListener("keydown", key, { capture: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menu, screen, reveal, practice, slots, dive, beep]);
 
   const shareText = () => {
     if (!result) return "";
@@ -775,7 +920,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   const camDepth = screen === "intro" ? 0 : screen === "play" ? total : (result?.total ?? 0);
 
   return (
-    <div className="pd-root" style={{ fontFamily: pixelFont }}>
+    <div className={`pd-root ${opts.bigText ? "pd-bigtext" : ""}`} style={{ fontFamily: pixelFont }}>
       <Sea depth={camDepth} font={pixelFont} />
 
       <Link
@@ -789,9 +934,46 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
       >
         ← GAMES
       </Link>
-      <button className="pd-sound" onClick={toggleSound} aria-label={soundOn ? "Sound off" : "Sound on"}>
-        {soundOn ? "SOUND ON" : "SOUND OFF"}
+      <button className="pd-sound" onClick={() => (menu ? closeMenu() : openMenu())} aria-label="Menu and settings">
+        {menu ? "✕ CLOSE" : "☰ MENU · ESC"}
       </button>
+
+      {menu && (
+        <div className="pd-menu-wrap" onClick={(e) => e.target === e.currentTarget && closeMenu()}>
+          <div className="pd-panel pd-menu" role="dialog" aria-label="Menu">
+            <h2 className="pd-menu-title">{screen === "play" ? "PAUSED" : "MENU"}</h2>
+            {screen === "play" && pausedLeft.current >= 0 && <div className="pd-menu-sub">the clock is stopped · 0:{String(Math.ceil(pausedLeft.current)).padStart(2, "0")} left</div>}
+            <div className="pd-menu-list">
+              {rows.map((r, i) => (
+                <button
+                  key={r.label}
+                  className={`pd-menu-row ${i === row ? "pd-menu-on" : ""} ${r.label.startsWith("SURE") ? "pd-menu-warn" : ""}`}
+                  onMouseEnter={() => setRow(i)}
+                  onClick={() => {
+                    setRow(i);
+                    r.act();
+                  }}
+                >
+                  <span>{i === row ? "▶ " : ""}{r.label}</span>
+                  {r.value !== undefined && <span className="pd-menu-val">{r.side ? "◀ " : ""}{r.value}{r.side ? " ▶" : ""}</span>}
+                </button>
+              ))}
+            </div>
+            {help && (
+              <div className="pd-menu-help">
+                7 prompts a day, the same for everyone. You get {SECONDS} seconds for each one.
+                <br />
+                Type an answer that fits: the RARER it is, the DEEPER your sub sinks.
+                <br />
+                Typo? It still counts if it&apos;s close, and SPELL HELP offers the nearest answers to tap.
+                <br />
+                Practice dives don&apos;t count. A new daily dive comes at midnight (UTC).
+              </div>
+            )}
+            <div className="pd-menu-keys">↑ ↓ PICK · ← → CHANGE · ENTER PRESS · ESC BACK</div>
+          </div>
+        </div>
+      )}
 
       {screen === "intro" && (
         <div className="pd-panel pd-intro">
@@ -815,7 +997,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         </div>
       )}
 
-      {screen === "play" && p && (
+      {screen === "play" && p && !menu && (
         <div className="pd-panel pd-play">
           <div className="pd-top">
             <span>
@@ -1034,6 +1216,23 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         .pd-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
         .pd-actions .pd-big { font-size: 11px; padding: 11px 18px; }
         .pd-next { margin-top: 12px; font-size: 7px; color: rgba(255, 255, 255, 0.6); }
+        .pd-menu-wrap { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-start; justify-content: center; background: rgba(5, 2, 12, 0.55); overflow-y: auto; }
+        .pd-menu { margin: max(56px, 10vh) auto 30px; background: rgba(11, 6, 20, 0.92); border: 3px solid ${PINK}; box-shadow: 6px 6px 0 #000; width: min(400px, 92vw); }
+        .pd-menu-title { margin: 0 0 6px; font-size: 20px; color: ${PINK}; text-shadow: 3px 3px 0 #12041c; letter-spacing: 2px; }
+        .pd-menu-sub { font-size: 7px; color: #9fe8ff; margin-bottom: 4px; }
+        .pd-menu-list { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+        .pd-menu-row {
+          display: flex; justify-content: space-between; align-items: center; gap: 10px; font-family: inherit; font-size: 9px; color: #fff;
+          padding: 10px 12px; background: #2a1438; border: 2px solid rgba(255, 255, 255, 0.35); cursor: pointer; text-shadow: 1px 1px 0 #000; text-align: left;
+        }
+        .pd-menu-on { border-color: #fff; background: #4a1c5e; box-shadow: 3px 3px 0 #000; }
+        .pd-menu-warn { background: #7a1430; border-color: #ff8ea0; }
+        .pd-menu-val { color: #9fe8ff; white-space: nowrap; font-size: 8px; }
+        .pd-menu-help { margin-top: 12px; padding: 10px; border: 2px dashed rgba(255, 255, 255, 0.35); font-size: 7px; line-height: 2; text-align: left; color: rgba(255, 255, 255, 0.85); }
+        .pd-menu-keys { margin-top: 12px; font-size: 6px; color: rgba(255, 255, 255, 0.5); }
+        .pd-bigtext .pd-panel { zoom: 1.25; }
+        .pd-bigtext .pd-menu { width: min(400px, 74vw); }
+        @media (hover: none) { .pd-menu-keys { display: none; } }
         @media (max-height: 520px) { .pd-intro { margin-top: 12vh; } .pd-play { margin-top: 52px; } }
         @media (prefers-reduced-motion: reduce) { .pd-bad, .pd-reveal, .pd-clock-low { animation: none; } }
       `}</style>
