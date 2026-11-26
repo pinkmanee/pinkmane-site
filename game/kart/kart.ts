@@ -46,6 +46,7 @@ type TrackData = {
   smokeRings?: [number, number][]; // HOTBOX HIGHWAY: smoke rings floating over the road; drive through one = a boost
   terrain?: boolean; // A REAL MOUNTAIN (TATRA TRIP): the land has its own height map (trackN-height.png) and is drawn by the terrain renderer
   tgrid?: number; // how many squares across that height map is
+  painted?: boolean; // the ground picture already has the land's colours and light painted in (TATRA TRIP): keep them as they are
   hill?: number[]; // HILLS: how high the road is at every centre point (0 = flat; the land around follows, fading out)
   slaps?: [number, number][]; // SLAPPING TENTACLES (SMOKE OCEAN): [centre point, which side it comes from: 1 / -1]
   outside?: number; // what's past the edge of the map (3 = void)
@@ -53,7 +54,7 @@ type TrackData = {
   peaks?: [number, number][]; // mountain tops to dodge while flying
   rings?: [number, number, number][]; // rings to fly through for a boost: x, y, height
 };
-type TrackPack = { track: TrackData; ground: Uint32Array; gsize: number; gs: number; types: Uint8Array; mini: HTMLCanvasElement; pal?: Pal; hillGrid?: Float32Array };
+type TrackPack = { track: TrackData; ground: Uint32Array; gsize: number; gs: number; types: Uint8Array; mini: HTMLCanvasElement; pal?: Pal; hillGrid?: Float32Array; shade?: Float32Array };
 // THE TRACKS: each is trackN.json + trackN-ground.png + trackN-map.png in public/kart/
 // (Next fills this in when it builds the site: "development" on your own computer, "production" on pinkmane.site)
 declare const process: { env: { NODE_ENV?: string } };
@@ -386,6 +387,7 @@ export class KartGame {
   // HILLS: the height map of this map (null = flat), and for every screen row: how far away its ground is, and how high
   private hillGrid: Float32Array | null = null;
   private hgN = HG; // how many squares across the height map is (HG, or a mountain map's own size)
+  private shade: Float32Array | null = null; // how lit each square of the height map is (the sun on the slopes)
   // THE TERRAIN RENDERER's own full-screen picture, and for every screen column how far up the land reaches at each distance
   private tframe = typeof document !== "undefined" ? document.createElement("canvas").getContext("2d")!.createImageData(BW, BH) : null;
   private tframe32 = this.tframe ? new Uint32Array(this.tframe.data.buffer) : new Uint32Array(0);
@@ -941,7 +943,7 @@ export class KartGame {
           const t = types[row + Math.min(TH - 1, (x * k) | 0)];
           if (t === 2) continue; // boost pads stay light blue everywhere
           const o = y * GZ + x;
-          if (psy && t === 0 && !track.terrain) {
+          if (psy && t === 0 && !track.painted) {
             ground[o] = fieldPixel(psy, x * wk, y * wk); // the glowing marble beside the road
             continue;
           }
@@ -1035,6 +1037,9 @@ export class KartGame {
     this.track = p.track;
     this.hillGrid = p.track.terrain ? p.hillGrid ?? null : p.track.hill ? (p.hillGrid ??= this.makeHillGrid(p.track)) : null;
     this.hgN = p.track.terrain ? p.track.tgrid ?? HG : HG;
+    // the sun on the hills: every square of the height map gets lit or shaded by which way its slope faces
+    // (not on a map whose picture has the light painted in already)
+    this.shade = this.hillGrid && !p.track.painted ? (p.shade ??= this.makeShade(this.hillGrid, this.hgN, p.track.size / this.hgN)) : null;
     this.camG = 0;
     this.pitch = 0;
     this.slope = 0;
@@ -2159,6 +2164,20 @@ export class KartGame {
     }
     return g;
   }
+  // the sun comes from the far left: slopes facing it are bright, slopes facing away are in shade (flat ground stays as it is)
+  private makeShade(g: Float32Array, n: number, cell: number): Float32Array {
+    const out = new Float32Array(n * n);
+    const lx = -0.5, ly = -0.45, lz = 0.74;
+    for (let y = 0; y < n; y++)
+      for (let x = 0; x < n; x++) {
+        const dzx = (g[y * n + Math.min(n - 1, x + 1)] - g[y * n + Math.max(0, x - 1)]) / (2 * cell);
+        const dzy = (g[Math.min(n - 1, y + 1) * n + x] - g[Math.max(0, y - 1) * n + x]) / (2 * cell);
+        const len = Math.sqrt(dzx * dzx + dzy * dzy + 1);
+        const lit = Math.max(0, (-dzx * lx - dzy * ly + lz) / len);
+        out[y * n + x] = 0.42 + 0.78 * lit;
+      }
+    return out;
+  }
   /** how high the ground is at a world position (0 on flat maps) */
   private groundH(x: number, y: number) {
     const g = this.hillGrid;
@@ -2190,7 +2209,7 @@ export class KartGame {
     const G = this.ground, S = this.gsize, gs = this.gs;
     const fog = this.pal.fog;
     const [fogAt, fogLen] = this.track.fog ?? [900, 4200];
-    const occ = this.occ;
+    const occ = this.occ, shade = this.shade;
     for (let x = 0; x < BW; x++) {
       const k = (x - BW / 2) / FOCAL;
       const vx = dx + rx * k, vy = dy + ry * k;
@@ -2206,6 +2225,7 @@ export class KartGame {
         const sy = hz + ((camZ - h) * FOCAL) / z;
         const yi = sy < 0 ? 0 : sy | 0;
         if (yi < ybuf) {
+          const sh = shade ? (shade[o] * (1 - ax) + shade[o + 1] * ax) * (1 - ay) + (shade[o + n] * (1 - ax) + shade[o + n + 1] * ax) * ay : 1;
           // every screen row between this step and the one before gets its own spot of ground (so flat ground near you
           // keeps its detail); a face that rises steeply is a little darker (so cliffs read as cliffs)
           const span = syp - sy, steep = h - hp > (z - zp) * 0.9;
@@ -2217,12 +2237,12 @@ export class KartGame {
             gx = gx < 0 ? 0 : gx >= S ? S - 1 : gx;
             gy = gy < 0 ? 0 : gy >= S ? S - 1 : gy;
             let c = G[gy * S + gx];
-            const m = steep && y > yi ? 205 : 256;
+            const m = ((steep && y > yi ? 205 : 256) * sh) | 0;
             let f256 = 0;
             if (zr > fogAt) f256 = (Math.min(0.82, (zr - fogAt) / fogLen) * 256) | 0;
             if (m !== 256 || f256) {
               const i256 = 256 - f256;
-              const cr = (((c & 255) * m) >> 8) * i256 + fog[0] * f256, cg = ((((c >> 8) & 255) * m) >> 8) * i256 + fog[1] * f256, cb = ((((c >> 16) & 255) * m) >> 8) * i256 + fog[2] * f256;
+              const cr = Math.min(255, ((c & 255) * m) >> 8) * i256 + fog[0] * f256, cg = Math.min(255, (((c >> 8) & 255) * m) >> 8) * i256 + fog[1] * f256, cb = Math.min(255, (((c >> 16) & 255) * m) >> 8) * i256 + fog[2] * f256;
               c = 0xff000000 | ((cb >> 8) << 16) | ((cg >> 8) << 8) | (cr >> 8);
             }
             out[y * BW + x] = c;
@@ -2332,7 +2352,7 @@ export class KartGame {
     }
 
     // ---- ground
-    const terrain = !!this.track.terrain;
+    const terrain = !!this.track.terrain || !!this.track.hill; // (the old hill maps are drawn by the terrain renderer too)
     if (terrain) this.drawTerrain(camX, camY, camZ, dx, dy, rx, ry, hz);
     const S = this.gsize;
     const gs = this.gs;
