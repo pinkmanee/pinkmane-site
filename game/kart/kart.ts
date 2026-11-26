@@ -386,7 +386,6 @@ export class KartGame {
   private packs: TrackPack[] = [];
   private trackNo = 0;
   private fallCam = 0;
-  private fallBuf: HTMLCanvasElement | null = null; // a copy of the picture while you fall (it slides up and away)
   private zoneF = 0; // 0 = the field's sky and haze, 1 = the void's (it fades between them)
   private track!: TrackData;
   private ground!: Uint32Array;
@@ -2331,9 +2330,10 @@ export class KartGame {
     const ca = this.camA;
     const dx = Math.cos(ca), dy = Math.sin(ca);
     const rx = -dy, ry = dx;
-    // when you fall into the void the camera stays right behind your kart and falls WITH it (see the end of drawWorld)
-    this.fallCam += ((me.fall > 0 ? 1 : 0) - this.fallCam) * 0.1;
-    const back = CAM_BACK;
+    // when you fall into the void the camera slowly pulls back a little and tilts down, so you watch your kart drop
+    // and burst below the road (gently: the road always stays on screen)
+    this.fallCam += ((me.fall > 0 ? 1 : 0) - this.fallCam) * (me.fall > 0 ? 0.035 : 0.08);
+    const back = CAM_BACK + 120 * this.fallCam;
     const camX = me.x - dx * back, camY = me.y - dy * back;
     // HILLS: the camera rides at the height of the ground under your kart, and tilts with the slope ahead:
     // up a climb the horizon moves down (you look up the hill), over a crest it moves up (you look down the other side)
@@ -2352,7 +2352,8 @@ export class KartGame {
     }
     // going downhill the camera rises a little, so you can see down the slope
     const camZ = this.camG + camH + (hills ? Math.max(0, -this.slope) * 45 : 0); // how high the camera is
-    const hz = HORIZON + Math.round(this.pitch); // where the horizon is on screen this frame
+    // where the horizon is on screen this frame (falling: it rises a bit = the camera looks down after your kart)
+    const hz = Math.max(HORIZON - PITCH_UP, HORIZON + Math.round(this.pitch) - Math.round(this.fallCam * 40));
 
     // ---- which zone you're in (0 = the field, 1 = the void): the sky and the haze fade from one to the other
     const zoneNow = this.track.tunnel ? this.track.tunnel[me.idx] ?? 0 : this.track.zone ? this.track.zone[me.idx] ?? 0 : 0;
@@ -2670,7 +2671,6 @@ export class KartGame {
 
     const list: Sprite[] = [];
     const bursts: { x: number; y: number; t: number; col: [number, number, number] }[] = [];
-    let meFall: { img: HTMLCanvasElement | HTMLImageElement; sx: number; sw: number; sh: number; k: number; tumble: number } | null = null;
     const now = performance.now();
     this.tags = [];
     for (const k of this.karts) {
@@ -2712,16 +2712,11 @@ export class KartGame {
       const jumpZ = k.air > 0 ? Math.sin((1 - k.air / AIR_TIME) * Math.PI) * 16 : 0;
       // falling into the void: it tumbles down and shrinks, then bursts into pixels at the bottom
       if (k.fall > 0 && k.fall <= BURST_TIME) {
-        if (k !== me) bursts.push({ x: k.x, y: k.y, t: 1 - k.fall / BURST_TIME, col: skinColor(k.skin) });
+        bursts.push({ x: k.x, y: k.y, t: 1 - k.fall / BURST_TIME, col: skinColor(k.skin) });
         continue;
       }
       const drop = k.fall > 0 ? 1 - (k.fall - BURST_TIME) / FALL_TIME : 0;
       const tumble = drop > 0 ? Math.max(0.15, Math.abs(Math.cos(drop * 9))) : 1;
-      if (k === me && k.fall > 0) {
-        // YOUR kart falling: drawn at the very end, after the camera has dropped with it
-        meFall = { img: im, sx: frame * fw, sw: fw, sh: im.height, k: CARS[k.car].k, tumble };
-        continue;
-      }
       if (k.alt > 2) {
         // the wings (behind the kart), opening as it takes off
         const open = Math.min(1, k.alt / 30);
@@ -2900,7 +2895,12 @@ export class KartGame {
       if (clipped) b.restore();
     }
     // ---- the pixel burst at the bottom of a fall: a white flash, then squares flying apart
-    const burst = (bu: { t: number; col: number[] }, cx: number, cy: number, sc: number) => {
+    for (const bu of bursts) {
+      const ex = bu.x - camX, ey = bu.y - camY;
+      const z = ex * dx + ey * dy;
+      if (z < 12 || z > 1200) continue;
+      const sc = FOCAL / z;
+      const cx = BW / 2 + (ex * rx + ey * ry) * sc, cy = hz + (camZ - gh(bu.x, bu.y)) * sc + (FALL_DEPTH - 4) * sc;
       const cols = ["#ff46c8", "#ffffff", `rgb(${bu.col[0]},${bu.col[1]},${bu.col[2]})`, "#7a3ce0", "#ffe23c"];
       if (bu.t < 0.12) {
         const f = Math.max(4, Math.round(40 * sc));
@@ -2915,61 +2915,6 @@ export class KartGame {
         b.fillStyle = cols[i % cols.length];
         b.fillRect(Math.round(cx + Math.cos(a) * sp * out2 * sc - size / 2), Math.round(cy + (Math.sin(a) * sp * out2 * 0.7 + 14 * bu.t * bu.t) * sc - size / 2), size, size);
       }
-    };
-    for (const bu of bursts) {
-      const ex = bu.x - camX, ey = bu.y - camY;
-      const z = ex * dx + ey * dy;
-      if (z < 12 || z > 1200) continue;
-      const sc = FOCAL / z;
-      burst(bu, BW / 2 + (ex * rx + ey * ry) * sc, hz + (camZ - gh(bu.x, bu.y)) * sc + (FALL_DEPTH - 4) * sc, sc);
-    }
-
-    // ---- FALLING WITH YOUR KART: the camera drops with it. The whole picture (road, sky, everything) slides up and away
-    // while you tumble down through the void (or the water / the smoke on SMOKE OCEAN), the view rolls a little,
-    // streaks rush past, and the pixel burst happens right in front of you.
-    if (me.fall > 0) {
-      const drop = me.fall > BURST_TIME ? 1 - (me.fall - BURST_TIME) / FALL_TIME : 1;
-      const sc0 = FOCAL / CAM_BACK;
-      const groundY = hz + (camZ - gh(me.x, me.y)) * sc0; // where your kart sits on the screen
-      const shift = Math.min(BH + 60, drop * drop * FALL_DEPTH * sc0);
-      const roll = Math.sin(drop * 5.5) * 0.2 * Math.min(1, drop * 2);
-      if (!this.fallBuf) {
-        this.fallBuf = document.createElement("canvas");
-        this.fallBuf.width = BW;
-        this.fallBuf.height = BH;
-      }
-      const fb = this.fallBuf.getContext("2d")!;
-      fb.clearRect(0, 0, BW, BH);
-      fb.drawImage(b.canvas, 0, 0, BW, BH, 0, 0, BW, BH);
-      const split = this.track.seaSplit;
-      const inWater = split !== undefined && me.x < split, inSmoke = split !== undefined && me.x >= split;
-      b.fillStyle = inWater ? "#04203a" : inSmoke ? "#2a2434" : "#06020f";
-      b.fillRect(0, 0, BW, BH);
-      // streaks (bubbles in the water) rushing up past you, faster as you fall
-      for (let i = 0; i < 46; i++) {
-        const sp = 0.25 + (i % 4) * 0.12 + drop * 0.4;
-        const len = 6 + ((i * 13) % 26);
-        const y = BH + 40 - (((i * 53 + now * sp) % (BH + 80)) | 0);
-        const x = (i * 97 + (i % 7) * 31) % BW;
-        b.fillStyle = inWater ? "rgba(170,230,255,0.35)" : inSmoke ? "rgba(235,228,245,0.3)" : i % 3 ? "rgba(255,90,210,0.3)" : "rgba(180,140,255,0.35)";
-        if (inWater) b.fillRect(x, y, 2, 2);
-        else b.fillRect(x, y, 1, len);
-      }
-      b.save();
-      b.translate(BW / 2, groundY - shift);
-      b.rotate(roll);
-      b.drawImage(this.fallBuf, -BW / 2, -groundY);
-      b.restore();
-      if (meFall && me.fall > BURST_TIME) {
-        // your kart, tumbling, right where it always is on the screen
-        const f = meFall;
-        const w = f.sw * f.k * sc0 * f.tumble, h = f.sh * f.k * sc0;
-        b.save();
-        b.translate(BW / 2, Math.round(groundY - h / 2));
-        b.rotate(roll * 2 + drop * drop * 5);
-        b.drawImage(f.img, f.sx * resOf(f.img), 0, f.sw * resOf(f.img), f.sh * resOf(f.img), -Math.round(w / 2), -Math.round(h / 2), Math.round(w), Math.round(h));
-        b.restore();
-      } else if (me.fall <= BURST_TIME) burst({ t: 1 - me.fall / BURST_TIME, col: skinColor(me.skin) }, BW / 2, groundY - 14, sc0 * 0.45); // (smaller: it's right in front of you)
     }
   }
 }
