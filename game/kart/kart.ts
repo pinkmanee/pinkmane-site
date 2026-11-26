@@ -157,7 +157,7 @@ const HORIZON = 100;
 const FOCAL = 260;
 const CAM_H = 34;
 const CAM_BACK = 65; // how far the camera sits behind your kart
-const PITCH_UP = 34; // HILLS: how far the camera may tilt down over a crest (pixels the horizon moves up)
+const PITCH_UP = 60; // HILLS: how far the camera may tilt down over a crest (pixels the horizon moves up)
 const MAX_ROWS = BH - HORIZON + PITCH_UP; // the most ground rows there can be on screen
 const HG = 256; // HILLS: the height map is this many squares across
 const LAPS = 3;
@@ -358,6 +358,7 @@ export class KartGame {
   private rowH = new Float32Array(MAX_ROWS);
   private camG = 0; // the ground height under the camera (smoothed)
   private pitch = 0; // how far the camera is tilted (pixels the horizon moves down)
+  private slope = 0; // how steep the road ahead is (smoothed)
   private types!: Uint8Array;
   private img: Record<string, HTMLImageElement> = {};
   private kartSkins: Record<string, HTMLCanvasElement>[] = [];
@@ -945,6 +946,7 @@ export class KartGame {
     this.hillGrid = p.track.hill ? (p.hillGrid ??= this.makeHillGrid(p.track)) : null;
     this.camG = 0;
     this.pitch = 0;
+    this.slope = 0;
     this.ground = p.ground;
     this.gsize = p.gsize;
     this.gs = p.gs;
@@ -2033,7 +2035,7 @@ export class KartGame {
         const f = e < 40 ? 1 : e > 420 ? 0 : 1 - (e - 40) / 380;
         g[gy * HG + gx] = (hill[bi] ?? 0) * f * f * (3 - 2 * f);
       }
-    for (let pass = 0; pass < 2; pass++) {
+    for (let pass = 0; pass < 4; pass++) {
       const s = g.slice();
       for (let gy = 1; gy < HG - 1; gy++)
         for (let gx = 1; gx < HG - 1; gx++) {
@@ -2078,10 +2080,15 @@ export class KartGame {
       const g0 = gh(me.x, me.y);
       this.camG += (g0 - this.camG) * 0.35;
       this.camG = Math.max(this.camG, gh(camX, camY), g0 - 6); // never inside the hill
-      const slope = (gh(me.x + dx * 140, me.y + dy * 140) - g0) / 140;
-      this.pitch += (clamp(slope * FOCAL * 0.85, -PITCH_UP, 40) - this.pitch) * 0.12;
+      // the slope of the road ahead, judged over a long stretch (so it doesn't twitch at every little bump)
+      let sl = 0;
+      for (const ahead of [90, 180, 300, 440]) sl += (gh(me.x + dx * ahead, me.y + dy * ahead) - g0) / ahead;
+      sl /= 4;
+      this.slope += (sl - this.slope) * 0.08;
+      this.pitch += (clamp(this.slope * FOCAL * 1.05, -PITCH_UP, 50) - this.pitch) * 0.08;
     }
-    const camZ = this.camG + camH; // how high the camera is
+    // going downhill the camera rises a little, so you can see down the slope
+    const camZ = this.camG + camH + (hills ? Math.max(0, -this.slope) * 45 : 0); // how high the camera is
     const hz = HORIZON + Math.round(this.pitch); // where the horizon is on screen this frame
 
     // ---- which zone you're in (0 = the field, 1 = the void): the sky and the haze fade from one to the other
