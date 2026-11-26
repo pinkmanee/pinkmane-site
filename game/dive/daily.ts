@@ -2,6 +2,7 @@
 // so both always agree.
 
 import { PROMPTS, TIERS, type Prompt } from "./prompts";
+import { MORE } from "./more";
 
 /** DIVE #1 is this day (UTC). Every day after is the next number. */
 export const LAUNCH = Date.UTC(2026, 10, 26);
@@ -72,76 +73,122 @@ export function norm(s: string): string {
 export type Hit = { answer: string; tier: number; depth: number };
 
 const indexes = new Map<string, Map<string, Hit>>();
-/** every way of writing every answer of a prompt -> the answer and its tier */
+/** every way of writing every answer of a prompt -> the answer and its tier (the extra answers in more.ts count too) */
 export function indexOf(p: Prompt): Map<string, Hit> {
   let m = indexes.get(p.id);
   if (m) return m;
   m = new Map();
-  p.t.forEach((line, tier) => {
-    for (const entry of line.split(",")) {
-      const names = entry.split("|").map((n) => n.trim()).filter(Boolean);
-      if (!names.length) continue;
-      const hit: Hit = { answer: names[0].toUpperCase(), tier, depth: TIERS[tier].depth };
-      for (const n of names) {
-        const k = norm(n);
-        if (!k) continue;
-        // (an answer that is in two tiers by mistake counts as the more common one: the first)
-        if (!m!.has(k)) m!.set(k, hit);
-        const tight = k.replace(/ /g, "");
-        if (!m!.has(tight)) m!.set(tight, hit);
+  const lines: string[][] = [p.t, MORE[p.id] ?? []];
+  for (const tiers of lines)
+    tiers.forEach((line, tier) => {
+      for (const entry of line.split(",")) {
+        const names = entry.split("|").map((n) => n.trim()).filter(Boolean);
+        if (!names.length) continue;
+        const k0 = norm(names[0]);
+        // (an answer that is in the list twice counts the first time it's written: prompts.ts first, then more.ts)
+        const hit: Hit = (k0 && m!.get(k0)) || { answer: names[0].toUpperCase(), tier, depth: TIERS[tier].depth };
+        for (const n of names) {
+          const k = norm(n);
+          if (!k) continue;
+          if (!m!.has(k)) m!.set(k, hit);
+          const tight = k.replace(/ /g, "");
+          if (!m!.has(tight)) m!.set(tight, hit);
+        }
       }
-    }
-  });
+    });
   indexes.set(p.id, m);
   return m;
 }
 
-function editDistance(a: string, b: string, max: number): number {
-  if (Math.abs(a.length - b.length) > max) return max + 1;
-  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    const cur = [i];
-    let best = i;
-    for (let j = 1; j <= b.length; j++) {
-      const v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-      cur.push(v);
+// ------------------------------------------------------------------ forgiving typos
+// A wrong key right next to the right one (on a phone or a laptop keyboard) costs half a mistake, so "lyon" -> lion.
+// Two letters swapped ("lino") and a doubled / missing double letter ("salmmon", "rabit") also cost half.
+const KEYROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
+const KEYPOS = new Map<string, [number, number]>();
+KEYROWS.forEach((row, r) => [...row].forEach((ch, c) => KEYPOS.set(ch, [r, c + r * 0.5])));
+function nextTo(a: string, b: string) {
+  const pa = KEYPOS.get(a), pb = KEYPOS.get(b);
+  return !!pa && !!pb && Math.abs(pa[0] - pb[0]) <= 1 && Math.abs(pa[1] - pb[1]) <= 1;
+}
+function typoDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max * 2) return max + 1;
+  const n = a.length, mm = b.length;
+  const d: number[][] = Array.from({ length: n + 1 }, (_, i) => Array.from({ length: mm + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= n; i++) {
+    let best = Infinity;
+    for (let j = 1; j <= mm; j++) {
+      const x = a[i - 1], y = b[j - 1];
+      const sub = x === y ? 0 : nextTo(x, y) ? 0.5 : 1;
+      const del = i > 1 && a[i - 2] === x ? 0.5 : 1; // an extra double letter
+      const ins = j > 1 && b[j - 2] === y ? 0.5 : 1; // a missing double letter
+      let v = Math.min(d[i - 1][j] + del, d[i][j - 1] + ins, d[i - 1][j - 1] + sub);
+      if (i > 1 && j > 1 && x === b[j - 2] && a[i - 2] === y) v = Math.min(v, d[i - 2][j - 2] + 0.5); // two letters swapped
+      d[i][j] = v;
       if (v < best) best = v;
     }
     if (best > max) return max + 1;
-    prev = cur;
   }
-  return prev[b.length];
+  return d[n][mm];
 }
+/** how many mistakes a word of this length may have */
+const allowance = (len: number) => (len <= 2 ? 0 : len === 3 ? 0.5 : len <= 5 ? 1 : len <= 8 ? 1.5 : len <= 12 ? 2 : 3);
 
-/** does this count for this prompt? Forgives plurals and small typos. null = not on the list */
-export function check(p: Prompt, typed: string): Hit | null {
-  const m = indexOf(p);
+function variants(typed: string): string[] {
   const k = norm(typed);
-  if (!k) return null;
+  if (!k) return [];
   const tries = [k, k.replace(/ /g, "")];
   if (k.endsWith("es")) tries.push(k.slice(0, -2));
   if (k.endsWith("s")) tries.push(k.slice(0, -1));
   else tries.push(k + "s");
-  for (const t of tries) {
+  return tries;
+}
+
+// every answer that's close to what was typed, closest first
+function near(p: Prompt, typed: string, extra: number): { hit: Hit; d: number }[] {
+  const m = indexOf(p);
+  const k = norm(typed);
+  const max = allowance(k.replace(/ /g, "").length) + extra;
+  if (max <= 0) return [];
+  const best = new Map<Hit, number>();
+  for (const [key, hit] of m) {
+    if (key.length < 3) continue;
+    let d = max + 1;
+    for (const t of variants(typed)) d = Math.min(d, typoDistance(t, key, max));
+    if (d <= max && d < (best.get(hit) ?? Infinity)) best.set(hit, d);
+  }
+  return [...best].map(([hit, d]) => ({ hit, d })).sort((a, b) => a.d - b.d || a.hit.tier - b.hit.tier);
+}
+
+/** does this count for this prompt? Forgives plurals, "the", spaces and typos. null = not on the list */
+export function check(p: Prompt, typed: string): Hit | null {
+  const m = indexOf(p);
+  for (const t of variants(typed)) {
     const hit = m.get(t);
     if (hit) return hit;
   }
-  // a typo: 1 letter off for 5 - 8 letters, 2 off for longer words (only if exactly one answer is that close)
-  const max = k.length >= 9 ? 2 : k.length >= 5 ? 1 : 0;
-  if (!max) return null;
-  let found: Hit | null = null;
-  let bestD = max + 1;
-  let tie = false;
-  for (const [key, hit] of m) {
-    if (key.length < 4) continue;
-    const d = editDistance(k, key, max);
-    if (d < bestD) {
-      bestD = d;
-      found = hit;
-      tie = false;
-    } else if (d === bestD && found && hit !== found) tie = true;
-  }
-  return found && !tie ? found : null;
+  const close = near(p, typed, 0);
+  if (!close.length) return null;
+  // the closest one counts, unless a different answer is just as close (then the player picks: see suggest)
+  if (close.length > 1 && close[1].d <= close[0].d) return null;
+  return close[0].hit;
+}
+
+/** "DID YOU MEAN ...?": up to 3 answers close to a word that didn't count (a bigger typo, or a part of a longer name) */
+export function suggest(p: Prompt, typed: string): Hit[] {
+  const k = norm(typed);
+  if (k.replace(/ /g, "").length < 3) return [];
+  const out: Hit[] = [];
+  // the start of an answer, at least 4 letters and half of it (so it helps with a cut-off word, but can't be used to fish
+  // for answers): "hammer" -> HAMMERHEAD SHARK, "guin" -> GUINEA
+  if (k.length >= 4)
+    for (const [key, hit] of indexOf(p)) if (!out.includes(hit) && key.length > k.length && key.length <= k.length * 2 && key.startsWith(k)) out.push(hit);
+  out.sort((x, y) => x.tier - y.tier);
+  for (const c of near(p, typed, 1)) if (!out.includes(c.hit)) out.push(c.hit);
+  // a part of a longer answer: "romagnolo" -> LAGOTTO ROMAGNOLO, "fringehead" -> SARCASTIC FRINGEHEAD
+  if (k.length >= 4)
+    for (const [key, hit] of indexOf(p))
+      if (!out.includes(hit) && key.includes(" ") && key.split(" ").some((w) => w === k || (k.length >= 5 && w.startsWith(k)))) out.push(hit);
+  return out.slice(0, 3);
 }
 
 /** the answer by its exact name (what the page sends to the server) */

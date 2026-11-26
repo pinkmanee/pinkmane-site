@@ -13,7 +13,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TIERS, type Prompt } from "../../../game/dive/prompts";
-import { BANDS, PER_DAY, SECONDS, bandOf, check, diveNumber, practicePrompts, promptsForDive, type Hit } from "../../../game/dive/daily";
+import { BANDS, PER_DAY, SECONDS, bandOf, check, diveNumber, practicePrompts, promptsForDive, suggest, type Hit } from "../../../game/dive/daily";
 import { buzz } from "../../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 const PINK = "#ff5fd2";
@@ -383,6 +383,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   const [typed, setTyped] = useState("");
   const [left, setLeft] = useState(SECONDS);
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null);
+  const [sugg, setSugg] = useState<Hit[]>([]); // "DID YOU MEAN ...?" after a word that didn't count
   const [reveal, setReveal] = useState<Hit | "none" | null>(null); // the answer card between two prompts
   const [result, setResult] = useState<Result | null>(null);
   const [copied, setCopied] = useState(false);
@@ -440,6 +441,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     setAt(0);
     setTyped("");
     setNote(null);
+    setSugg([]);
     setReveal(null);
     setResult(null);
     setCopied(false);
@@ -499,6 +501,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     setSlots(all);
     setReveal(hit ?? "none");
     setNote(null);
+    setSugg([]);
     if (hit) [0, 1, 2].slice(0, 1 + Math.min(2, hit.tier)).forEach((i) => beep(500 + hit.tier * 120 + i * 160, 500 + hit.tier * 120 + i * 160, 0.1, "square", 0.1, i * 0.08));
     else beep(180, 70, 0.4, "sawtooth", 0.1);
     const isPractice = practice, d = dive, n = at;
@@ -540,11 +543,14 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     const hit = check(p, typed);
     if (hit) lock(hit);
     else {
+      // didn't count: keep what was typed (so a typo is quick to fix) and offer the closest answers to tap
       buzz("soft");
-      setNote({ text: `"${typed.trim().toUpperCase().slice(0, 24)}" ISN'T ON THE LIST - TRY ANOTHER`, bad: true });
-      setTyped("");
+      const close = suggest(p, typed);
+      setSugg(close);
+      setNote({ text: close.length ? "NOT QUITE - DID YOU MEAN:" : `"${typed.trim().toUpperCase().slice(0, 24)}" ISN'T ON THE LIST - FIX IT OR TRY ANOTHER`, bad: true });
       beep(160, 110, 0.18, "square", 0.08);
       inputRef.current?.focus();
+      inputRef.current?.select();
     }
   };
 
@@ -663,7 +669,13 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
                 ref={inputRef}
                 className="pd-input"
                 value={typed}
-                onChange={(e) => setTyped(e.target.value)}
+                onChange={(e) => {
+                  setTyped(e.target.value);
+                  if (sugg.length || note) {
+                    setSugg([]);
+                    setNote(null);
+                  }
+                }}
                 placeholder="TYPE YOUR ANSWER"
                 autoComplete="off"
                 autoCorrect="off"
@@ -679,6 +691,15 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
             </form>
           )}
           <div className={`pd-note ${note?.bad ? "pd-bad" : ""}`}>{note ? note.text : reveal ? "" : `${Math.ceil(left)} SECONDS · ONE ANSWER COUNTS`}</div>
+          {!reveal && sugg.length > 0 && (
+            <div className="pd-sugg">
+              {sugg.map((h) => (
+                <button key={h.answer} className="pd-btn pd-sugg-btn" onClick={() => lock(h)}>
+                  {h.answer}?
+                </button>
+              ))}
+            </div>
+          )}
           {!reveal && (
             <button className="pd-skip" onClick={() => lock(null)}>
               SKIP
@@ -792,6 +813,8 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         .pd-note { min-height: 28px; margin-top: 12px; font-size: 7px; line-height: 1.7; color: rgba(255, 255, 255, 0.7); }
         .pd-bad { color: #ff8ea0; animation: pdShake 0.25s; }
         @keyframes pdShake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+        .pd-sugg { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: -4px 0 8px; }
+        .pd-sugg-btn { font-size: 9px; padding: 8px 10px; background: #3a1850; border-color: ${PINK}; }
         .pd-skip { font-family: inherit; font-size: 7px; color: rgba(255, 255, 255, 0.6); background: none; border: none; cursor: pointer; padding: 6px; text-decoration: underline; }
         .pd-reveal { border: 3px solid; padding: 12px 8px; font-size: 9px; line-height: 2; background: rgba(0, 0, 0, 0.35); animation: pdPop 0.25s ease-out; }
         .pd-reveal-a { font-size: 14px; color: #fff; }
