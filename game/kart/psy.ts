@@ -4,9 +4,10 @@
 //   - the road: shaded cobblestones
 //   - the things beside the road: twisted striped horn towers, spotted mushrooms and dotted candy trees,
 //     mixed with PINKMANE's own weed plants (from props.png)
-// Each map picks a theme in TRACKS (game/kart/kart.ts): psy: "candy" | "glitter" | "lava".
+// Each map picks a theme in TRACKS (game/kart/kart.ts): psy: "candy" | "glitter" | "lava" | "ocean".
+//   - maps over water (GHOST SHIP BAY): the animated sea (waterPixel) and wooden planks for the road (plankPixel)
 
-export type PsyTheme = "candy" | "glitter" | "lava";
+export type PsyTheme = "candy" | "glitter" | "lava" | "ocean";
 type RGB = [number, number, number];
 
 // ---------------------------------------------------------------- colours of each theme (change them here)
@@ -53,6 +54,16 @@ const THEMES: Record<PsyTheme, {
     skyline: [30, 6, 16], windows: [255, 230, 120], moon: [255, 200, 90],
     fog: [230, 90, 50],
     grass: [[20, 8, 4], [70, 170, 50], [170, 255, 110], [12, 4, 2]],
+  },
+  ocean: {
+    sky: [[4, 8, 30], [14, 36, 86], [70, 100, 170], [255, 150, 200]],
+    swirl: [[60, 220, 220], [255, 110, 200], [255, 220, 110], [140, 90, 255], [120, 255, 200]],
+    field: [[120, 50, 90], [200, 110, 140], [255, 176, 170], [236, 140, 160], [170, 80, 120], [140, 60, 110]],
+    sparkle: [255, 236, 170],
+    stones: [104, 92, 130], mortar: [26, 16, 40], glint: [255, 190, 240],
+    skyline: [8, 14, 40], windows: [255, 220, 120], moon: [240, 250, 255],
+    fog: [60, 100, 170],
+    grass: [[16, 30, 46], [50, 170, 150], [160, 255, 220], [8, 16, 26]],
   },
 };
 export const psyColours = (t: PsyTheme) => THEMES[t];
@@ -140,6 +151,32 @@ export function cobblePixel(theme: PsyTheme, x: number, y: number, shade: number
   if (gap < 2.6) c = mix(c, T.mortar, 0.45); // the stone's edge sinks into the gap
   if (lx + ly < -0.45 && dome > 1.05 && gap > 3) c = mix(c, T.glint, 0.55); // the shine
   return abgr([Math.max(0, Math.min(255, c[0])), Math.max(0, Math.min(255, c[1])), Math.max(0, Math.min(255, c[2]))]);
+}
+
+// ---------------------------------------------------------------- the sea (maps over water): animated, x/y = world, t = seconds
+const SEA_DEEP: RGB = [8, 20, 58], SEA_MID: RGB = [24, 62, 128], SEA_LIGHT = abgr([70, 150, 220]), SEA_FOAM = abgr([170, 236, 255]), SEA_GLINT = abgr([255, 246, 220]);
+const SEA_RAMP = Array.from({ length: 8 }, (_, i) => abgr(mix(SEA_DEEP, SEA_MID, i / 7)));
+export function waterPixel(x: number, y: number, t: number): number {
+  const w = noise(x / 90 + t * 0.12, y / 90);
+  const v = Math.sin(x * 0.07 + w * 6 + t * 1.3) + Math.sin(y * 0.06 - w * 5 - t * 1.0);
+  if (v > 1.9) return SEA_FOAM; // the crest of a wave
+  if (v > 1.72) return SEA_LIGHT;
+  if ((hash((x >> 2) + Math.floor(t * 2) * 977, y >> 2) & 2047) < 3) return SEA_GLINT; // moonlight glinting on the waves
+  return SEA_RAMP[Math.min(7, Math.floor(w * 9))];
+}
+
+// ---------------------------------------------------------------- the wooden road (planks): key = the road picture's colour key
+const WOOD_A: RGB = [132, 80, 122], WOOD_B: RGB = [108, 64, 108];
+export function plankPixel(key: string, x: number, y: number): number {
+  if (key === "t0") return abgr([30, 12, 34]); // the gaps between planks
+  if (key === "cp") return abgr([76, 36, 74]); // the rails
+  if (key === "cw") return abgr([238, 224, 208]); // the rail posts (bone white)
+  if (key === "edge") return abgr([24, 8, 24]);
+  if (key === "dash") return 0;
+  const base = key === "t1" ? WOOD_A : WOOD_B;
+  const grain = 0.86 + noise(x / 3.5, y / 3.5) * 0.28; // wood grain
+  const glint = (hash(x >> 1, y >> 1) & 1023) < 3; // a little pink shine here and there
+  return glint ? abgr([255, 160, 230]) : abgr([base[0] * grain, base[1] * grain, base[2] * grain]);
 }
 
 // ---------------------------------------------------------------- the sky (wraps around once: its width = one full turn)

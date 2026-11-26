@@ -367,7 +367,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
   const maps = (picked: number, onPick?: (i: number) => void) => (
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 9, textAlign: "center", marginBottom: 8, color: PALE }}>{onPick ? "CHOOSE THE MAP" : "THE MAP"}</div>
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${TRACKS.length}, 1fr)`, gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(3, TRACKS.length)}, 1fr)`, gap: 8 }}>
         {TRACKS.map((t, i) => (
           <button
             key={t.id}
