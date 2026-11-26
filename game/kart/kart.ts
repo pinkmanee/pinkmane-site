@@ -3,7 +3,7 @@
 // Everything you see comes from the pictures in public/kart/ : swap a picture, the game changes.
 
 import { KartSound } from "./sound";
-import { cobblePixel, fieldPixel, makePsyProps, makePsySky, plankPixel, psyColours, waterPixel, type PsyTheme } from "./psy"; // the psychedelic look
+import { cobblePixel, fieldPixel, makePsyProps, makePsySky, plankPixel, psyColours, tilePixel, waterPixel, type PsyTheme } from "./psy"; // the psychedelic look
 import { buzz } from "../buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // THE MUSIC IN PINK KART: which of your beats plays where (files in public/music). Change a file name to change the song.
@@ -13,6 +13,7 @@ const MUSIC: Record<string, string> = {
   track2: "/music/beat-3.mp3", // VOID HIGHWAY
   track3: "/music/beat-5.mp3", // HIGH HILLS
   track4: "/music/06.mp3", // GHOST SHIP BAY
+  track5: "/music/05.mp3", // 808 TEMPLE (its speakers bounce on this song's beat: "beat" in track5.json)
 };
 
 type Img = HTMLImageElement | HTMLCanvasElement;
@@ -34,7 +35,9 @@ type TrackData = {
   spawnOff?: number[]; // ...and how far to the side (the split has a hole in the middle)
   water?: boolean; // the "void" around the road is the sea (GHOST SHIP BAY): it's drawn as moving water
   fallText?: string; // what it says when you fall off (default: INTO THE VOID)
-  decor?: [number, number, string, number][]; // big things standing around: [x, y, "ship" | "tentacle", size]
+  decor?: [number, number, string, number][]; // big things standing around: [x, y, "ship" | "tentacle" | "speaker" | "eq", size]
+  beat?: { bpm: number; at: number }; // the map song's tempo and where its first beat is (s): speakers and equalizers move on it
+  jumpText?: string; // what it says on a jump (default: JUMP!)
   outside?: number; // what's past the edge of the map (3 = void)
   alt?: number[]; // the flying part: how high the karts fly at every centre point (0 = on the ground)
   peaks?: [number, number][]; // mountain tops to dodge while flying
@@ -47,6 +50,7 @@ export const TRACKS = [
   { id: "track2", name: "VOID HIGHWAY", hue: -75, road: "neon", psy: "glitter" },
   { id: "track3", name: "HIGH HILLS", hue: 68, greenPlants: true, road: "cobble", psy: "lava" },
   { id: "track4", name: "GHOST SHIP BAY", hue: 0, road: "planks", psy: "ocean" },
+  { id: "track5", name: "808 TEMPLE", hue: 0, road: "tiles", psy: "gold" },
 ];
 // EACH MAP HAS ITS OWN COLOURS. "hue" turns the colour wheel for that map's ground, sky and haze (in degrees):
 // 0 = the original pink and purple, -75 = cold blue, 68 = sunset orange and red. Change a number to recolour a map.
@@ -93,6 +97,7 @@ function roadPixel(style: string, c: number, x: number, y: number, psy?: PsyThem
   if (!key) return 0;
   const shade = key === "t0" ? 0 : key === "t1" ? 1 : 2;
   if (style === "planks") return plankPixel(key, x, y); // wooden piers, ship decks and boardwalks
+  if (style === "tiles") return tilePixel(key, x, y); // black marble tiles with gold seams
   if (style === "cobble") {
     // cobblestones; the curbs, edge line and centre dashes keep the map's own colours
     if (key === "t0" || key === "t1" || key === "t2") return cobblePixel(psy ?? "candy", x, y, shade);
@@ -437,7 +442,7 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", ...ITEMS.map((i) => `item-${i}`)];
+    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", ...ITEMS.map((i) => `item-${i}`)];
     const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n))]);
     this.packs = packs;
     for (const it of ITEMS) (this.img[`item-${it}`] as { pkRes?: number }).pkRes = this.img[`item-${it}`].width / 48;
@@ -1099,7 +1104,7 @@ export class KartGame {
         // (straight away, not after the usual little slide, so a slow kart still clears the gap)
         k.vx = Math.cos(k.a) * k.speed;
         k.vy = Math.sin(k.a) * k.speed;
-        if (k.player) this.say("JUMP!", 0.8);
+        if (k.player) this.say(this.track.jumpText ?? "JUMP!", 0.8);
       }
       if (type === 3) {
         if (k.player) buzz();
@@ -1119,7 +1124,7 @@ export class KartGame {
         if (gap < -55) top *= 1.07;
         if (k.blind > 0) top *= 0.8;
       }
-      if (type === 0) top *= 0.42;
+      if (type === 0 || type === 6) top *= 0.42; // off the road (6 = painted ground like the vinyl record: slow too, so it's no shortcut)
       if (flying) top *= 1.12;
       if (k.boost > 0) top = MAX_SPEED * 1.5;
       if (k.spin > 0) {
@@ -2176,10 +2181,18 @@ export class KartGame {
       }
     // beside the track: the black sigil trees (pictures 0-2 in props.png) and black weed plants (3-5), about half and half
     for (const p of this.track.props) list.push({ img: this.pal.props, sx: (p[2] + ((p[0] + p[1]) % 2) * 3) * 40, sw: 40, sh: 64, x: p[0], y: p[1], k: 1.1, lift: 0, flip: false, shadow: false });
-    // big things standing around (GHOST SHIP BAY): ghost ships rocking on the water, tentacles waving out of it
+    // where we are in the beat: 0 = right on it .. 1 = just before the next one (follows the song when it's playing)
+    const bt = this.track.beat, mt = this.snd.musicTime();
+    const beat = bt ? (((((mt >= 0 ? mt : now / 1000) - bt.at) * bt.bpm) / 60) % 1 + 1) % 1 : 0;
+    // big things standing around: ghost ships and tentacles (GHOST SHIP BAY), speakers and equalizer towers (808 TEMPLE)
     for (const d of this.track.decor ?? []) {
       if (d[2] === "ship") list.push({ img: this.img["ghostship"], sx: 0, sw: 72, sh: 46, x: d[0], y: d[1], k: d[3], lift: -5 + Math.sin(now / 700 + d[0]) * 3, flip: d[0] % 2 === 0, shadow: false });
-      else if (d[2] === "tentacle") list.push({ img: this.img["tentacle"], sx: (Math.floor(now / 380 + d[1]) % 2) * 24, sw: 24, sh: 64, x: d[0], y: d[1], k: d[3], lift: -6, flip: d[1] % 2 === 0, shadow: false });
+      else if (d[2] === "speaker") list.push({ img: this.img["speaker"], sx: beat < 0.2 ? 40 : 0, sw: 40, sh: 56, x: d[0], y: d[1], k: d[3], lift: 0, flip: false, shadow: true });
+      else if (d[2] === "eq") {
+        // loud right on the beat, then dropping; every tower a little different
+        const lvl = Math.max(0, Math.min(7, Math.round(7 * Math.pow(1 - beat, 1.3)) - (d[0] % 3) + (beat > 0.5 && beat < 0.62 ? 2 : 0)));
+        list.push({ img: this.img["eq"], sx: lvl * 32, sw: 32, sh: 64, x: d[0], y: d[1], k: d[3], lift: 0, flip: d[1] % 2 === 0, shadow: true });
+      } else if (d[2] === "tentacle") list.push({ img: this.img["tentacle"], sx: (Math.floor(now / 380 + d[1]) % 2) * 24, sw: 24, sh: 64, x: d[0], y: d[1], k: d[3], lift: -6, flip: d[1] % 2 === 0, shadow: false });
     }
     // the flying part: mountain tops standing in the hills, and rings hanging in the air
     for (const pk of this.track.peaks ?? []) list.push({ img: this.img["peak"], sx: 0, sw: 64, sh: 100, x: pk[0], y: pk[1], k: 1.05, lift: 0, flip: false, shadow: false });

@@ -4,10 +4,11 @@
 //   - the road: shaded cobblestones
 //   - the things beside the road: twisted striped horn towers, spotted mushrooms and dotted candy trees,
 //     mixed with PINKMANE's own weed plants (from props.png)
-// Each map picks a theme in TRACKS (game/kart/kart.ts): psy: "candy" | "glitter" | "lava" | "ocean".
+// Each map picks a theme in TRACKS (game/kart/kart.ts): psy: "candy" | "glitter" | "lava" | "ocean" | "gold".
+//   - 808 TEMPLE ("gold"): black marble tiles with gold seams for the road (tilePixel)
 //   - maps over water (GHOST SHIP BAY): the animated sea (waterPixel) and wooden planks for the road (plankPixel)
 
-export type PsyTheme = "candy" | "glitter" | "lava" | "ocean";
+export type PsyTheme = "candy" | "glitter" | "lava" | "ocean" | "gold";
 type RGB = [number, number, number];
 
 // ---------------------------------------------------------------- colours of each theme (change them here)
@@ -54,6 +55,16 @@ const THEMES: Record<PsyTheme, {
     skyline: [30, 6, 16], windows: [255, 230, 120], moon: [255, 200, 90],
     fog: [230, 90, 50],
     grass: [[20, 8, 4], [70, 170, 50], [170, 255, 110], [12, 4, 2]],
+  },
+  gold: {
+    sky: [[10, 4, 20], [50, 16, 70], [150, 50, 120], [255, 190, 90]],
+    swirl: [[255, 214, 90], [255, 70, 200], [150, 80, 255], [255, 140, 60], [255, 255, 220]],
+    field: [[10, 6, 10], [30, 20, 18], [120, 86, 30], [255, 210, 100], [60, 40, 20], [16, 10, 12]],
+    sparkle: [255, 240, 180],
+    stones: [104, 92, 130], mortar: [26, 16, 40], glint: [255, 190, 240],
+    skyline: [16, 6, 24], windows: [255, 214, 90], moon: [255, 230, 150],
+    fog: [150, 60, 110],
+    grass: [[14, 8, 10], [140, 100, 30], [255, 214, 90], [8, 4, 6]],
   },
   ocean: {
     sky: [[4, 8, 30], [14, 36, 86], [70, 100, 170], [255, 150, 200]],
@@ -177,6 +188,20 @@ export function plankPixel(key: string, x: number, y: number): number {
   const grain = 0.86 + noise(x / 3.5, y / 3.5) * 0.28; // wood grain
   const glint = (hash(x >> 1, y >> 1) & 1023) < 3; // a little pink shine here and there
   return glint ? abgr([255, 160, 230]) : abgr([base[0] * grain, base[1] * grain, base[2] * grain]);
+}
+
+// ---------------------------------------------------------------- the marble road (808 TEMPLE): black marble tiles, gold seams
+export function tilePixel(key: string, x: number, y: number): number {
+  if (key === "t0") return abgr([232, 178, 62]); // the gold seams between tiles
+  if (key === "cw") return abgr([255, 214, 90]); // gold curb
+  if (key === "cp") return abgr([18, 10, 22]); // black curb
+  if (key === "edge") return abgr([10, 6, 12]);
+  if (key === "dash") return 0;
+  const w = noise(x / 40, y / 40);
+  if (w > 0.55 && Math.abs(Math.sin(x * 0.045 + y * 0.02 + w * 9)) < 0.03) return abgr([150, 140, 176]); // faint veins in the marble, here and there
+  const base: RGB = key === "t1" ? [30, 22, 38] : [42, 32, 52];
+  const k = 0.85 + w * 0.35;
+  return (hash(x >> 1, y >> 1) & 1023) < 4 ? abgr([255, 230, 160]) : abgr([base[0] * k, base[1] * k, base[2] * k]);
 }
 
 // ---------------------------------------------------------------- the sky (wraps around once: its width = one full turn)

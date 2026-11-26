@@ -83,6 +83,11 @@ export class KartSound {
 
   // ---------------------------------------------------------------- music
   /** which beat plays (or "" for none). The same beat keeps playing if it's already on. */
+  /** where the song is right now, in seconds (-1 when no song is playing): 808 TEMPLE's speakers bounce on its beat */
+  musicTime() {
+    return this.music && !this.music.paused ? this.music.currentTime : -1;
+  }
+
   setMusic(src: string, force = false) {
     this.wantMusic = src;
     if (!src) {
