@@ -146,9 +146,9 @@ function Sea({ depth, font }: { depth: number; font: string }) {
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return;
-    // drawn at 360 x 203 "big pixels" (zoomed out: a lot of sea on screen); the canvas itself is twice that, so the game
+    // drawn at 480 x 270 "big pixels" (zoomed out: a lot of sea on screen); the canvas itself is twice that, so the game
     // sprites keep their own detail
-    const W = 360, H = 203;
+    const W = 480, H = 270;
     cv.width = W * 2;
     cv.height = H * 2;
     const c = cv.getContext("2d")!;
@@ -218,7 +218,7 @@ function Sea({ depth, font }: { depth: number; font: string }) {
       const seenW = Math.min(W, Math.max(40, (H * box.width) / Math.max(1, box.height)));
       const seenX = (W - seenW) / 2;
       const camY = cam * 3; // pixels of water above the sub
-      const subY = upright ? 150 : 88;
+      const subY = upright ? 200 : 118;
       const surface = subY - camY - 2; // where the waterline is on screen
       const at = (worldY: number) => worldY - camY + subY; // a depth in the sea -> a height on the screen
       c.clearRect(0, 0, W, H);
