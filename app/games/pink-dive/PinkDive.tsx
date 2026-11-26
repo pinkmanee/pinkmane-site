@@ -23,6 +23,9 @@ const SEEN_KEY = "pinkdive-seen"; // the prompts you've had lately (practice pic
 const SOUND_KEY = "pinkmane-dive-sound";
 const VOL_KEY = "pinkmane-dive-vol"; // how loud the beeps are (0-1)
 const OPTS_KEY = "pinkmane-dive-options"; // the other settings from the ESC menu
+const NAME_KEY = "pinkrun-name"; // the same name as on every other scoreboard
+const NAMED_KEY = "pinkdive-named"; // the name you put on today's board
+const REPLAY_KEY = "pinkdive-replay"; // the dive number you used your one REPLAY on
 const DEVICE_KEY = "pinkrun-device"; // the same "you" as the scoreboards
 
 type Slot = { answer: string | null; tier: number; depth: number }; // tier -1 = no answer
@@ -152,10 +155,15 @@ const ZONES: [number, string][] = [
   [390, "KART GRAVEYARD"], [460, "MIDNIGHT ZONE"], [530, "THE ABYSS"], [600, "HADAL ZONE"], [680, "THE TRENCH"],
 ];
 
-function Sea({ depth, font }: { depth: number; font: string }) {
+// a GHOST SUB: another diver from today, at the depth they had reached at the same point of the dive
+type GhostSub = { name: string | null; depth: number };
+
+function Sea({ depth, font, ghosts = [] }: { depth: number; font: string; ghosts?: GhostSub[] }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const target = useRef(depth);
   target.current = depth;
+  const ghostRef = useRef(ghosts);
+  ghostRef.current = ghosts;
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return;
@@ -216,6 +224,7 @@ function Sea({ depth, font }: { depth: number; font: string }) {
       });
     };
     let lastZone = -1, flashName = "", flashAt = -10;
+    const ghostCur: number[] = []; // where each ghost sub is right now (it glides to its depth)
     const rect = (x: number, y: number, w: number, h: number, col: string) => {
       c.fillStyle = col;
       c.fillRect(Math.round(x), Math.round(y), w, h);
@@ -402,6 +411,51 @@ function Sea({ depth, font }: { depth: number; font: string }) {
       // ---- PINKMANE in the pink sub ----
       const bob = Math.round(Math.sin(t * 2) * 1.5);
       const sx = Math.round(upright ? W / 2 - 21 : seenX + seenW * 0.08), sy2 = subY - 6 + bob;
+      // ---- THE GHOST SUBS (today's other divers), see-through, each with its name (or "DIVER" for one without a name).
+      // They sink to where those divers were at the same point of the dive, so you see who you pass.
+      const gs = ghostRef.current;
+      for (let i = 0; i < gs.length; i++) {
+        const g = gs[i];
+        ghostCur[i] = ghostCur[i] === undefined ? g.depth : ghostCur[i] + (g.depth - ghostCur[i]) * 0.04;
+        const gy2 = Math.round(at(ghostCur[i] * 3) - 6 + Math.sin(t * 1.7 + i * 2.1) * 1.5);
+        if (gy2 < -20 || gy2 > H + 10) continue;
+        // where there's open water: upright, left and right of your sub; wide, beside your sub and right of the card
+        let gx2: number;
+        if (upright) {
+          // (a phone shows a narrow strip of sea: spread them over the part you can see; they're see-through, so they can pass your sub)
+          const spots = [seenX + 3, seenX + seenW - 41, seenX + seenW * 0.5 - 18, seenX + seenW * 0.25 - 10, seenX + seenW * 0.75 - 26];
+          gx2 = spots[i % spots.length] + (i >= spots.length ? 8 : 0);
+        } else {
+          const half = (Math.min(520, box.width * 0.94) / 2) * (seenW / Math.max(1, box.width)) + 6; // half the card, in sea pixels
+          const leftFrom = sx + 50, leftTo = W / 2 - half - 40, rightFrom = W / 2 + half + 6, rightTo = seenX + seenW - 42;
+          const spots: number[] = [];
+          for (let x = rightFrom; x <= rightTo; x += 42) spots.push(x);
+          for (let x = leftFrom; x <= leftTo; x += 42) spots.push(x);
+          if (!spots.length) spots.push(sx + 50);
+          gx2 = spots[i % spots.length] + (i >= spots.length ? 12 : 0);
+        }
+        gx2 = Math.round(gx2 + Math.sin(t * 0.4 + i) * 3);
+        c.globalAlpha = 0.42;
+        rect(gx2 + 3, gy2 + 8, 30, 10, "#e6dcff");
+        rect(gx2 + 1, gy2 + 10, 34, 6, "#e6dcff");
+        rect(gx2 + 3, gy2 + 8, 30, 2, "#ffffff");
+        rect(gx2 + 35, gy2 + 11, 2, 4, "#e6dcff");
+        rect(gx2 - 2, gy2 + 10, 3, 6, "#b8a8e0");
+        for (let dy = 0; dy <= 7; dy++) {
+          const hw = Math.round(Math.sqrt(8 * 8 - dy * dy));
+          rect(gx2 + 15 - hw, gy2 + 7 - dy, hw * 2, 1, dy === 7 ? "#ffffff" : "rgba(220,240,255,0.7)");
+        }
+        rect(gx2 + 26, gy2 + 12, 3, 3, "#5a4a80"); // porthole
+        c.globalAlpha = 0.75;
+        const label = (g.name ?? "DIVER").slice(0, 12);
+        c.font = `5px ${font}`;
+        c.textAlign = "center";
+        c.fillStyle = "#000";
+        c.fillText(label, gx2 + 17 + 0.5, gy2 - 3.5);
+        c.fillStyle = g.name ? "#ffe6f7" : "#c8bce8";
+        c.fillText(label, gx2 + 17, gy2 - 4);
+        c.globalAlpha = 1;
+      }
       if (cam > 250) {
         // the headlight once it's dark
         c.globalAlpha = 0.14;
@@ -523,6 +577,17 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   // TEST MODE (for trying a coming day on the live site): pinkmane.site/games/pink-dive?test=tomorrow (or ?test=3 = DIVE #3,
   // up to 7 days ahead). It plays that day's 7 prompts like a practice: nothing is saved or sent, so it never counts.
   const [testDive, setTestDive] = useState(0);
+  // ONE REPLAY A DAY: after today's dive you can play the same 7 prompts once more, just for fun (it never counts)
+  const [replay, setReplay] = useState(false); // this run is the replay
+  const [replayUsed, setReplayUsed] = useState(false);
+  const [realTotal, setRealTotal] = useState<number | null>(null); // today's real result (the one that counts)
+  // TODAY'S BOARD + THE GHOST SUBS (other divers of the day, from app/api/dive)
+  const [board, setBoard] = useState<{ top: { name: string; score: number }[]; ghosts: { name: string | null; depths: number[] }[] } | null>(null);
+  const [ghostsOn, setGhostsOn] = useState(false); // this dive has today's real prompts, so the ghosts fit
+  const [myName, setMyName] = useState("");
+  const [named, setNamed] = useState<{ name: string; rank: number | null } | null>(null);
+  const [nameMsg, setNameMsg] = useState("");
+  const [saving, setSaving] = useState(false);
   const [dive, setDive] = useState(1);
   const [practice, setPractice] = useState(false);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -565,6 +630,27 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     });
   };
 
+  const loadBoard = (d: number) => {
+    fetch(`/api/dive?dive=${d}&board=1&me=${encodeURIComponent(deviceId())}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => {
+        if (b && Array.isArray(b.top)) setBoard({ top: b.top, ghosts: Array.isArray(b.ghosts) ? b.ghosts : [] });
+      })
+      .catch(() => {});
+  };
+  useEffect(() => {
+    try {
+      setReplayUsed(Number(localStorage.getItem(REPLAY_KEY)) === diveNumber());
+      const sv = JSON.parse(localStorage.getItem(SAVE_KEY) || "null") as Result | null;
+      if (sv && sv.dive === diveNumber() && typeof sv.total === "number") setRealTotal(sv.total);
+    } catch {}
+    try {
+      setMyName(localStorage.getItem(NAME_KEY) || "");
+      const n = JSON.parse(localStorage.getItem(NAMED_KEY) || "null") as { dive: number; name: string; rank: number | null } | null;
+      if (n && n.dive === diveNumber()) setNamed({ name: n.name, rank: n.rank });
+    } catch {}
+  }, []);
+
   // today's dive; if you already dove today, straight to your result
   useEffect(() => {
     const d = diveNumber();
@@ -587,6 +673,8 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         setSlots(saved.slots);
         setResult(saved);
         setScreen("results");
+        setGhostsOn(true);
+        loadBoard(d);
         // the curve keeps filling up during the day: get the newest one
         fetch(`/api/dive?dive=${d}`)
           .then((r) => r.json())
@@ -614,9 +702,16 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
 
   const total = slots.reduce((a, s) => a + s.depth, 0);
 
-  const begin = (isPracticeAsked: boolean) => {
-    const d = testDive && !isPracticeAsked ? testDive : diveNumber();
-    const isPractice = isPracticeAsked || testDive > 0; // a test dive counts like a practice (never saved or sent)
+  const begin = (isPracticeAsked: boolean, isReplay = false) => {
+    const d = testDive && !isPracticeAsked && !isReplay ? testDive : diveNumber();
+    const isPractice = isPracticeAsked || isReplay || testDive > 0; // a test dive or the replay counts like a practice (never saved or sent)
+    setReplay(isReplay);
+    if (isReplay) {
+      setReplayUsed(true);
+      try {
+        localStorage.setItem(REPLAY_KEY, String(d));
+      } catch {}
+    }
     setDive(d);
     setPractice(isPractice);
     const today = promptsForDive(d);
@@ -626,12 +721,17 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
       seen = JSON.parse(localStorage.getItem(SEEN_KEY) || "[]");
       if (!Array.isArray(seen)) seen = [];
     } catch {}
-    const these = isPracticeAsked ? practicePrompts(today, seen) : today;
+    const these = isPracticeAsked && !isReplay ? practicePrompts(today, seen) : today;
     try {
       const next = [...seen.filter((id) => !these.some((p) => p.id === id)), ...these.map((p) => p.id)].slice(-500);
       localStorage.setItem(SEEN_KEY, JSON.stringify(next));
     } catch {}
     setPrompts(these);
+    // the ghost subs: only when these are today's real prompts (the daily dive, or a test of today's)
+    const realToday = (!isPracticeAsked || isReplay) && d === diveNumber();
+    setGhostsOn(realToday);
+    if (realToday) loadBoard(d);
+    else setBoard(null);
     setSlots([]);
     setAt(0);
     setTyped("");
@@ -655,6 +755,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     setScreen("results");
     [523, 659, 784, 1046].forEach((f, i) => beep(f, f, i === 3 ? 0.4 : 0.12, "square", 0.1, i * 0.11));
     if (isPractice) return;
+    setRealTotal(base.total);
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(base));
     } catch {}
@@ -680,6 +781,8 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         };
         setSlots(live.slots);
         setResult(live);
+        setRealTotal(live.total);
+        loadBoard(d);
         try {
           localStorage.setItem(SAVE_KEY, JSON.stringify(live));
         } catch {}
@@ -799,6 +902,54 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     return () => window.removeEventListener("keydown", key);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);
+
+  // ---------------- TODAY'S BOARD: put your name next to your depth
+  const NAME_WHY: Record<string, string> = {
+    "name too short": "NAME TOO SHORT",
+    "pick another name": "PICK ANOTHER NAME",
+    "name reserved": "THAT NAME IS RESERVED",
+    "name taken": "THAT NAME BELONGS TO SOMEONE ELSE",
+    "slow down": "WAIT A FEW SECONDS",
+    "dive first": "DIVE FIRST",
+    offline: "THE BOARD IS OFFLINE RIGHT NOW",
+  };
+  const saveName = async () => {
+    const n = myName.toUpperCase().replace(/[^A-Z0-9 _.\-]/g, "").trim().slice(0, 12);
+    if (n.length < 2) {
+      setNameMsg("NAME TOO SHORT");
+      return;
+    }
+    if (saving || !result) return;
+    setSaving(true);
+    setNameMsg("");
+    try {
+      let owner = "";
+      try {
+        owner = localStorage.getItem("pinkrun-owner") || "";
+      } catch {}
+      const r = await fetch("/api/dive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ act: "name", dive: result.dive, device: deviceId(), name: n, owner }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j || !Array.isArray(j.top)) {
+        setNameMsg(NAME_WHY[j?.error] ?? "COULDN'T SAVE, TRY AGAIN");
+      } else {
+        setBoard((b) => ({ top: j.top, ghosts: b?.ghosts ?? [] }));
+        setNamed({ name: j.name, rank: j.rank });
+        setMyName(j.name);
+        try {
+          localStorage.setItem(NAME_KEY, j.name);
+          localStorage.setItem(NAMED_KEY, JSON.stringify({ dive: result.dive, name: j.name, rank: j.rank }));
+        } catch {}
+        [660, 880].forEach((f, i) => beep(f, f, 0.1, "square", 0.08, i * 0.09));
+      }
+    } catch {
+      setNameMsg("THE BOARD IS OFFLINE RIGHT NOW");
+    }
+    setSaving(false);
+  };
 
   // ---------------- the ESC menu
   const openMenu = () => {
@@ -933,10 +1084,18 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   const band = result ? bandOf(result.total) : 0;
   // where the camera is: the depth so far while playing, your total on the results, the surface on the first screen
   const camDepth = screen === "intro" ? 0 : screen === "play" ? total : (result?.total ?? 0);
+  // the ghost subs: while diving, each one is where that diver was after the same number of prompts; at the end, their total
+  const ghostSubs: GhostSub[] =
+    ghostsOn && board && screen !== "intro"
+      ? board.ghosts.map((g) => ({
+          name: g.name,
+          depth: g.depths.slice(0, screen === "play" ? slots.length : PER_DAY).reduce((a, b) => a + b, 0),
+        }))
+      : [];
 
   return (
     <div className={`pd-root ${opts.bigText ? "pd-bigtext" : ""}`} style={{ fontFamily: pixelFont }}>
-      <Sea depth={camDepth} font={pixelFont} />
+      <Sea depth={camDepth} font={pixelFont} ghosts={ghostSubs} />
 
       <Link
         href="/"
@@ -1018,7 +1177,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
           <div className="pd-top">
             <span>
               {at + 1}/{PER_DAY} · {p.cat}
-              {testDive && practice ? ` · TEST #${dive}` : practice ? " · PRACTICE" : ""}
+              {replay ? " · REPLAY" : testDive && practice ? ` · TEST #${dive}` : practice ? " · PRACTICE" : ""}
             </span>
             <span className="pd-depth">{metres(total)}</span>
           </div>
@@ -1103,7 +1262,13 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         <div className="pd-panel pd-results">
           <div className="pd-top">
             <span>
-              {testDive && practice ? `TEST OF DIVE #${result.dive} (DOESN'T COUNT)` : practice ? "PRACTICE DIVE" : `DIVE #${result.dive} COMPLETE`}
+              {replay
+                ? `REPLAY OF DIVE #${result.dive} (DOESN'T COUNT)`
+                : testDive && practice
+                  ? `TEST OF DIVE #${result.dive} (DOESN'T COUNT)`
+                  : practice
+                    ? "PRACTICE DIVE"
+                    : `DIVE #${result.dive} COMPLETE`}
             </span>
             <span>{practice || !result.live ? "" : `${result.players} DIVER${result.players === 1 ? "" : "S"} TODAY`}</span>
           </div>
@@ -1124,6 +1289,54 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
           {!practice && result.live && result.players <= 1 && <div className="pd-better">YOU&apos;RE THE FIRST DIVER TODAY</div>}
           {!practice && !result.live && <div className="pd-wait">{result.off ? "today's divers aren't reachable right now: these are your own depths" : "checking today's divers..."}</div>}
 
+          {!practice && result.live && (
+            <div className="pd-board">
+              <div className="pd-board-title">TODAY&apos;S DEEPEST DIVERS</div>
+              {board && board.top.length > 0 ? (
+                board.top.map((e, i) => (
+                  <div key={e.name} className={`pd-board-row ${named && e.name === named.name ? "pd-board-me" : ""}`}>
+                    <span className="pd-board-rank" style={{ color: i < 3 ? ["#ffd84a", "#d8dce8", "#e0a060"][i] : undefined }}>
+                      {i + 1}.
+                    </span>
+                    <span className="pd-board-name">{e.name}</span>
+                    <span>{metres(e.score)}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="pd-board-empty">{board ? "NO NAMES YET - BE THE FIRST" : "LOADING..."}</div>
+              )}
+              {named && <div className="pd-board-you">{named.rank ? `YOU'RE #${named.rank} ON TODAY'S BOARD` : "YOU'RE ON TODAY'S BOARD"}</div>}
+              <form
+                className="pd-form pd-board-form"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void saveName();
+                }}
+              >
+                <input
+                  className="pd-input"
+                  value={myName}
+                  onChange={(e) => {
+                    setMyName(e.target.value.toUpperCase().slice(0, 12));
+                    setNameMsg("");
+                  }}
+                  placeholder="YOUR NAME"
+                  maxLength={12}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  aria-label="Your name for today's board"
+                />
+                <button className="pd-btn" type="submit" disabled={saving}>
+                  {saving ? "..." : named ? "RENAME" : "ADD MY SCORE"}
+                </button>
+              </form>
+              {nameMsg && <div className="pd-note pd-bad">{nameMsg}</div>}
+              {board && board.ghosts.length > 0 && <div className="pd-board-ghosts">the see-through subs in the sea are today&apos;s other divers</div>}
+            </div>
+          )}
+
           <div className="pd-log">
             {result.slots.map((s, i) => (
               <div className="pd-row" key={i}>
@@ -1136,6 +1349,12 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
             ))}
           </div>
 
+          {replay && realTotal !== null && (
+            <div className="pd-better">
+              YOUR REAL DIVE TODAY: {realTotal} ({metres(realTotal)}) · {result.total > realTotal ? "DEEPER THIS TIME!" : result.total === realTotal ? "THE SAME DEPTH" : "NOT AS DEEP THIS TIME"}
+            </div>
+          )}
+
           <div className="pd-actions">
             {!practice && (
               <>
@@ -1147,13 +1366,25 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
                 </button>
               </>
             )}
+            {realTotal !== null && !testDive && (
+              <button className="pd-btn" onClick={() => !replayUsed && begin(false, true)} disabled={replayUsed} style={replayUsed ? { opacity: 0.45, cursor: "default" } : undefined}>
+                {replayUsed ? "REPLAY USED" : "↻ REPLAY TODAY (1 LEFT)"}
+              </button>
+            )}
             <button className="pd-btn" onClick={() => begin(true)}>
-              {practice ? "PRACTICE AGAIN" : "PRACTICE"}
+              {practice && !replay ? "PRACTICE AGAIN" : "PRACTICE"}
             </button>
           </div>
-          <div className="pd-next">
-            {practice ? "practice doesn't count for today" : "next dive in"} {practice ? "" : nextIn}
-          </div>
+          {realTotal !== null && !testDive ? (
+            <div className="pd-tomorrow">
+              <div className="pd-tomorrow-big">✓ TODAY&apos;S DIVE IS DONE</div>
+              <div>COME BACK TOMORROW FOR 7 NEW QUESTIONS</div>
+              <div className="pd-tomorrow-clock">NEW DIVE IN {nextIn}</div>
+              {practice && <div className="pd-tomorrow-small">{replay ? "the replay" : "practice"} doesn&apos;t count, your real dive stays on the board</div>}
+            </div>
+          ) : (
+            <div className="pd-next">{practice ? "practice doesn't count for today" : `next dive in ${nextIn}`}</div>
+          )}
         </div>
       )}
 
@@ -1232,6 +1463,22 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         .pd-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
         .pd-actions .pd-big { font-size: 11px; padding: 11px 18px; }
         .pd-next { margin-top: 12px; font-size: 7px; color: rgba(255, 255, 255, 0.6); }
+        .pd-tomorrow { margin-top: 14px; padding: 12px 10px; border: 2px dashed #ffd84a; font-size: 8px; line-height: 2; color: #fff; }
+        .pd-tomorrow-big { font-size: 11px; color: #ffd84a; }
+        .pd-tomorrow-clock { margin-top: 2px; font-size: 13px; color: #9fe8ff; letter-spacing: 1px; }
+        .pd-tomorrow-small { font-size: 6px; color: rgba(255, 255, 255, 0.6); }
+        .pd-board { margin: 14px 0 4px; padding: 10px; border: 2px solid rgba(255, 255, 255, 0.35); background: rgba(0, 0, 0, 0.25); text-align: left; }
+        .pd-board-title { font-size: 9px; color: ${PINK}; margin-bottom: 8px; }
+        .pd-board-row { display: flex; gap: 8px; font-size: 8px; padding: 4px 0; border-bottom: 1px dashed rgba(255, 255, 255, 0.15); }
+        .pd-board-rank { width: 22px; color: rgba(255, 255, 255, 0.6); }
+        .pd-board-name { flex: 1; }
+        .pd-board-me { color: #ffd84a; }
+        .pd-board-empty { font-size: 7px; color: rgba(255, 255, 255, 0.6); padding: 4px 0; }
+        .pd-board-you { margin-top: 8px; font-size: 8px; color: #ffd84a; }
+        .pd-board-form { margin-top: 10px; }
+        .pd-board-form .pd-input { font-size: 13px; padding: 8px; }
+        .pd-board-form .pd-btn { font-size: 8px; padding: 8px 10px; }
+        .pd-board-ghosts { margin-top: 8px; font-size: 6px; color: rgba(255, 255, 255, 0.5); }
         .pd-menu-wrap { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-start; justify-content: center; background: rgba(5, 2, 12, 0.55); overflow-y: auto; }
         .pd-menu { margin: max(56px, 10vh) auto 30px; background: rgba(11, 6, 20, 0.92); border: 3px solid ${PINK}; box-shadow: 6px 6px 0 #000; width: min(400px, 92vw); }
         .pd-menu-title { margin: 0 0 6px; font-size: 20px; color: ${PINK}; text-shadow: 3px 3px 0 #12041c; letter-spacing: 2px; }

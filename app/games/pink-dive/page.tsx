@@ -1,15 +1,15 @@
 // pinkmane.site/games/pink-dive : PINK DIVE, the daily word dive.
 
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
 import { Press_Start_2P } from "next/font/google";
 import PinkDive from "./PinkDive";
 
 // the pixel font every PSP game uses
 const pixel = Press_Start_2P({ weight: "400", subsets: ["latin"] });
 
-// HIDDEN until it's ready: on the live site this page says "not found". It works when you run the site on your
-// own computer (npm run dev). To make it public: change false to true here AND in app/page.tsx (DIVE_PUBLIC).
+// PILOT (UNLISTED): the page works on the live site for anyone with the link (pinkmane.site/games/pink-dive),
+// but it isn't in the games menu and search engines are asked not to list it.
+// To make it fully public: change false to true here AND DIVE_SHOWN in app/page.tsx (and add it to app/sitemap.ts).
 const DIVE_PUBLIC = false;
 
 export const metadata: Metadata = {
@@ -19,6 +19,5 @@ export const metadata: Metadata = {
 };
 
 export default function PinkDivePage() {
-  if (!DIVE_PUBLIC && process.env.NODE_ENV !== "development") notFound();
   return <PinkDive pixelFont={pixel.style.fontFamily} />;
 }
