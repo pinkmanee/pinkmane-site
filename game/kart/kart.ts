@@ -3,7 +3,7 @@
 // Everything you see comes from the pictures in public/kart/ : swap a picture, the game changes.
 
 import { KartSound } from "./sound";
-import { cobblePixel, fieldPixel, makePsyProps, makePsySky, plankPixel, psyColours, tilePixel, waterPixel, type PsyTheme } from "./psy"; // the psychedelic look
+import { cobblePixel, fieldPixel, makePsyProps, makePsySky, makeTempleWall, plankPixel, psyColours, tilePixel, waterPixel, type PsyTheme } from "./psy"; // the psychedelic look
 import { buzz } from "../buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // THE MUSIC IN PINK KART: which of your beats plays where (files in public/music). Change a file name to change the song.
@@ -38,6 +38,7 @@ type TrackData = {
   decor?: [number, number, string, number][]; // big things standing around: [x, y, "ship" | "tentacle" | "speaker" | "eq", size]
   beat?: { bpm: number; at: number }; // the map song's tempo and where its first beat is (s): speakers and equalizers move on it
   jumpText?: string; // what it says on a jump (default: JUMP!)
+  tunnel?: number[]; // for every centre point: 1 = inside a building (808 TEMPLE): the sky turns into its walls
   outside?: number; // what's past the edge of the map (3 = void)
   alt?: number[]; // the flying part: how high the karts fly at every centre point (0 = on the ground)
   peaks?: [number, number][]; // mountain tops to dodge while flying
@@ -442,7 +443,7 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", ...ITEMS.map((i) => `item-${i}`)];
+    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", ...ITEMS.map((i) => `item-${i}`)];
     const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n))]);
     this.packs = packs;
     for (const it of ITEMS) (this.img[`item-${it}`] as { pkRes?: number }).pkRes = this.img[`item-${it}`].width / 48;
@@ -823,7 +824,7 @@ export class KartGame {
   }
 
   /** the sky, haze and edge colours of one map, turned to that map's hue */
-  private makePal(hue: number, greenPlants = false, psy?: PsyTheme): Pal {
+  private makePal(hue: number, greenPlants = false, psy?: PsyTheme, indoors = false): Pal {
     const M = hueMatrix(hue);
     const sky = (name: string) => {
       const im = this.img[name];
@@ -847,12 +848,13 @@ export class KartGame {
       const A = (c: number[]) => abgr(c[0], c[1], c[2]);
       const sk = this.img["sky"];
       const psySky = makePsySky(psy, sk.width, sk.height); // (the void parts of a map use the same sky)
+      const inside = indoors ? makeTempleWall(sk.width, sk.height) : psySky; // a map with a building: its walls
       return {
         fog: P.fog, vfog: rgbOf(t(abgr(52, 14, 84))), vdeep: rgbOf(t(abgr(6, 2, 14))),
         farLine: A(P.field[2].map((v) => v * 0.45)), farDark: A(P.field[0]),
         lip: t(SLAB_LIP), side: t(SLAB_SIDE), rib: t(SLAB_RIB),
         gDark: A(P.grass[0]), gMid: A(P.grass[1]), gTip: A(P.grass[2]), gBank: A(P.grass[3]),
-        sky: psySky, skyVoid: psySky,
+        sky: psySky, skyVoid: inside,
         props: makePsyProps(psy, this.img["props"], greenPlants),
       };
     }
@@ -899,7 +901,7 @@ export class KartGame {
     this.types = p.types;
     this.mini = p.mini;
     const info = TRACKS[this.trackNo] as { hue: number; greenPlants?: boolean; psy?: PsyTheme };
-    this.pal = p.pal ?? (p.pal = this.makePal(info.hue, !!info.greenPlants, info.psy));
+    this.pal = p.pal ?? (p.pal = this.makePal(info.hue, !!info.greenPlants, info.psy, !!p.track?.tunnel));
     this.zoneF = 0;
   }
 
@@ -1938,7 +1940,7 @@ export class KartGame {
     const camX = me.x - dx * back, camY = me.y - dy * back;
 
     // ---- which zone you're in (0 = the field, 1 = the void): the sky and the haze fade from one to the other
-    const zoneNow = this.track.zone ? this.track.zone[me.idx] ?? 0 : 0;
+    const zoneNow = this.track.tunnel ? this.track.tunnel[me.idx] ?? 0 : this.track.zone ? this.track.zone[me.idx] ?? 0 : 0;
     this.zoneF += (zoneNow - this.zoneF) * 0.04;
     if (Math.abs(zoneNow - this.zoneF) < 0.01) this.zoneF = zoneNow;
     const zf = this.zoneF;
@@ -2188,6 +2190,8 @@ export class KartGame {
     for (const d of this.track.decor ?? []) {
       if (d[2] === "ship") list.push({ img: this.img["ghostship"], sx: 0, sw: 72, sh: 46, x: d[0], y: d[1], k: d[3], lift: -5 + Math.sin(now / 700 + d[0]) * 3, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "speaker") list.push({ img: this.img["speaker"], sx: beat < 0.2 ? 40 : 0, sw: 40, sh: 56, x: d[0], y: d[1], k: d[3], lift: 0, flip: false, shadow: true });
+      else if (d[2] === "gate") list.push({ img: this.img["gate"], sx: beat < 0.2 ? 120 : 0, sw: 120, sh: 96, x: d[0], y: d[1], k: d[3], lift: 0, flip: false, shadow: false });
+      else if (d[2] === "pillar") list.push({ img: this.img["pillar"], sx: beat < 0.2 ? 30 : 0, sw: 30, sh: 90, x: d[0], y: d[1], k: d[3], lift: 0, flip: false, shadow: false });
       else if (d[2] === "eq") {
         // loud right on the beat, then dropping; every tower a little different
         const lvl = Math.max(0, Math.min(7, Math.round(7 * Math.pow(1 - beat, 1.3)) - (d[0] % 3) + (beat > 0.5 && beat < 0.62 ? 2 : 0)));

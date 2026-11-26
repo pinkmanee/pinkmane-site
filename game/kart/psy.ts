@@ -204,6 +204,44 @@ export function tilePixel(key: string, x: number, y: number): number {
   return (hash(x >> 1, y >> 1) & 1023) < 4 ? abgr([255, 230, 160]) : abgr([base[0] * k, base[1] * k, base[2] * k]);
 }
 
+// ---------------------------------------------------------------- inside 808 TEMPLE: instead of the sky, walls of speakers
+export function makeTempleWall(W: number, H: number): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const x = c.getContext("2d")!;
+  x.fillStyle = "#0c0612";
+  x.fillRect(0, 0, W, H);
+  const CW = 32; // one speaker cabinet wide (W is a multiple of it, so it joins up all the way round)
+  for (let col = 0; col < W / CW; col++) {
+    for (let row = 0; row < 4; row++) {
+      const cx = col * CW, cy = H - 8 - (row + 1) * 26 + (col % 2) * 6;
+      x.fillStyle = "#160c1c";
+      x.fillRect(cx + 1, cy, CW - 2, 25);
+      x.fillStyle = "#c8902c";
+      x.fillRect(cx + 1, cy, CW - 2, 1);
+      x.fillRect(cx + 1, cy + 24, CW - 2, 1);
+      // the cone: pink rings around a dark centre
+      const r = 9 - row;
+      for (let dy = -r; dy <= r; dy++) {
+        const hw = Math.round(Math.sqrt(r * r - dy * dy));
+        x.fillStyle = Math.abs(dy) > r - 2 || hw < 3 ? "#3a0c30" : dy % 3 === 0 ? "#ff3cbe" : "#c22890";
+        x.fillRect(cx + CW / 2 - hw, cy + 12 + dy, hw * 2, 1);
+      }
+      x.fillStyle = "#ffc850";
+      x.fillRect(cx + CW / 2 - 1, cy + 11, 2, 2);
+    }
+  }
+  // the ceiling beams fading into the dark at the top, and a gold line along the floor
+  for (let y = 0; y < H * 0.25; y++) {
+    x.fillStyle = `rgba(12,6,18,${1 - y / (H * 0.25)})`;
+    x.fillRect(0, y, W, 1);
+  }
+  x.fillStyle = "#ffc850";
+  x.fillRect(0, H - 6, W, 2);
+  return c;
+}
+
 // ---------------------------------------------------------------- the sky (wraps around once: its width = one full turn)
 export function makePsySky(theme: PsyTheme, W: number, H: number): HTMLCanvasElement {
   const T = THEMES[theme];
