@@ -7,10 +7,8 @@ import PinkDive from "./PinkDive";
 // the pixel font every PSP game uses
 const pixel = Press_Start_2P({ weight: "400", subsets: ["latin"] });
 
-// PILOT (UNLISTED): the page works on the live site for anyone with the link (pinkmane.site/games/pink-dive),
-// but it isn't in the games menu and search engines are asked not to list it.
-// To make it fully public: change false to true here AND DIVE_SHOWN in app/page.tsx (and add it to app/sitemap.ts).
-const DIVE_PUBLIC = false;
+// PUBLIC: in the games list and findable on Google. (false = the page still works by link, but Google is asked not to list it)
+const DIVE_PUBLIC = true;
 
 export const metadata: Metadata = {
   title: "PINK DIVE · PINKMANE",

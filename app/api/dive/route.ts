@@ -25,8 +25,8 @@ import { RULES, wikidataLookup } from "../../../game/dive/lookup";
 
 export const dynamic = "force-dynamic";
 
-// PILOT: the page works on the live site (unlisted: not in the games menu, see app/page.tsx DIVE_SHOWN), so the server is on.
-const DIVE_PUBLIC = true; // (the page works on the live site for the pilot, but it isn't in the games menu yet)
+// PINK DIVE is live, so the server is on (false = it answers "not found" on the live site).
+const DIVE_PUBLIC = true;
 const off = () => !DIVE_PUBLIC && process.env.NODE_ENV !== "development";
 
 const KEEP = 4 * 86400;

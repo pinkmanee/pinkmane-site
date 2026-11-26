@@ -64,9 +64,9 @@ const ALL_TRACKS = [
   { id: "track2", name: "VOID HIGHWAY", hue: -75, road: "neon", psy: "glitter" },
   { id: "track3", name: "HIGH HILLS", hue: 68, greenPlants: true, road: "cobble", psy: "lava" },
   { id: "track4", name: "SMOKE OCEAN", hue: 0, road: "planks", psy: "ocean" },
-  { id: "track5", name: "808 TEMPLE", hue: 0, road: "tiles", psy: "gold", wip: true },
-  { id: "track6", name: "HOTBOX HIGHWAY", hue: 0, road: "cobble", psy: "smoke", wip: true },
-  { id: "track7", name: "TATRA TRIP", hue: 0, road: "cobble", psy: "alpine", wip: true },
+  { id: "track5", name: "808 TEMPLE", hue: 0, road: "tiles", psy: "gold" },
+  { id: "track6", name: "HOTBOX HIGHWAY", hue: 0, road: "cobble", psy: "smoke" },
+  { id: "track7", name: "TATRA TRIP", hue: 0, road: "cobble", psy: "alpine" },
 ];
 // NOT READY YET: maps with wip: true only show when you run the site on your own computer (npm run dev).
 // On pinkmane.site they're hidden and not even loaded. To make one public, take its "wip: true" out.

@@ -465,10 +465,9 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
   },
 ];
 // The big games (the first list you see) and the mini games (behind the MINI GAMES row)
-// PINK KART is hidden on the live site for now: it only shows in the list on your own computer (localhost)
-// PINK DIVE is hidden on the live site until it's ready: it only shows when you run the site on your own computer (npm run dev).
-// To make it public: change false to true on the next line (and add /games/pink-dive back in app/sitemap.ts).
-const DIVE_PUBLIC = false;
+// PINK DIVE is public (in the games list). To hide it again: change true to false on the next line
+// (then it only shows when you run the site on your own computer).
+const DIVE_PUBLIC = true;
 const DIVE_SHOWN = DIVE_PUBLIC || process.env.NODE_ENV === "development";
 const MAIN_GAMES = PICKER_GAMES.filter((g) => !g.mini && (g.id !== "dive" || DIVE_SHOWN));
 const MINI_GAMES = PICKER_GAMES.filter((g) => g.mini);
