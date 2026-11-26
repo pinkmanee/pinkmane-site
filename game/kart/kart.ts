@@ -944,7 +944,7 @@ export class KartGame {
           const t = types[row + Math.min(TH - 1, (x * k) | 0)];
           if (t === 2) continue; // boost pads stay light blue everywhere
           const o = y * GZ + x;
-          if (psy && t === 0 && !track.painted) {
+          if (psy && (t === 0 || (t === 5 && track.terrain)) && !track.painted) { // (on a mountain map the flying zone is land too)
             ground[o] = fieldPixel(psy, x * wk, y * wk); // the glowing marble beside the road
             continue;
           }
@@ -2220,7 +2220,7 @@ export class KartGame {
     for (let x = 0; x < BW; x++) {
       const k = (x - BW / 2) / FOCAL;
       const vx = dx + rx * k, vy = dy + ry * k;
-      let ybuf = BH, lv = 0, z = 4, zp = 4, syp = 1e6, hp = -1e6, tPrev = -1;
+      let ybuf = BH, lv = 0, z = 4, zp = 4, syp = 1e6, hp = -1e6, tPrev = -1, lastTuft = 0;
       while (z < TERRAIN_FAR && ybuf > 0) {
         const wx = camX + vx * z, wy = camY + vy * z;
         // the height here (blended between the 4 nearest squares)
@@ -2260,7 +2260,9 @@ export class KartGame {
         if (z < 700) {
           const tx = (wx | 0) >> 1, ty = (wy | 0) >> 1;
           const t = tx >= 0 && ty >= 0 && tx < TH && ty < TH ? types[ty * TH + tx] : 0;
-          if (tPrev >= 0 && t !== tPrev && (roadish(t) !== roadish(tPrev)) && t !== 3 && tPrev !== 3) {
+          // (one tuft per column within a short distance: looking straight along an edge would stack them into a pole)
+          if (tPrev >= 0 && t !== tPrev && roadish(t) !== roadish(tPrev) && t !== 3 && tPrev !== 3 && z > lastTuft * 1.25 + 6) {
+            lastTuft = z;
             const seedG = ((tx >> 1) * 7 + (ty >> 1) * 13) & 255;
             const wave = 0.72 + 0.28 * Math.sin(sway * 3.6 + seedG * 0.7 + x * 0.06);
             const tall = Math.max(1, Math.min(14, Math.round(((GRASS_TALL * 1.6 * FOCAL) / z) * (0.5 + (seedG & 7) / 10) * wave)));
