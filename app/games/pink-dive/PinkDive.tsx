@@ -94,6 +94,18 @@ function deviceId() {
   }
 }
 
+// how many of today's divers you're deeper than, in percent (the same sum as the server: steps of 20, ties count half)
+function betterThan(total: number, hist: Record<string, number>, players: number) {
+  if (players <= 1) return 100;
+  const mine = Math.floor(total / 20);
+  let below = 0, same = 0;
+  for (const [k, v] of Object.entries(hist)) {
+    if (Number(k) < mine) below += Number(v) || 0;
+    else if (Number(k) === mine) same += Number(v) || 0;
+  }
+  return Math.max(0, Math.min(100, Math.round(((below + Math.max(0, same - 1) / 2) / (players - 1)) * 100)));
+}
+
 const metres = (score: number) => `-${(score * 10).toLocaleString("en-US")} m`;
 
 // ---------------------------------------------------------------- sound (tiny beeps made in code)
@@ -709,6 +721,9 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
       .then((r) => (r.ok ? r.json() : null))
       .then((b) => {
         if (b && Array.isArray(b.top)) setBoard({ top: b.top, ghosts: Array.isArray(b.ghosts) ? b.ghosts : [] });
+        // the newest count of today's divers: "DEEPER THAN X%" keeps up as more people dive (it was only worked out once)
+        if (b && typeof b.players === "number" && b.hist)
+          setResult((r) => (r && r.live && r.dive === d ? { ...r, players: b.players, hist: b.hist, better: betterThan(r.total, b.hist, b.players) } : r));
       })
       .catch(() => {});
   };
@@ -1583,7 +1598,13 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
               ) : (
                 <div className="pd-board-empty">{board ? "NO NAMES YET - BE THE FIRST" : "LOADING..."}</div>
               )}
-              {named && <div className="pd-board-you">{named.rank ? `YOU'RE #${named.rank} ON TODAY'S BOARD` : "YOU'RE ON TODAY'S BOARD"}</div>}
+              {named &&
+                (() => {
+                  // your place right now (from the board as it is now, not from when you put your name on it)
+                  const i = board ? board.top.findIndex((e) => e.name === named.name) : -1;
+                  const rank = i >= 0 ? i + 1 : board && board.top.length >= 10 ? null : named.rank;
+                  return <div className="pd-board-you">{rank ? `YOU'RE #${rank} ON TODAY'S BOARD` : "YOU'RE ON TODAY'S BOARD (OUTSIDE THE TOP 10)"}</div>;
+                })()}
               <form
                 className="pd-form pd-board-form"
                 onSubmit={(e) => {
