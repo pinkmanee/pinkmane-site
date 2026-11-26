@@ -520,6 +520,9 @@ function Curve({ hist, mine }: { hist: Record<string, number>; mine: number }) {
 // ---------------------------------------------------------------- the game
 export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   const [screen, setScreen] = useState<Screen>("intro");
+  // TEST MODE (for trying a coming day on the live site): pinkmane.site/games/pink-dive?test=tomorrow (or ?test=3 = DIVE #3,
+  // up to 7 days ahead). It plays that day's 7 prompts like a practice: nothing is saved or sent, so it never counts.
+  const [testDive, setTestDive] = useState(0);
   const [dive, setDive] = useState(1);
   const [practice, setPractice] = useState(false);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -567,6 +570,17 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     const d = diveNumber();
     setDive(d);
     try {
+      const t = new URLSearchParams(window.location.search).get("test");
+      if (t) {
+        const n = t === "tomorrow" ? d + 1 : t === "today" ? d : parseInt(t, 10);
+        if (n >= 1 && n <= d + 7) {
+          setTestDive(n);
+          setDive(n);
+          return; // test mode: don't jump to today's saved result
+        }
+      }
+    } catch {}
+    try {
       const saved = JSON.parse(localStorage.getItem(SAVE_KEY) || "null") as Result | null;
       if (saved && saved.dive === d && Array.isArray(saved.slots)) {
         setPrompts(promptsForDive(d));
@@ -600,8 +614,9 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
 
   const total = slots.reduce((a, s) => a + s.depth, 0);
 
-  const begin = (isPractice: boolean) => {
-    const d = diveNumber();
+  const begin = (isPracticeAsked: boolean) => {
+    const d = testDive && !isPracticeAsked ? testDive : diveNumber();
+    const isPractice = isPracticeAsked || testDive > 0; // a test dive counts like a practice (never saved or sent)
     setDive(d);
     setPractice(isPractice);
     const today = promptsForDive(d);
@@ -611,7 +626,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
       seen = JSON.parse(localStorage.getItem(SEEN_KEY) || "[]");
       if (!Array.isArray(seen)) seen = [];
     } catch {}
-    const these = isPractice ? practicePrompts(today, seen) : today;
+    const these = isPracticeAsked ? practicePrompts(today, seen) : today;
     try {
       const next = [...seen.filter((id) => !these.some((p) => p.id === id)), ...these.map((p) => p.id)].slice(-500);
       localStorage.setItem(SEEN_KEY, JSON.stringify(next));
@@ -979,6 +994,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         <div className="pd-panel pd-intro">
           <h1 className="pd-title">PINK DIVE</h1>
           <div className="pd-sub">THE DAILY DIVE · #{dive}</div>
+          {testDive > 0 && <div className="pd-sub" style={{ color: "#ffd84a" }}>TEST MODE · DIVE #{testDive} · NOTHING IS SAVED</div>}
           <p className="pd-how">
             7 prompts · {SECONDS} seconds each
             <br />
@@ -1002,7 +1018,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
           <div className="pd-top">
             <span>
               {at + 1}/{PER_DAY} · {p.cat}
-              {practice ? " · PRACTICE" : ""}
+              {testDive && practice ? ` · TEST #${dive}` : practice ? " · PRACTICE" : ""}
             </span>
             <span className="pd-depth">{metres(total)}</span>
           </div>
@@ -1087,7 +1103,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         <div className="pd-panel pd-results">
           <div className="pd-top">
             <span>
-              {practice ? "PRACTICE DIVE" : `DIVE #${result.dive} COMPLETE`}
+              {testDive && practice ? `TEST OF DIVE #${result.dive} (DOESN'T COUNT)` : practice ? "PRACTICE DIVE" : `DIVE #${result.dive} COMPLETE`}
             </span>
             <span>{practice || !result.live ? "" : `${result.players} DIVER${result.players === 1 ? "" : "S"} TODAY`}</span>
           </div>
