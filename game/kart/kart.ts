@@ -286,6 +286,7 @@ export class KartGame {
   private acc = 0;
   private dead = false;
   private ready = false;
+  private pendingSolo: number | null = null; // SOLO RACE was pressed while the maps were still loading: start it when they are
   private loadError = "";
 
   private packs: TrackPack[] = [];
@@ -377,6 +378,11 @@ export class KartGame {
         this.ready = true;
         this.reset();
         this.snd.setMusic(MUSIC.menu);
+        if (this.pendingSolo !== null) {
+          const t = this.pendingSolo;
+          this.pendingSolo = null;
+          this.startSolo(t);
+        }
       })
       .catch((e) => {
         this.loadError = String(e);
@@ -1407,7 +1413,10 @@ export class KartGame {
   // ------------------------------------------------------------ the page's menu buttons
   /** SOLO: a race against 5 bots */
   startSolo(track = this.trackNo) {
-    if (!this.ready) return;
+    if (!this.ready) {
+      this.pendingSolo = track; // still loading: the race starts the moment it's done
+      return;
+    }
     this.snd.unlock();
     this.useTrack(track);
     this.snd.setMusic(MUSIC[TRACKS[this.trackNo].id] ?? MUSIC.menu);
