@@ -3,6 +3,7 @@
 // Everything you see comes from the pictures in public/kart/ : swap a picture, the game changes.
 
 import { KartSound } from "./sound";
+import { cobblePixel, fieldPixel, makePsyProps, makePsySky, psyColours, type PsyTheme } from "./psy"; // the psychedelic look
 import { buzz } from "../buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // THE MUSIC IN PINK KART: which of your beats plays where (files in public/music). Change a file name to change the song.
@@ -38,9 +39,9 @@ type TrackData = {
 type TrackPack = { track: TrackData; ground: Uint32Array; gsize: number; gs: number; types: Uint8Array; mini: HTMLCanvasElement; pal?: Pal };
 // THE TRACKS: each is trackN.json + trackN-ground.png + trackN-map.png in public/kart/
 export const TRACKS = [
-  { id: "track1", name: "NIGHT FIELD", hue: 0 },
-  { id: "track2", name: "VOID HIGHWAY", hue: -75, road: "neon" },
-  { id: "track3", name: "HIGH HILLS", hue: 68, greenPlants: true, road: "brick" },
+  { id: "track1", name: "NIGHT FIELD", hue: 0, road: "cobble", psy: "candy" },
+  { id: "track2", name: "VOID HIGHWAY", hue: -75, road: "neon", psy: "glitter" },
+  { id: "track3", name: "HIGH HILLS", hue: 68, greenPlants: true, road: "cobble", psy: "lava" },
 ];
 // EACH MAP HAS ITS OWN COLOURS. "hue" turns the colour wheel for that map's ground, sky and haze (in degrees):
 // 0 = the original pink and purple, -75 = cold blue, 68 = sunset orange and red. Change a number to recolour a map.
@@ -48,6 +49,10 @@ export const TRACKS = [
 // road: how the road itself looks. none = the original grey road with pink and white curbs,
 //   "neon" = a dark glassy road with a glowing blue grid and blue curbs, "brick" = a road of warm bricks with orange curbs.
 // greenPlants: the pink outlines of the weed plants and trees by the road turn light green on that map.
+// psy: THE PSYCHEDELIC LOOK (game/kart/psy.ts): "candy" = pink and purple marble, "glitter" = deep blue full of glitter,
+//   "lava" = orange and black marble. It draws that map's sky, the ground beside the road, the cobblestones and the
+//   twisted towers / mushrooms / candy trees by the road. Take the psy line out to get the old flat look back.
+//   road: "cobble" = shaded cobblestones in the map's psy colours.
 function hueMatrix(deg: number): number[] {
   const a = (deg * Math.PI) / 180, c = Math.cos(a), n = Math.sin(a);
   return [
@@ -78,10 +83,15 @@ function hash2(a: number, b: number) {
   return (h ^ (h >>> 16)) >>> 0;
 }
 /** one road pixel in a style (or 0 = leave it as it is). x, y are world positions */
-function roadPixel(style: string, c: number, x: number, y: number): number {
+function roadPixel(style: string, c: number, x: number, y: number, psy?: PsyTheme): number {
   const key = ROAD_KEYS[c & 0xffffff];
   if (!key) return 0;
   const shade = key === "t0" ? 0 : key === "t1" ? 1 : 2;
+  if (style === "cobble") {
+    // cobblestones; the curbs, edge line and centre dashes keep the map's own colours
+    if (key === "t0" || key === "t1" || key === "t2") return cobblePixel(psy ?? "candy", x, y, shade);
+    return 0;
+  }
   if (style === "neon") {
     // dark glass with a glowing blue grid; curbs blue and white
     if (key === "cw") return abgr(230, 250, 255);
@@ -141,7 +151,8 @@ const LAPS = 3;
 const CARS: Record<string, { k: number }> = {
   mane: { k: 0.25 }, // with the camera 65 behind, your own kart is drawn at exactly its drawn size
 };
-const VIEWS = ["back", "side", "front"];
+const KART_ANGLES = 16; // the 3D kart is drawn from this many angles all the way around
+const KART_DIR = -1; // which way round the 16 views go (1 or -1)
 // THE GRASS EDGE: how tall the grass along the road stands (in world units; a kart is about 19 tall), and its colours (0xAABBGGRR)
 const GRASS_TALL = 4.5;
 const GRASS_DARK = 0xff180612, GRASS_MID = 0xff96288c, GRASS_TIP = 0xffc846ff, GRASS_BANK = 0xff10040c;
@@ -414,7 +425,7 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", ...Object.keys(CARS).flatMap((c) => VIEWS.map((v) => `kart-${c}-${v}`)), ...ITEMS.map((i) => `item-${i}`)];
+    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", ...ITEMS.map((i) => `item-${i}`)];
     const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n))]);
     this.packs = packs;
     for (const it of ITEMS) (this.img[`item-${it}`] as { pkRes?: number }).pkRes = this.img[`item-${it}`].width / 48;
@@ -422,9 +433,20 @@ export class KartGame {
     this.useTrack(0);
     // kart colours
     // skin 0 = the drawing as it is, skins 1 - 7 = the same kart in another colour
+    // THE 3D PINKMANE KART: one sheet (kart3d-mane.png) with 16 views all the way around (rows: 0 = from behind,
+    // 4 = from his right, 8 = from the front, 12 = from his left) and 3 pictures per view (plain, flames, bigger flames).
+    // It was rendered from a low-poly 3D model; each racer gets it in their own colour.
     this.kartSkins = [{ car: "mane", color: null }, ...BOTS].map((b) => {
+      const sheet = this.tint(this.img["kart3d-mane"], b.color as [number, number, number] | null);
+      const fh = sheet.height / KART_ANGLES;
       const set: Record<string, HTMLCanvasElement> = {};
-      for (const v of VIEWS) set[v] = this.tint(this.img[`kart-${b.car}-${v}`], b.color as [number, number, number] | null);
+      for (let i = 0; i < KART_ANGLES; i++) {
+        const v = document.createElement("canvas");
+        v.width = sheet.width;
+        v.height = fh;
+        v.getContext("2d")!.drawImage(sheet, 0, i * fh, sheet.width, fh, 0, 0, sheet.width, fh);
+        set[`a${i}`] = v;
+      }
       return set;
     });
     // the explosion: 6 clean frames side by side (a ball of fire that opens into a ring)
@@ -460,7 +482,7 @@ export class KartGame {
     const p = d.data;
     for (let i = 0; i < p.length; i += 4) {
       const r = p[i], g = p[i + 1], b = p[i + 2];
-      if (r > 190 && g < 130 && b > 130) {
+      if (r > 80 && r > g * 1.8 && b > g * 1.35) {
         const f = r / 255;
         p[i] = col[0] * f;
         p[i + 1] = col[1] * f;
@@ -755,9 +777,9 @@ export class KartGame {
       }
     nc.putImageData(nd, 0, 0);
     // this map's own colours: turn the ground's colours (but not the boost pads: they stay light blue everywhere)
-    const info = TRACKS.find((t) => t.id === id) as { hue: number; road?: string } | undefined;
-    const hue = info?.hue ?? 0, style = info?.road ?? "";
-    if (hue || style) {
+    const info = TRACKS.find((t) => t.id === id) as { hue: number; road?: string; psy?: PsyTheme } | undefined;
+    const hue = info?.hue ?? 0, style = info?.road ?? "", psy = info?.psy;
+    if (hue || style || psy) {
       const M = hueMatrix(hue), TH = S / 2, k = S / GZ / 2, wk = S / GZ;
       for (let y = 0; y < GZ; y++) {
         const row = Math.min(TH - 1, (y * k) | 0) * TH;
@@ -765,8 +787,12 @@ export class KartGame {
           const t = types[row + Math.min(TH - 1, (x * k) | 0)];
           if (t === 2) continue; // boost pads stay light blue everywhere
           const o = y * GZ + x;
+          if (psy && t === 0) {
+            ground[o] = fieldPixel(psy, x * wk, y * wk); // the glowing marble beside the road
+            continue;
+          }
           if (style && (t === 1 || t === 4)) {
-            const c = roadPixel(style, ground[o], x * wk, y * wk);
+            const c = roadPixel(style, ground[o], x * wk, y * wk, psy);
             if (c) {
               ground[o] = c;
               continue;
@@ -780,7 +806,7 @@ export class KartGame {
   }
 
   /** the sky, haze and edge colours of one map, turned to that map's hue */
-  private makePal(hue: number, greenPlants = false): Pal {
+  private makePal(hue: number, greenPlants = false, psy?: PsyTheme): Pal {
     const M = hueMatrix(hue);
     const sky = (name: string) => {
       const im = this.img[name];
@@ -798,6 +824,21 @@ export class KartGame {
       return c;
     };
     const t = (c: number) => (hue ? tint(c, M) : c);
+    if (psy) {
+      // THE PSYCHEDELIC LOOK: this map's sky, haze, grass fringe and roadside things all come from game/kart/psy.ts
+      const P = psyColours(psy);
+      const A = (c: number[]) => abgr(c[0], c[1], c[2]);
+      const sk = this.img["sky"];
+      const psySky = makePsySky(psy, sk.width, sk.height); // (the void parts of a map use the same sky)
+      return {
+        fog: P.fog, vfog: rgbOf(t(abgr(52, 14, 84))), vdeep: rgbOf(t(abgr(6, 2, 14))),
+        farLine: A(P.field[2].map((v) => v * 0.45)), farDark: A(P.field[0]),
+        lip: t(SLAB_LIP), side: t(SLAB_SIDE), rib: t(SLAB_RIB),
+        gDark: A(P.grass[0]), gMid: A(P.grass[1]), gTip: A(P.grass[2]), gBank: A(P.grass[3]),
+        sky: psySky, skyVoid: psySky,
+        props: makePsyProps(psy, this.img["props"], greenPlants),
+      };
+    }
     return {
       fog: rgbOf(t(abgr(235, 50, 170))), vfog: rgbOf(t(abgr(52, 14, 84))), vdeep: rgbOf(t(abgr(6, 2, 14))),
       farLine: t(0xff4a103a), farDark: t(0xff200914),
@@ -840,7 +881,8 @@ export class KartGame {
     this.gs = p.gs;
     this.types = p.types;
     this.mini = p.mini;
-    this.pal = p.pal ?? (p.pal = this.makePal(TRACKS[this.trackNo].hue, !!(TRACKS[this.trackNo] as { greenPlants?: boolean }).greenPlants));
+    const info = TRACKS[this.trackNo] as { hue: number; greenPlants?: boolean; psy?: PsyTheme };
+    this.pal = p.pal ?? (p.pal = this.makePal(info.hue, !!info.greenPlants, info.psy));
     this.zoneF = 0;
   }
 
@@ -2063,18 +2105,19 @@ export class KartGame {
         }
       }
       let rel = wrapAngle(k.a + k.spinA - ca);
-      if (k === me && k.spin <= 0) rel = 0;
-      // which side of the car we see: back, right side, front, left side
-      const quarter = Math.round(rel / (Math.PI / 2));
-      const view = quarter === 0 ? "back" : Math.abs(quarter) === 2 ? "front" : "side";
-      const im = this.kartSkins[k.skin][view];
+      // your own kart: the camera swings after it a moment late, so while you steer you see it turn a little (a bit more than really)
+      if (k === me && k.spin <= 0) rel = clamp(rel * 1.8, -0.5, 0.5);
+      // which of the 16 views of the 3D kart: 0 = from behind, 4 / 12 = from the sides, 8 = from the front
+      const STEP = (Math.PI * 2) / KART_ANGLES;
+      const angle = (((Math.round(rel / STEP) * KART_DIR) % KART_ANGLES) + KART_ANGLES) % KART_ANGLES;
+      const im = this.kartSkins[k.skin][`a${angle}`];
       const fw = im.width / 3;
       // flames only while boosting, or while revving on the start line
       const fire = k.boost > 0 || (this.state === "count" && k.rev >= 0);
       const frame = fire ? 1 + (Math.floor(now / 50) % 2) : 0;
       // spinning out: each side squeezes thin and opens into the next one, like a turning card, with a little hop
       const spinning = k.spin > 0;
-      const squash = spinning ? Math.max(0.12, Math.cos((rel - (quarter * Math.PI) / 2) * 2)) : 1;
+      const squash = 1; // (the 3D kart really turns, so it doesn't need squeezing any more)
       const hop = spinning ? Math.sin((1 - k.spin / SPIN_TIME) * Math.PI) * 9 : 0;
       // a jump is an arc; falling into the void = sinking and shrinking
       const jumpZ = k.air > 0 ? Math.sin((1 - k.air / AIR_TIME) * Math.PI) * 16 : 0;
@@ -2092,7 +2135,7 @@ export class KartGame {
         list.push({ img: wg, sx: 0, sw: wg.width, sh: wg.height, x: k.x, y: k.y, k: 0.3 * open, lift: k.alt + 7, flip: false, shadow: false, kart: true, rot: k.tilt });
       }
       const shake = k.stall > 0 || (this.state === "count" && k.rev >= 0) ? (Math.floor(now / 40) % 2) * 0.5 : 0;
-      list.push({ img: im, sx: frame * fw, sw: fw, sh: im.height, x: k.x, y: k.y, k: CARS[k.car].k * (1 - 0.65 * drop), lift: hop + shake + jumpZ + k.alt - drop * drop * FALL_DEPTH, flip: view === "side" && rel < 0, shadow: k.fall <= 0 && k.air <= 0 && k.alt <= 6, squash: squash * tumble, kart: true, rot: k.tilt });
+      list.push({ img: im, sx: frame * fw, sw: fw, sh: im.height, x: k.x, y: k.y, k: CARS[k.car].k * (1 - 0.65 * drop), lift: hop + shake + jumpZ + k.alt - drop * drop * FALL_DEPTH, flip: false, shadow: k.fall <= 0 && k.air <= 0 && k.alt <= 6, squash: squash * tumble, kart: true, rot: k.tilt });
     }
     for (const bx of this.boxes)
       if (bx.back <= 0) {
