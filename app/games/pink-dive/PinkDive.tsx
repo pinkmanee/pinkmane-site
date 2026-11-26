@@ -105,7 +105,7 @@ const SKELETON = [
   ["..www..", ".wkwkw.", "..www..", "...w...", "w.www.w", ".wwwww.", "...w...", "..www..", "..w.w..", ".w...w."],
   ["..www..", ".wkwkw.", "..www..", "...w...", "..www..", ".wwwww.", "w..w..w", "..www..", "..w.w..", "..w.w.."],
 ];
-function Sea({ depth }: { depth: number }) {
+function Sea({ depth, font }: { depth: number; font: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const target = useRef(depth);
   target.current = depth;
@@ -272,6 +272,23 @@ function Sea({ depth }: { depth: number }) {
         c.globalAlpha = 1;
       }
       weed(false);
+      // ---- THE DEPTH ZONES: a dotted line where each zone starts, with its name and depth on the right (the same zones
+      // as your final rank: PLANKTON, SCHOOL FISH, RARE, DEEP CUT, ONE IN A MILLION, game/dive/daily.ts BANDS)
+      c.textAlign = "right";
+      c.textBaseline = "bottom";
+      c.font = `5px ${font}, monospace`;
+      BANDS.forEach((band, i) => {
+        if (i === 0) return;
+        const ly = Math.round(at(band.from * 3));
+        if (ly < 4 || ly > H - 1 || ly < surface + 4) return;
+        const col = TIERS[Math.min(TIERS.length - 1, i)].color;
+        for (let x = Math.round(seenX) + 4; x < seenX + seenW - 4; x += 5) rect(x, ly, 3, 1, "rgba(255,255,255,0.32)");
+        c.globalAlpha = 0.8;
+        rect(seenX + seenW - 6, ly - 6, 3, 3, col);
+        c.fillStyle = "rgba(255,255,255,0.75)";
+        c.fillText(`${band.name} · -${(band.from * 10).toLocaleString("en-US")} m`, seenX + seenW - 9, ly - 2);
+        c.globalAlpha = 1;
+      });
       // ---- the sea floor: a sunken Pink Kart between the plants ----
       const floor = at(700 * 3 + 40);
       if (floor < H) {
@@ -289,14 +306,40 @@ function Sea({ depth }: { depth: number }) {
         for (let i = 0; i < 28; i++) rect(sx + 44 + i * 3, sy2 + 11 - i * 0.5, 3, 4 + i, "#fff0a8");
         c.globalAlpha = 1;
       }
-      // PINKMANE (the third picture has the smoke coming off the joint), behind the glass
-      const frame = Math.floor(t * 1.6) % 4 === 3 ? 2 : Math.floor(t * 1.6) % 2;
-      spr(DUDE, frame * 24, 0, 24, 23, sx + 12, sy2 - 4, 12, 11.5);
-      // the glass dome
+      // the glass dome: a half circle (radius 11) sitting on the hull. Everything inside it is cut to its exact shape.
       const gx = sx + 18, gy = sy2 + 8;
+      const dome = () => {
+        c.beginPath();
+        for (let dy = 0; dy <= 10; dy++) {
+          const hw = Math.round(Math.sqrt(10.5 * 10.5 - dy * dy));
+          c.rect(gx - hw, gy - dy - 1, hw * 2, 1);
+        }
+      };
+      c.save();
+      dome();
+      c.clip();
+      // PINKMANE (the third picture has the smoke coming off the joint), sitting low enough that his hair stays inside
+      const frame = Math.floor(t * 1.6) % 4 === 3 ? 2 : Math.floor(t * 1.6) % 2;
+      spr(DUDE, frame * 24, 0, 24, 23, sx + 12, gy - 10, 12, 11.5);
+      // HOTBOXED: the smoke fills the dome, thicker and thinner in slow waves (it builds up, then clears a bit)
+      const fill = 0.5 + 0.5 * Math.sin(t * 0.35);
+      c.fillStyle = `rgba(206, 198, 218, ${0.2 + fill * 0.3})`;
+      c.fillRect(gx - 11, gy - 12, 22, 12);
+      for (let i = 0; i < 9; i++) {
+        // puffs drifting round and round inside the glass
+        const ph = t * (0.25 + (i % 3) * 0.08) + i * 1.7;
+        const px = gx + Math.sin(ph) * (4 + (i % 4) * 1.5);
+        const py = gy - 4 - ((i * 2.3 + t * 1.2) % 7);
+        const size = 4 + (i % 3);
+        c.fillStyle = `rgba(238, 234, 246, ${(0.3 + fill * 0.4) * (0.6 + 0.4 * Math.sin(ph * 2))})`;
+        c.fillRect(Math.round(px - size / 2), Math.round(py - size / 2), size, size - 1);
+        c.fillRect(Math.round(px - size / 2) + 1, Math.round(py - size / 2) - 1, size - 2, 1);
+      }
+      c.restore();
+      // the glass on top: a faint tint, a bright rim and a shine
       for (let dy = 0; dy <= 11; dy++) {
         const hw = Math.round(Math.sqrt(11 * 11 - dy * dy));
-        rect(gx - hw, gy - dy, hw * 2, 1, "rgba(170,240,255,0.16)");
+        rect(gx - hw, gy - dy, hw * 2, 1, "rgba(170,240,255,0.1)");
         rect(gx - hw, gy - dy, 1, 1, "rgba(220,250,255,0.8)");
         rect(gx + hw - 1, gy - dy, 1, 1, "rgba(220,250,255,0.8)");
       }
@@ -319,7 +362,7 @@ function Sea({ depth }: { depth: number }) {
         const bt = (t * 1.2 + i * 0.2) % 1;
         rect(sx - 8 - bt * 14, sy2 + 13 - bt * 16 + Math.sin(i + t * 3) * 2, 2, 2, `rgba(255,255,255,${0.7 * (1 - bt)})`);
       }
-      // smoke bubbles leaving the top of the dome
+      // a little smoke leaking out of the top of the dome
       for (let i = 0; i < 3; i++) {
         const bt = (t * 0.5 + i / 3) % 1;
         if (surface < sy2 - 4 - bt * 30) rect(gx + 2 + Math.sin(t * 2 + i * 2) * 2, sy2 - 4 - bt * 30, 2, 2, `rgba(230,220,240,${0.6 * (1 - bt)})`);
@@ -611,7 +654,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
 
   return (
     <div className="pd-root" style={{ fontFamily: pixelFont }}>
-      <Sea depth={camDepth} />
+      <Sea depth={camDepth} font={pixelFont} />
 
       <Link
         href="/"
@@ -658,6 +701,9 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
               {practice ? " · PRACTICE" : ""}
             </span>
             <span className="pd-depth">{metres(total)}</span>
+          </div>
+          <div className={`pd-clock ${left <= 5 ? "pd-clock-low" : ""}`} aria-label={`${Math.ceil(left)} seconds left`}>
+            0:{String(Math.ceil(left)).padStart(2, "0")}
           </div>
           <div className="pd-bar" aria-hidden="true">
             <div className={`pd-bar-in ${left <= 5 ? "pd-low" : ""}`} style={{ width: `${(left / SECONDS) * 100}%` }} />
@@ -707,7 +753,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
               </button>
             </form>
           )}
-          <div className={`pd-note ${note?.bad ? "pd-bad" : ""}`}>{note ? note.text : reveal ? "" : `${Math.ceil(left)} SECONDS · ONE ANSWER COUNTS`}</div>
+          <div className={`pd-note ${note?.bad ? "pd-bad" : ""}`}>{note ? note.text : reveal ? "" : "ONE ANSWER COUNTS"}</div>
           {!reveal && sugg.length > 0 && (
             <div className="pd-sugg">
               {sugg.map((h) => (
@@ -816,7 +862,10 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         .pd-big { background: #d63cc8; font-size: 13px; padding: 13px 26px; }
         .pd-top { display: flex; justify-content: space-between; gap: 10px; font-size: 8px; color: #9fe8ff; }
         .pd-depth { color: #fff; }
-        .pd-bar { height: 8px; margin: 10px 0 16px; background: #2a1438; border: 2px solid #fff; }
+        .pd-clock { margin-top: 10px; font-size: 22px; color: #fff; text-shadow: 2px 2px 0 #000; letter-spacing: 2px; }
+        .pd-clock-low { color: #ff4a6a; animation: pdTick 1s steps(2) infinite; }
+        @keyframes pdTick { 50% { transform: scale(1.12); } }
+        .pd-bar { height: 8px; margin: 8px 0 16px; background: #2a1438; border: 2px solid #fff; }
         .pd-bar-in { height: 100%; background: #56c8ff; transition: width 0.1s linear; }
         .pd-low { background: #ff4a6a; }
         .pd-q { margin: 0 0 16px; font-size: clamp(12px, 3.6vw, 17px); line-height: 1.6; color: #fff; }
@@ -853,7 +902,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         .pd-actions .pd-big { font-size: 11px; padding: 11px 18px; }
         .pd-next { margin-top: 12px; font-size: 7px; color: rgba(255, 255, 255, 0.6); }
         @media (max-height: 520px) { .pd-intro { margin-top: 12vh; } .pd-play { margin-top: 52px; } }
-        @media (prefers-reduced-motion: reduce) { .pd-bad, .pd-reveal { animation: none; } }
+        @media (prefers-reduced-motion: reduce) { .pd-bad, .pd-reveal, .pd-clock-low { animation: none; } }
       `}</style>
     </div>
   );
