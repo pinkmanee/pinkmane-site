@@ -954,7 +954,7 @@ export class KartGame {
               continue;
             }
           }
-          if (hue) ground[o] = tint(ground[o], M);
+          if (hue && !track.painted) ground[o] = tint(ground[o], M); // (painted land keeps its own colours)
         }
       }
     }
@@ -2584,7 +2584,8 @@ export class KartGame {
         const sc = FOCAL / z;
         const size = Math.max(1, Math.round(big * sc));
         b.fillStyle = col;
-        b.fillRect(Math.round(BW / 2 + (ex * rx + ey * ry) * sc - size / 2), Math.round(hz + (camZ - h) * sc - size / 2), size, size);
+        // (the flight path rides above the land, like the karts do)
+        b.fillRect(Math.round(BW / 2 + (ex * rx + ey * ry) * sc - size / 2), Math.round(hz + (camZ - gh(wx, wy) - h) * sc - size / 2), size, size);
       };
       for (let i = 0; i < NC; i++) {
         const h = altOf[i] || 0;
