@@ -297,6 +297,8 @@ type Kart = {
   fall: number; // seconds left of falling into the void (the last BURST_TIME of it is the pixel burst)
   alt: number; // how high it's flying right now (0 = on the ground)
   tilt: number; // flying: banking into the turn
+  steerVis?: number; // how hard it's turning right now (-1 left .. 1 right), for the front wheels in the picture
+  lastA?: number;
 };
 type Thing = {
   kind: "vinyl" | "wall" | "bomb" | "mic" | "boom" | "wave";
@@ -2427,10 +2429,16 @@ export class KartGame {
       const STEP = (Math.PI * 2) / KART_ANGLES;
       const angle = (((Math.round(rel / STEP) * KART_DIR) % KART_ANGLES) + KART_ANGLES) % KART_ANGLES;
       const im = this.kartSkins[k.skin][`a${angle}`];
-      const fw = im.width / 3;
+      const fw = im.width / 9;
       // flames only while boosting, or while revving on the start line
       const fire = k.boost > 0 || (this.state === "count" && k.rev >= 0);
-      const frame = fire ? 1 + (Math.floor(now / 50) % 2) : 0;
+      // THE FRONT WHEELS: worked out from how fast the kart is turning (so it works for everyone: you, the computer
+      // racers and online players). The picture sheet has steering left / straight / steering right, 3 flame frames each.
+      const da = wrapAngle(k.a - (k.lastA ?? k.a));
+      k.lastA = k.a;
+      k.steerVis = (k.steerVis ?? 0) + (clamp(da * 28, -1, 1) - (k.steerVis ?? 0)) * 0.3;
+      const steerGroup = k.spin > 0 ? 1 : k.steerVis < -0.3 ? 0 : k.steerVis > 0.3 ? 2 : 1;
+      const frame = steerGroup * 3 + (fire ? 1 + (Math.floor(now / 50) % 2) : 0);
       // spinning out: each side squeezes thin and opens into the next one, like a turning card, with a little hop
       const spinning = k.spin > 0;
       const squash = 1; // (the 3D kart really turns, so it doesn't need squeezing any more)
