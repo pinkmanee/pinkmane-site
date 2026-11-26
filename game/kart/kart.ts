@@ -13,6 +13,7 @@ const MUSIC: Record<string, string> = {
   track2: "/music/beat-3.mp3", // VOID HIGHWAY
   track3: "/music/beat-5.mp3", // HIGH HILLS
   track4: "/music/06.mp3", // GHOST SHIP BAY
+  track6: "/music/09.mp3", // HOTBOX HIGHWAY
   track5: "/music/05.mp3", // 808 TEMPLE (its speakers bounce on this song's beat: "beat" in track5.json)
 };
 
@@ -39,6 +40,8 @@ type TrackData = {
   beat?: { bpm: number; at: number }; // the map song's tempo and where its first beat is (s): speakers and equalizers move on it
   jumpText?: string; // what it says on a jump (default: JUMP!)
   tunnel?: number[]; // for every centre point: 1 = inside a building (808 TEMPLE): the sky turns into its walls
+  fog?: [number, number]; // how thick the haze is: [where it starts, how far until it's full] (default [500, 2600])
+  smokeRings?: [number, number][]; // HOTBOX HIGHWAY: smoke rings floating over the road; drive through one = a boost
   hill?: number[]; // HILLS: how high the road is at every centre point (0 = flat; the land around follows, fading out)
   slaps?: [number, number][]; // SLAPPING TENTACLES (GHOST SHIP BAY): [centre point, which side it comes from: 1 / -1]
   outside?: number; // what's past the edge of the map (3 = void)
@@ -54,6 +57,7 @@ export const TRACKS = [
   { id: "track3", name: "HIGH HILLS", hue: 68, greenPlants: true, road: "cobble", psy: "lava" },
   { id: "track4", name: "GHOST SHIP BAY", hue: 0, road: "planks", psy: "ocean" },
   { id: "track5", name: "808 TEMPLE", hue: 0, road: "tiles", psy: "gold" },
+  { id: "track6", name: "HOTBOX HIGHWAY", hue: 0, road: "cobble", psy: "smoke" },
 ];
 // EACH MAP HAS ITS OWN COLOURS. "hue" turns the colour wheel for that map's ground, sky and haze (in degrees):
 // 0 = the original pink and purple, -75 = cold blue, 68 = sunset orange and red. Change a number to recolour a map.
@@ -525,7 +529,7 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", ...ITEMS.map((i) => `item-${i}`)];
+    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", "smokering", "puff", ...ITEMS.map((i) => `item-${i}`)];
     const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n)), this.loadTrip()]);
     this.packs = packs;
     for (const it of ITEMS) (this.img[`item-${it}`] as { pkRes?: number }).pkRes = this.img[`item-${it}`].width / 48;
@@ -1450,7 +1454,25 @@ export class KartGame {
     // from out in the water on its side, across the whole road
     return { ex: c[0] + nx * side * (hw + 18), ey: c[1] + ny * side * (hw + 18), fx: c[0] - nx * side * (hw + 6), fy: c[1] - ny * side * (hw + 6) };
   }
+  // SMOKE RINGS (HOTBOX HIGHWAY): drive through one and it blows you forwards
+  private stepRings() {
+    const rings = this.track.smokeRings;
+    if (!rings || this.state !== "race") return;
+    for (const k of this.karts) {
+      if (!this.mine(k) || k.fall > 0 || k.boost > 0.9) continue;
+      for (const r of rings)
+        if (Math.hypot(k.x - r[0], k.y - r[1]) < 30) {
+          k.boost = 1.1;
+          if (k.player) {
+            this.snd.play("boost");
+            this.say("PUFF PUFF", 0.7);
+          }
+          break;
+        }
+    }
+  }
   private stepSlaps() {
+    this.stepRings();
     const slaps = this.track.slaps;
     if (!slaps || this.state !== "race") return;
     slaps.forEach(([i, side], n) => {
@@ -2218,11 +2240,12 @@ export class KartGame {
     // far away the ground fades into the haze: pink over the field, deep purple in the void
     const FOG_R = Math.round(pal.fog[0] + (pal.vfog[0] - pal.fog[0]) * zf), FOG_G = Math.round(pal.fog[1] + (pal.vfog[1] - pal.fog[1]) * zf), FOG_B = Math.round(pal.fog[2] + (pal.vfog[2] - pal.fog[2]) * zf);
     const water = !!this.track.water, seaT = performance.now() / 1000;
+    const [fogAt, fogLen] = this.track.fog ?? [500, 2600]; // (HOTBOX HIGHWAY: thick smoke, so the haze starts close)
     for (let r = 0; r < rows; r++) {
       const z = rowZ[r];
       const stepX = (rx * z) / FOCAL, stepY = (ry * z) / FOCAL;
       let wx = camX + dx * z - stepX * (BW / 2), wy = camY + dy * z - stepY * (BW / 2);
-      const fog = z > 500 ? Math.min(0.85, (z - 500) / 2600) : 0;
+      const fog = z > fogAt ? Math.min(0.85, (z - fogAt) / fogLen) : 0;
       const f256 = (fog * 256) | 0, inv = 256 - f256;
       // THE VOID has no ground: it's the haze at the horizon, getting darker towards your feet
       const vd = Math.min(1, r / 70);
@@ -2443,6 +2466,7 @@ export class KartGame {
       if (d[2] === "ship") list.push({ img: this.img["ghostship"], sx: 0, sw: 72, sh: 46, x: d[0], y: d[1], k: d[3], lift: -5 + Math.sin(now / 700 + d[0]) * 3, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "speaker") list.push({ img: this.img["speaker"], sx: beat < 0.2 ? 80 : 0, sw: 80, sh: 112, x: d[0], y: d[1], k: d[3] / 2, lift: 0, flip: false, shadow: true });
       // (808 TEMPLE's speakers, towers, gates and pillars are 3D renders at double detail: public/kart/speaker.png etc.)
+      else if (d[2] === "puff") list.push({ img: this.img["puff"], sx: (Math.floor(now / 900 + d[0]) % 2) * 96, sw: 96, sh: 80, x: d[0], y: d[1], k: d[3] / 2, lift: 4 + Math.sin(now / 1100 + d[1]) * 4, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "gate") list.push({ img: this.img["gate"], sx: beat < 0.2 ? 240 : 0, sw: 240, sh: 192, x: d[0], y: d[1], k: d[3] * 0.7, lift: 0, flip: false, shadow: false });
       else if (d[2] === "pillar") list.push({ img: this.img["pillar"], sx: beat < 0.2 ? 60 : 0, sw: 60, sh: 180, x: d[0], y: d[1], k: d[3] * 0.38, lift: 0, flip: false, shadow: false });
       else if (d[2] === "eq") {
@@ -2451,6 +2475,8 @@ export class KartGame {
         list.push({ img: this.img["eq"], sx: lvl * 64, sw: 64, sh: 128, x: d[0], y: d[1], k: d[3] / 2, lift: 0, flip: d[1] % 2 === 0, shadow: true });
       } else if (d[2] === "tentacle") list.push({ img: this.img["tentacle"], sx: (Math.floor(now / 380 + d[1]) % 2) * 24, sw: 24, sh: 64, x: d[0], y: d[1], k: d[3], lift: -6, flip: d[1] % 2 === 0, shadow: false });
     }
+    // the smoke rings, floating over the road and slowly wobbling
+    for (const r of this.track.smokeRings ?? []) list.push({ img: this.img["smokering"], sx: (Math.floor(now / 500 + r[0]) % 2) * 96, sw: 96, sh: 96, x: r[0], y: r[1], k: 0.72, lift: 6 + Math.sin(now / 600 + r[1]) * 3, flip: false, shadow: false });
     // the slapping tentacles
     (this.track.slaps ?? []).forEach(([i, side], n) => {
       const p = this.slapPhase(n);
@@ -2520,7 +2546,8 @@ export class KartGame {
           b.clip();
         }
       }
-      if (p.z > 500) b.globalAlpha = Math.max(0.25, 1 - (p.z - 500) / 1300);
+      const [fa, fl] = this.track.fog ?? [500, 2600];
+      if (p.z > fa) b.globalAlpha = Math.max(0.2, 1 - (p.z - fa) / (fl / 2));
       if (s.rot) {
         // banking while flying
         b.save();
