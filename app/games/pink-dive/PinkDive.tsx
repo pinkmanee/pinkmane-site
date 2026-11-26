@@ -13,7 +13,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TIERS, type Prompt } from "../../../game/dive/prompts";
-import { BANDS, PER_DAY, SECONDS, bandOf, check, diveNumber, practicePrompts, promptsForDive, suggest, type Hit } from "../../../game/dive/daily";
+import { BANDS, PER_DAY, SECONDS, bandOf, check, diveNumber, norm, practicePrompts, promptsForDive, suggest, type Hit } from "../../../game/dive/daily";
 import { buzz } from "../../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 const PINK = "#ff5fd2";
@@ -26,6 +26,55 @@ const OPTS_KEY = "pinkmane-dive-options"; // the other settings from the ESC men
 const NAME_KEY = "pinkrun-name"; // the same name as on every other scoreboard
 const NAMED_KEY = "pinkdive-named"; // the name you put on today's board
 const REPLAY_KEY = "pinkdive-replay"; // the dive number you used your one REPLAY on
+// WEED LEAVES: every daily dive pays some (more the deeper you got), spend them on sub skins in the SUB SHOP.
+// Kept in this browser only (like the best scores in the other games).
+const LEAVES_KEY = "pinkdive-leaves";
+const PAID_KEY = "pinkdive-paid"; // the last dive that paid out (so a dive only pays once)
+const OWNED_KEY = "pinkdive-skins";
+const SKIN_KEY = "pinkdive-skin";
+const leavesFor = (total: number) => 5 + Math.round(total / 10); // 5 for diving at all, +1 for every 100 m
+// THE SUB SKINS: hull colour, the light top edge, the dark bottom edge, the propeller. rainbow = the colours run along the
+// hull, ghost = see-through. To add one: copy a line, give it a new id, name, price and colours.
+type Skin = { id: string; name: string; price: number; hull: string; light: string; dark: string; prop: string; rainbow?: boolean; ghost?: boolean };
+const SKINS: Skin[] = [
+  { id: "pink", name: "PINK SUB", price: 0, hull: "#ff46c8", light: "#ff9be8", dark: "#b0208c", prop: "#ffd6ef" },
+  { id: "toxic", name: "TOXIC", price: 60, hull: "#5adc3c", light: "#b4ff8c", dark: "#2a8a1c", prop: "#e6ffd0" },
+  { id: "ice", name: "ICE", price: 90, hull: "#7ad8ff", light: "#d8f6ff", dark: "#3a8cc0", prop: "#ffffff" },
+  { id: "void", name: "VOID", price: 120, hull: "#2a1c3c", light: "#6a4c8c", dark: "#0c0614", prop: "#b48cff" },
+  { id: "gold", name: "GOLD RUSH", price: 160, hull: "#f0b828", light: "#ffe48a", dark: "#a8700c", prop: "#fff2c0" },
+  { id: "bone", name: "BONE", price: 220, hull: "#ece4d4", light: "#ffffff", dark: "#a89c88", prop: "#ffffff" },
+  { id: "lava", name: "LAVA", price: 280, hull: "#e8401c", light: "#ffa040", dark: "#8a1808", prop: "#ffd080" },
+  { id: "rainbow", name: "RAINBOW", price: 420, hull: "#ff46c8", light: "#ffffff", dark: "#6a2c8c", prop: "#ffffff", rainbow: true },
+  { id: "ghost", name: "GHOST SHIP", price: 650, hull: "#d6ccf0", light: "#ffffff", dark: "#8a7cb0", prop: "#ffffff", ghost: true },
+];
+const skinOf = (id: string) => SKINS.find((k) => k.id === id) ?? SKINS[0];
+
+// a little pixel weed leaf (7 leaflets) for the WEED LEAVES counter
+function Leaf({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 13 13" style={{ verticalAlign: "-2px", imageRendering: "pixelated" }} aria-hidden="true">
+      <path fill="#3ee05a" d="M6 0h1v8H6zM5 2h1v5H5zM7 2h1v5H7zM2 3h1v1H2zM3 4h1v1H3zM4 5h1v2H4zM10 3h1v1h-1zM9 4h1v1H9zM8 5h1v2H8zM0 7h2v1H0zM2 7h2v1H2zM9 7h2v1H9zM11 7h2v1h-2zM1 8h3v1H1zM9 8h3v1H9z" />
+      <path fill="#1c8a2c" d="M6 8h1v5H6z" />
+    </svg>
+  );
+}
+// a small picture of a sub in a skin's colours (for the shop)
+function SubPic({ skin, w = 60 }: { skin: Skin; w?: number }) {
+  const col = (x: number) => (skin.rainbow ? `hsl(${(x * 9) % 360}, 90%, 62%)` : skin.hull);
+  return (
+    <svg width={w} height={(w * 24) / 46} viewBox="-4 -12 46 24" style={{ imageRendering: "pixelated", opacity: skin.ghost ? 0.6 : 1 }} aria-hidden="true">
+      <path fill="rgba(170,240,255,0.35)" d="M10 0h12v-3h-2v-2h-2v-1h-4v1h-2v2h-2z" />
+      {Array.from({ length: 10 }, (_, i) => (
+        <rect key={i} x={1 + i * 4} y={2} width={4} height={8} fill={col(i * 4)} />
+      ))}
+      <rect x={3} y={0} width={36} height={2} fill={skin.light} />
+      <rect x={3} y={10} width={36} height={2} fill={skin.dark} />
+      <rect x={-2} y={2} width={4} height={8} fill={skin.dark} />
+      <rect x={30} y={4} width={4} height={4} fill="#12041c" />
+      <rect x={-5} y={1} width={3} height={10} fill={skin.prop} />
+    </svg>
+  );
+}
 const DEVICE_KEY = "pinkrun-device"; // the same "you" as the scoreboards
 
 type Slot = { answer: string | null; tier: number; depth: number }; // tier -1 = no answer
@@ -158,7 +207,9 @@ const ZONES: [number, string][] = [
 // a GHOST SUB: another diver from today, at the depth they had reached at the same point of the dive
 type GhostSub = { name: string | null; depth: number };
 
-function Sea({ depth, font, ghosts = [] }: { depth: number; font: string; ghosts?: GhostSub[] }) {
+function Sea({ depth, font, ghosts = [], skin = SKINS[0] }: { depth: number; font: string; ghosts?: GhostSub[]; skin?: Skin }) {
+  const skinRef = useRef(skin);
+  skinRef.current = skin;
   const ref = useRef<HTMLCanvasElement>(null);
   const target = useRef(depth);
   target.current = depth;
@@ -224,7 +275,6 @@ function Sea({ depth, font, ghosts = [] }: { depth: number; font: string; ghosts
       });
     };
     let lastZone = -1, flashName = "", flashAt = -10;
-    const ghostCur: number[] = []; // where each ghost sub is right now (it glides to its depth)
     const rect = (x: number, y: number, w: number, h: number, col: string) => {
       c.fillStyle = col;
       c.fillRect(Math.round(x), Math.round(y), w, h);
@@ -411,49 +461,58 @@ function Sea({ depth, font, ghosts = [] }: { depth: number; font: string; ghosts
       // ---- PINKMANE in the pink sub ----
       const bob = Math.round(Math.sin(t * 2) * 1.5);
       const sx = Math.round(upright ? W / 2 - 21 : seenX + seenW * 0.08), sy2 = subY - 6 + bob;
-      // ---- THE GHOST SUBS (today's other divers), see-through, each with its name (or "DIVER" for one without a name).
-      // They sink to where those divers were at the same point of the dive, so you see who you pass.
+      // ---- THE SOULS (today's other divers): each one's ghost floats on the line where their dive ended, wiggling and
+      // waving, with their name (or "DIVER" for one without a name). You see them as you sink past them.
       const gs = ghostRef.current;
       for (let i = 0; i < gs.length; i++) {
         const g = gs[i];
-        ghostCur[i] = ghostCur[i] === undefined ? g.depth : ghostCur[i] + (g.depth - ghostCur[i]) * 0.04;
-        const gy2 = Math.round(at(ghostCur[i] * 3) - 6 + Math.sin(t * 1.7 + i * 2.1) * 1.5);
-        if (gy2 < -20 || gy2 > H + 10) continue;
-        // where there's open water: upright, left and right of your sub; wide, beside your sub and right of the card
+        const lineY = Math.round(at(g.depth * 3));
+        if (lineY < -30 || lineY > H + 30) continue;
         let gx2: number;
         if (upright) {
-          // (a phone shows a narrow strip of sea: spread them over the part you can see; they're see-through, so they can pass your sub)
-          const spots = [seenX + 3, seenX + seenW - 41, seenX + seenW * 0.5 - 18, seenX + seenW * 0.25 - 10, seenX + seenW * 0.75 - 26];
-          gx2 = spots[i % spots.length] + (i >= spots.length ? 8 : 0);
+          const spots = [seenX + 6, seenX + seenW - 22, seenX + seenW * 0.5 - 8, seenX + seenW * 0.25 - 4, seenX + seenW * 0.75 - 12];
+          gx2 = spots[i % spots.length] + (i >= spots.length ? 9 : 0);
         } else {
           const half = (Math.min(520, box.width * 0.94) / 2) * (seenW / Math.max(1, box.width)) + 6; // half the card, in sea pixels
-          const leftFrom = sx + 50, leftTo = W / 2 - half - 40, rightFrom = W / 2 + half + 6, rightTo = seenX + seenW - 42;
+          const leftFrom = sx + 52, leftTo = W / 2 - half - 18, rightFrom = W / 2 + half + 10, rightTo = seenX + seenW - 20;
           const spots: number[] = [];
-          for (let x = rightFrom; x <= rightTo; x += 42) spots.push(x);
-          for (let x = leftFrom; x <= leftTo; x += 42) spots.push(x);
-          if (!spots.length) spots.push(sx + 50);
+          for (let x = rightFrom; x <= rightTo; x += 30) spots.push(x);
+          for (let x = leftFrom; x <= leftTo; x += 30) spots.push(x);
+          if (!spots.length) spots.push(sx + 52);
           gx2 = spots[i % spots.length] + (i >= spots.length ? 12 : 0);
         }
-        gx2 = Math.round(gx2 + Math.sin(t * 0.4 + i) * 3);
-        c.globalAlpha = 0.42;
-        rect(gx2 + 3, gy2 + 8, 30, 10, "#e6dcff");
-        rect(gx2 + 1, gy2 + 10, 34, 6, "#e6dcff");
-        rect(gx2 + 3, gy2 + 8, 30, 2, "#ffffff");
-        rect(gx2 + 35, gy2 + 11, 2, 4, "#e6dcff");
-        rect(gx2 - 2, gy2 + 10, 3, 6, "#b8a8e0");
-        for (let dy = 0; dy <= 7; dy++) {
-          const hw = Math.round(Math.sqrt(8 * 8 - dy * dy));
-          rect(gx2 + 15 - hw, gy2 + 7 - dy, hw * 2, 1, dy === 7 ? "#ffffff" : "rgba(220,240,255,0.7)");
+        // the line where they stopped
+        c.globalAlpha = 0.5;
+        for (let x = -10; x < 24; x += 4) rect(gx2 + x, lineY, 2, 1, "#e6dcff");
+        // the soul: a little ghost, bobbing and wiggling side to side, one arm waving
+        const wx = Math.round(gx2 + Math.sin(t * 2.6 + i * 1.3) * 2);
+        const wy = Math.round(lineY - 17 + Math.sin(t * 1.9 + i) * 2);
+        c.globalAlpha = 0.72;
+        const SOUL = ["....wwwwww....", "..wwwwwwwwww..", ".wwwwwwwwwwww.", ".wwkkwwwwkkww.", ".wwkkwwwwkkww.", "wwwwwwwwwwwwww", "wwwwwwkkwwwwww", "wwwwwwkkwwwwww", "wwwwwwwwwwwwww", "wwwwwwwwwwwwww", "wwwwwwwwwwwwww"];
+        SOUL.forEach((row, ry) => {
+          for (let rx = 0; rx < row.length; rx++) if (row[rx] !== ".") rect(wx + rx, wy + ry, 1, 1, row[rx] === "k" ? "#2a1a40" : "#f2eaff");
+        });
+        const hem = Math.floor(t * 5 + i) % 2 ? "w.ww.ww.ww.ww." : ".ww.ww.ww.ww.w";
+        for (let rx = 0; rx < hem.length; rx++) if (hem[rx] !== ".") rect(wx + rx, wy + 11, 1, 1, "#f2eaff");
+        // the waving arm (up, down, up...)
+        if (Math.floor(t * 3.2 + i) % 2) {
+          rect(wx + 14, wy + 4, 1, 1, "#f2eaff");
+          rect(wx + 15, wy + 3, 1, 1, "#f2eaff");
+          rect(wx + 15, wy + 1, 2, 2, "#f2eaff");
+        } else {
+          rect(wx + 14, wy + 6, 1, 1, "#f2eaff");
+          rect(wx + 15, wy + 6, 2, 1, "#f2eaff");
+          rect(wx + 16, wy + 4, 2, 2, "#f2eaff");
         }
-        rect(gx2 + 26, gy2 + 12, 3, 3, "#5a4a80"); // porthole
-        c.globalAlpha = 0.75;
+        rect(wx - 1, wy + 6, 1, 2, "#f2eaff"); // the other arm, hanging
+        c.globalAlpha = 0.8;
         const label = (g.name ?? "DIVER").slice(0, 12);
         c.font = `5px ${font}`;
         c.textAlign = "center";
         c.fillStyle = "#000";
-        c.fillText(label, gx2 + 17 + 0.5, gy2 - 3.5);
+        c.fillText(label, wx + 7 + 0.5, wy - 3.5);
         c.fillStyle = g.name ? "#ffe6f7" : "#c8bce8";
-        c.fillText(label, gx2 + 17, gy2 - 4);
+        c.fillText(label, wx + 7, wy - 4);
         c.globalAlpha = 1;
       }
       if (cam > 250) {
@@ -501,19 +560,26 @@ function Sea({ depth, font, ghosts = [] }: { depth: number; font: string; ghosts
       }
       rect(gx - 6, gy - 8, 2, 1, "#ffffff"); // a shine on the glass
       rect(gx - 7, gy - 7, 1, 2, "#ffffff");
-      // the hull
-      rect(sx + 3, sy2 + 8, 36, 12, "#ff46c8");
-      rect(sx + 1, sy2 + 10, 40, 8, "#ff46c8");
-      rect(sx + 3, sy2 + 8, 36, 2, "#ff9be8");
-      rect(sx + 3, sy2 + 18, 36, 2, "#b0208c");
-      rect(sx + 41, sy2 + 12, 2, 4, "#ff46c8"); // nose
+      // (where the sub is, for the SHARE TO INSTAGRAM picture: it frames the sea around your sub)
+      cv.dataset.subx = String((sx + 20) * 2);
+      cv.dataset.suby = String((sy2 + 12) * 2);
+      // the hull (in the skin from the SUB SHOP)
+      const sk = skinRef.current;
+      if (sk.ghost) c.globalAlpha = 0.6;
+      rect(sx + 3, sy2 + 8, 36, 12, sk.hull);
+      rect(sx + 1, sy2 + 10, 40, 8, sk.hull);
+      if (sk.rainbow) for (let x = 0; x < 40; x += 4) rect(sx + 1 + x, sy2 + (x < 2 || x > 37 ? 10 : 8), 4, x < 2 || x > 37 ? 8 : 12, `hsl(${(x * 9 + t * 80) % 360}, 90%, 62%)`);
+      rect(sx + 3, sy2 + 8, 36, 2, sk.light);
+      rect(sx + 3, sy2 + 18, 36, 2, sk.dark);
+      rect(sx + 41, sy2 + 12, 2, 4, sk.hull); // nose
       rect(sx + 30, sy2 + 12, 4, 4, "#12041c"); // porthole
       rect(sx + 31, sy2 + 13, 2, 1, "#9fe8ff");
       rect(sx + 8, sy2 + 13, 3, 3, "#12041c");
       rect(sx + 9, sy2 + 13, 1, 1, "#9fe8ff");
-      rect(sx - 2, sy2 + 10, 4, 8, "#b0208c"); // tail
+      rect(sx - 2, sy2 + 10, 4, 8, sk.dark); // tail
       const spin = Math.floor(t * 12) % 2;
-      rect(sx - 5, sy2 + (spin ? 9 : 12), 3, spin ? 10 : 4, "#ffd6ef"); // propeller
+      rect(sx - 5, sy2 + (spin ? 9 : 12), 3, spin ? 10 : 4, sk.prop); // propeller
+      c.globalAlpha = 1;
       for (let i = 0; i < 5; i++) {
         const bt = (t * 1.2 + i * 0.2) % 1;
         rect(sx - 8 - bt * 14, sy2 + 13 - bt * 16 + Math.sin(i + t * 3) * 2, 2, 2, `rgba(255,255,255,${0.7 * (1 - bt)})`);
@@ -581,6 +647,14 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   const [replay, setReplay] = useState(false); // this run is the replay
   const [replayUsed, setReplayUsed] = useState(false);
   const [realTotal, setRealTotal] = useState<number | null>(null); // today's real result (the one that counts)
+  const [realAnswers, setRealAnswers] = useState<(string | null)[]>([]); // its answers: the replay can't use them again
+  // WEED LEAVES + THE SUB SHOP
+  const [leaves, setLeaves] = useState(0);
+  const [earned, setEarned] = useState(0); // what this dive paid
+  const [owned, setOwned] = useState<string[]>(["pink"]);
+  const [skinId, setSkinId] = useState("pink");
+  const [shop, setShop] = useState(false);
+  const [shareMsg, setShareMsg] = useState("");
   // TODAY'S BOARD + THE GHOST SUBS (other divers of the day, from app/api/dive)
   const [board, setBoard] = useState<{ top: { name: string; score: number }[]; ghosts: { name: string | null; depths: number[] }[] } | null>(null);
   const [ghostsOn, setGhostsOn] = useState(false); // this dive has today's real prompts, so the ghosts fit
@@ -642,7 +716,17 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     try {
       setReplayUsed(Number(localStorage.getItem(REPLAY_KEY)) === diveNumber());
       const sv = JSON.parse(localStorage.getItem(SAVE_KEY) || "null") as Result | null;
-      if (sv && sv.dive === diveNumber() && typeof sv.total === "number") setRealTotal(sv.total);
+      if (sv && sv.dive === diveNumber() && typeof sv.total === "number") {
+        setRealTotal(sv.total);
+        setRealAnswers(sv.slots.map((x) => x.answer));
+      }
+    } catch {}
+    try {
+      setLeaves(Math.max(0, Number(localStorage.getItem(LEAVES_KEY)) || 0));
+      const o = JSON.parse(localStorage.getItem(OWNED_KEY) || "[]");
+      if (Array.isArray(o)) setOwned(["pink", ...o.filter((x: unknown) => typeof x === "string" && x !== "pink")]);
+      const k = localStorage.getItem(SKIN_KEY);
+      if (k) setSkinId(k);
     } catch {}
     try {
       setMyName(localStorage.getItem(NAME_KEY) || "");
@@ -740,6 +824,8 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     setReveal(null);
     setResult(null);
     setCopied(false);
+    setEarned(0);
+    setShareMsg("");
     lockedAt.current = -1;
     deadline.current = Date.now() + SECONDS * 1000;
     setLeft(SECONDS);
@@ -756,6 +842,18 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     [523, 659, 784, 1046].forEach((f, i) => beep(f, f, i === 3 ? 0.4 : 0.12, "square", 0.1, i * 0.11));
     if (isPractice) return;
     setRealTotal(base.total);
+    setRealAnswers(all.map((x) => x.answer));
+    // WEED LEAVES: today's dive pays once
+    try {
+      if (Number(localStorage.getItem(PAID_KEY)) !== d) {
+        const pay = leavesFor(base.total);
+        const now = Math.max(0, Number(localStorage.getItem(LEAVES_KEY)) || 0) + pay;
+        localStorage.setItem(LEAVES_KEY, String(now));
+        localStorage.setItem(PAID_KEY, String(d));
+        setLeaves(now);
+        setEarned(pay);
+      }
+    } catch {}
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(base));
     } catch {}
@@ -876,11 +974,22 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
       checking.current = false;
       if (lockedAt.current === here) return; // the clock ran out while checking
     }
+    // THE REPLAY: an answer you already gave in today's real dive doesn't count again
+    const usedBefore = (h: Hit | null) => !!h && replay && !!realAnswers[at] && norm(realAnswers[at] ?? "") === norm(h.answer);
+    if (hit && usedBefore(hit)) {
+      buzz("soft");
+      setSugg([]);
+      setNote({ text: `YOU ALREADY USED ${hit.answer.toUpperCase()} IN TODAY'S DIVE - PICK ANOTHER`, bad: true });
+      beep(160, 110, 0.18, "square", 0.08);
+      inputRef.current?.focus();
+      inputRef.current?.select();
+      return;
+    }
     if (hit) lock(hit);
     else {
       // didn't count: keep what was typed (so a typo is quick to fix) and offer the closest answers to tap
       buzz("soft");
-      const close = opts.spellHelp ? suggest(p, typed) : [];
+      const close = (opts.spellHelp ? suggest(p, typed) : []).filter((h) => !usedBefore(h));
       setSugg(close);
       setNote({ text: close.length ? "NOT QUITE - DID YOU MEAN:" : `"${typed.trim().toUpperCase().slice(0, 24)}" ISN'T ON THE LIST - FIX IT OR TRY ANOTHER`, bad: true });
       beep(160, 110, 0.18, "square", 0.08);
@@ -891,7 +1000,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
 
   // ENTER starts the dive on the first screen
   useEffect(() => {
-    if (screen !== "intro") return;
+    if (screen !== "intro" || shop) return;
     const key = (e: KeyboardEvent) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
@@ -901,7 +1010,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen]);
+  }, [screen, shop]);
 
   // ---------------- TODAY'S BOARD: put your name next to your depth
   const NAME_WHY: Record<string, string> = {
@@ -1003,6 +1112,15 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     { label: "CLOCK BEEPS", value: opts.clockBeeps ? "ON" : "OFF", act: () => setOpt("clockBeeps"), side: () => setOpt("clockBeeps") },
     { label: "BIG TEXT", value: opts.bigText ? "ON" : "OFF", act: () => setOpt("bigText"), side: () => setOpt("bigText") },
     { label: "HOW TO PLAY", act: () => setHelp((h) => !h) },
+    ...(screen === "play" ? [] : [
+          {
+            label: "SUB SHOP",
+            act: () => {
+              setMenu(false);
+              setShop(true);
+            },
+          },
+        ]),
   ];
   if (screen === "play")
     rows.push({
@@ -1026,6 +1144,12 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   // UP / DOWN pick, ENTER / SPACE press, LEFT / RIGHT change a setting
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && shop) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setShop(false);
+        return;
+      }
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -1059,7 +1183,126 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     window.addEventListener("keydown", key, { capture: true });
     return () => window.removeEventListener("keydown", key, { capture: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [menu, screen, reveal, practice, slots, dive, beep]);
+  }, [menu, shop, screen, reveal, practice, slots, dive, beep]);
+
+  // ---------------- THE SUB SHOP
+  const buySkin = (k: Skin) => {
+    if (owned.includes(k.id)) {
+      setSkinId(k.id);
+      try {
+        localStorage.setItem(SKIN_KEY, k.id);
+      } catch {}
+      beep(700, 900, 0.08, "square", 0.06);
+      return;
+    }
+    if (leaves < k.price) {
+      beep(160, 110, 0.15, "square", 0.06);
+      return;
+    }
+    const left = leaves - k.price;
+    const now = [...owned, k.id];
+    setLeaves(left);
+    setOwned(now);
+    setSkinId(k.id);
+    try {
+      localStorage.setItem(LEAVES_KEY, String(left));
+      localStorage.setItem(OWNED_KEY, JSON.stringify(now));
+      localStorage.setItem(SKIN_KEY, k.id);
+    } catch {}
+    [523, 784, 1046].forEach((f, i) => beep(f, f, 0.1, "square", 0.08, i * 0.08));
+  };
+
+  // ---------------- SHARE TO INSTAGRAM: a story-sized picture (1080 x 1920) of the sea right now (your sub and the souls
+  // around it) with your score on top. On a phone it opens the share menu (pick Instagram), on a computer it downloads.
+  const storyPicture = async (): Promise<Blob | null> => {
+    if (!result) return null;
+    try {
+      await document.fonts?.ready;
+    } catch {}
+    const cv = document.createElement("canvas");
+    cv.width = 1080;
+    cv.height = 1920;
+    const g = cv.getContext("2d");
+    if (!g) return null;
+    g.imageSmoothingEnabled = false;
+    g.fillStyle = INK;
+    g.fillRect(0, 0, 1080, 1920);
+    const sea = document.querySelector(".pd-sea") as HTMLCanvasElement | null;
+    if (sea && sea.width) {
+      // the sea around your sub: a tall slice of it, with your sub in the lower part of the picture (below the card)
+      const sc = 1920 / sea.height; // the sea's full height fills the picture
+      const cw = 1080 / sc; // how wide a slice that is
+      const subX = Number(sea.dataset.subx) || sea.width / 2, subY = Number(sea.dataset.suby) || sea.height / 2;
+      const srcX = Math.max(0, Math.min(sea.width - cw, subX - cw * 0.35));
+      const dy = 1420 - subY * sc;
+      g.drawImage(sea, srcX, 0, cw, sea.height, 0, dy, 1080, sea.height * sc);
+      if (dy > 0) g.drawImage(sea, srcX, 0, cw, 1, 0, 0, 1080, dy + 1); // above it: the top of the sea, stretched
+      if (dy < 0) g.drawImage(sea, srcX, sea.height - 1, cw, 1, 0, dy + sea.height * sc - 1, 1080, -dy + 2);
+    }
+    const fam = pixelFont;
+    const text = (t: string, x: number, y: number, size: number, col: string, align: CanvasTextAlign = "center") => {
+      g.font = `${size}px ${fam}`;
+      g.textAlign = align;
+      g.fillStyle = "#000";
+      g.fillText(t, x + size / 8, y + size / 8);
+      g.fillStyle = col;
+      g.fillText(t, x, y);
+    };
+    // the card
+    g.fillStyle = "rgba(11, 6, 20, 0.84)";
+    g.fillRect(90, 170, 900, 760);
+    g.fillStyle = PINK;
+    g.fillRect(90, 170, 900, 10);
+    g.fillRect(90, 920, 900, 10);
+    g.fillRect(90, 170, 10, 760);
+    g.fillRect(980, 170, 10, 760);
+    text("PINK DIVE", 540, 300, 84, PINK);
+    text(replay ? `REPLAY OF DIVE #${result.dive}` : `DAILY DIVE #${result.dive}`, 540, 380, 30, "#9fe8ff");
+    text(metres(result.total), 540, 540, 92, "#ffffff");
+    const b = BANDS[bandOf(result.total)];
+    text(b.name, 540, 630, 40, TIERS[bandOf(result.total)].color);
+    // the 7 squares (how rare each answer was)
+    result.slots.forEach((sl, i) => {
+      g.fillStyle = sl.tier >= 0 ? TIERS[sl.tier].color : "#3a2a4a";
+      g.fillRect(540 - 7 * 50 + i * 100 + 10, 690, 80, 80);
+    });
+    if (!practice && result.better !== null && result.players > 1) text(`DEEPER THAN ${result.better}% OF TODAY'S DIVERS`, 540, 850, 26, "#ffd84a");
+    else text("HOW DEEP CAN YOU GO?", 540, 850, 28, "#ffd84a");
+    text("pinkmane.site/games/pink-dive", 540, 1830, 34, "#ffe6f7");
+    return await new Promise((res) => cv.toBlob((bl) => res(bl), "image/png"));
+  };
+  const shareStory = async () => {
+    if (!result) return;
+    setShareMsg("MAKING YOUR PICTURE...");
+    const blob = await storyPicture();
+    if (!blob) {
+      setShareMsg("COULDN'T MAKE THE PICTURE");
+      return;
+    }
+    const file = new File([blob], `pink-dive-${result.dive}.png`, { type: "image/png" });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text: "pinkmane.site/games/pink-dive" });
+        setShareMsg("");
+        return;
+      }
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") {
+        setShareMsg("");
+        return;
+      }
+    }
+    // no share menu here (a computer): download it instead
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    setShareMsg("SAVED! POST IT ON YOUR INSTAGRAM STORY");
+  };
 
   const shareText = () => {
     if (!result) return "";
@@ -1084,18 +1327,13 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   const band = result ? bandOf(result.total) : 0;
   // where the camera is: the depth so far while playing, your total on the results, the surface on the first screen
   const camDepth = screen === "intro" ? 0 : screen === "play" ? total : (result?.total ?? 0);
-  // the ghost subs: while diving, each one is where that diver was after the same number of prompts; at the end, their total
+  // the souls: each other diver's ghost floats where their dive ended
   const ghostSubs: GhostSub[] =
-    ghostsOn && board && screen !== "intro"
-      ? board.ghosts.map((g) => ({
-          name: g.name,
-          depth: g.depths.slice(0, screen === "play" ? slots.length : PER_DAY).reduce((a, b) => a + b, 0),
-        }))
-      : [];
+    ghostsOn && board && screen !== "intro" ? board.ghosts.map((g) => ({ name: g.name, depth: g.depths.slice(0, PER_DAY).reduce((a, b) => a + b, 0) })) : [];
 
   return (
     <div className={`pd-root ${opts.bigText ? "pd-bigtext" : ""}`} style={{ fontFamily: pixelFont }}>
-      <Sea depth={camDepth} font={pixelFont} ghosts={ghostSubs} />
+      <Sea depth={camDepth} font={pixelFont} ghosts={ghostSubs} skin={skinOf(skinId)} />
 
       <Link
         href="/"
@@ -1149,6 +1387,38 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         </div>
       )}
 
+      {shop && (
+        <div className="pd-menu-wrap" onClick={(e) => e.target === e.currentTarget && setShop(false)}>
+          <div className="pd-panel pd-menu pd-shop" role="dialog" aria-label="Sub shop">
+            <h2 className="pd-menu-title">SUB SHOP</h2>
+            <div className="pd-menu-sub">
+              <Leaf /> {leaves} WEED LEAVES · every daily dive pays 5, +1 for every 100 m
+            </div>
+            <div className="pd-shop-grid">
+              {SKINS.map((k) => {
+                const has = owned.includes(k.id), on = skinId === k.id, can = leaves >= k.price;
+                return (
+                  <button key={k.id} className={`pd-shop-item ${on ? "pd-shop-on" : ""}`} onClick={() => buySkin(k)} disabled={!has && !can}>
+                    <SubPic skin={k} />
+                    <span className="pd-shop-name">{k.name}</span>
+                    <span className="pd-shop-price">
+                      {on ? "ON" : has ? "USE" : (
+                        <>
+                          <Leaf size={10} /> {k.price}
+                        </>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <button className="pd-btn" style={{ marginTop: 14 }} onClick={() => setShop(false)}>
+              BACK
+            </button>
+          </div>
+        </div>
+      )}
+
       {screen === "intro" && (
         <div className="pd-panel pd-intro">
           <h1 className="pd-title">PINK DIVE</h1>
@@ -1162,6 +1432,14 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
           <button className="pd-btn pd-big" onClick={() => begin(false)}>
             DIVE
           </button>
+          <div className="pd-shop-row">
+            <span className="pd-leaves">
+              <Leaf /> {leaves}
+            </span>
+            <button className="pd-btn pd-shop-btn" onClick={() => setShop(true)}>
+              SUB SHOP
+            </button>
+          </div>
           <div className="pd-tiers">
             {TIERS.map((t) => (
               <span key={t.name} style={{ color: t.color }}>
@@ -1333,7 +1611,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
                 </button>
               </form>
               {nameMsg && <div className="pd-note pd-bad">{nameMsg}</div>}
-              {board && board.ghosts.length > 0 && <div className="pd-board-ghosts">the see-through subs in the sea are today&apos;s other divers</div>}
+              {board && board.ghosts.length > 0 && <div className="pd-board-ghosts">the little ghosts in the sea are today&apos;s other divers, on the line where their dive ended</div>}
             </div>
           )}
 
@@ -1355,7 +1633,21 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
             </div>
           )}
 
+          {earned > 0 && (
+            <div className="pd-earned">
+              +{earned} <Leaf size={14} /> WEED LEAVES · YOU HAVE {leaves} ·{" "}
+              <button className="pd-link" onClick={() => setShop(true)}>
+                SUB SHOP
+              </button>
+            </div>
+          )}
+
           <div className="pd-actions">
+            {!testDive && (
+              <button className="pd-btn pd-insta" onClick={() => void shareStory()}>
+                SHARE TO INSTAGRAM
+              </button>
+            )}
             {!practice && (
               <>
                 <button className="pd-btn pd-big" onClick={copy}>
@@ -1374,7 +1666,11 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
             <button className="pd-btn" onClick={() => begin(true)}>
               {practice && !replay ? "PRACTICE AGAIN" : "PRACTICE"}
             </button>
+            <button className="pd-btn" onClick={() => setShop(true)}>
+              SUB SHOP
+            </button>
           </div>
+          {shareMsg && <div className="pd-better" style={{ textAlign: "center" }}>{shareMsg}</div>}
           {realTotal !== null && !testDive ? (
             <div className="pd-tomorrow">
               <div className="pd-tomorrow-big">✓ TODAY&apos;S DIVE IS DONE</div>
@@ -1463,6 +1759,22 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         .pd-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
         .pd-actions .pd-big { font-size: 11px; padding: 11px 18px; }
         .pd-next { margin-top: 12px; font-size: 7px; color: rgba(255, 255, 255, 0.6); }
+        .pd-shop-row { margin-top: 16px; display: flex; gap: 12px; justify-content: center; align-items: center; }
+        .pd-leaves { font-size: 10px; color: #b4ff8c; }
+        .pd-shop-btn { font-size: 9px; padding: 8px 12px; }
+        .pd-earned { margin: 10px 0 2px; font-size: 8px; color: #b4ff8c; text-align: left; line-height: 2; }
+        .pd-link { font-family: inherit; font-size: 8px; color: #ffd84a; background: none; border: none; text-decoration: underline; cursor: pointer; padding: 0; }
+        .pd-insta { background: linear-gradient(45deg, #f9a43a, #e4405f 45%, #b02cc0); }
+        .pd-shop { width: min(520px, 94vw); }
+        .pd-shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 14px; }
+        .pd-shop-item {
+          display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px; font-family: inherit; color: #fff;
+          background: #2a1438; border: 2px solid rgba(255, 255, 255, 0.35); cursor: pointer; text-shadow: 1px 1px 0 #000;
+        }
+        .pd-shop-item:disabled { opacity: 0.45; cursor: default; }
+        .pd-shop-on { border-color: #ffd84a; background: #4a1c5e; box-shadow: 3px 3px 0 #000; }
+        .pd-shop-name { font-size: 8px; }
+        .pd-shop-price { font-size: 8px; color: #b4ff8c; }
         .pd-tomorrow { margin-top: 14px; padding: 12px 10px; border: 2px dashed #ffd84a; font-size: 8px; line-height: 2; color: #fff; }
         .pd-tomorrow-big { font-size: 11px; color: #ffd84a; }
         .pd-tomorrow-clock { margin-top: 2px; font-size: 13px; color: #9fe8ff; letter-spacing: 1px; }
