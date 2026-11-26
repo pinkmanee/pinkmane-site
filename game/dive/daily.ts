@@ -1,7 +1,7 @@
 // PINK DIVE: which prompts today, and whether an answer counts. Used by the game page AND the server (app/api/dive),
 // so both always agree.
 
-import { PROMPTS, TIERS, type Prompt } from "./prompts";
+import { FIRST_SET, PROMPTS, TIERS, type Prompt } from "./prompts";
 import { MORE } from "./more";
 import { MORE2 } from "./more2";
 import { MORE3 } from "./more3";
@@ -34,37 +34,53 @@ function shuffled<T>(list: T[], seed: number): T[] {
   return out;
 }
 
-// One long running order of every prompt, with the categories taking turns (animals, food, music, earth, film...),
+// One long running order of every prompt, with the categories taking turns (animals, food, music, earth, film, sports, stuff...),
 // so any 7 in a row are a mix. Each day takes the next 7; when the list runs out it starts again, reshuffled.
-function order(round: number): Prompt[] {
-  const cats = Array.from(new Set(PROMPTS.map((p) => p.cat)));
-  const piles = cats.map((c, i) => shuffled(PROMPTS.filter((p) => p.cat === c), 1000 + round * 97 + i));
+function order(list: Prompt[], round: number): Prompt[] {
+  const cats = Array.from(new Set(list.map((p) => p.cat)));
+  const piles = cats.map((c, i) => shuffled(list.filter((p) => p.cat === c), 1000 + round * 97 + i));
   const out: Prompt[] = [];
   for (let k = 0; piles.some((pile) => pile.length > k); k++) for (const pile of shuffled(piles, 5000 + round * 31 + k)) if (pile[k]) out.push(pile[k]);
   return out;
 }
 
-// each new round: the prompts of the last 2 days of the round before go to the end, so nothing comes back the next day
-const rounds: Prompt[][] = [];
-function roundOrder(round: number): Prompt[] {
-  const perRound = Math.floor(PROMPTS.length / PER_DAY);
-  for (let r = rounds.length; r <= round; r++) {
-    let o = order(r);
-    if (r > 0) {
-      const recent = new Set(rounds[r - 1].slice((perRound - 2) * PER_DAY, perRound * PER_DAY).map((p) => p.id));
-      o = [...o.filter((p) => !recent.has(p.id)), ...o.filter((p) => recent.has(p.id))];
-    }
-    rounds.push(o);
-  }
-  return rounds[round];
+// each new round: the prompts of the last 6 days of the round before go to the end, so nothing comes back within a week
+// (`before` = the prompts of the days just before round 0, they go to the end of round 0 the same way)
+function makeRounds(list: Prompt[], before: string[] = []) {
+  const perRound = Math.floor(list.length / PER_DAY);
+  const rounds: Prompt[][] = [];
+  return {
+    perRound,
+    get(round: number): Prompt[] {
+      for (let r = rounds.length; r <= round; r++) {
+        let o = order(list, r);
+        const recent = new Set(r > 0 ? rounds[r - 1].slice(Math.max(0, perRound - 6) * PER_DAY, perRound * PER_DAY).map((p) => p.id) : before);
+        o = [...o.filter((p) => !recent.has(p.id)), ...o.filter((p) => recent.has(p.id))];
+        rounds.push(o);
+      }
+      return rounds[round];
+    },
+  };
 }
+
+// DIVE #1 was played with the first set of prompts only (before prompts-extra.ts), so it stays exactly as it was.
+// From DIVE #2 on every prompt takes part (and nothing from DIVE #1 comes back in the first days).
+const OLD_DIVES = 1;
+const firstSet = makeRounds(PROMPTS.slice(0, FIRST_SET));
+const oldDive = (dive: number) => {
+  const round = Math.floor((dive - 1) / firstSet.perRound);
+  const at = ((dive - 1) % firstSet.perRound) * PER_DAY;
+  return firstSet.get(round).slice(at, at + PER_DAY);
+};
+const allSet = makeRounds(PROMPTS, Array.from({ length: OLD_DIVES }, (_, i) => oldDive(i + 1).map((p) => p.id)).flat());
 
 /** the 7 prompts of a dive (the same for everyone) */
 export function promptsForDive(dive: number): Prompt[] {
-  const perRound = Math.floor(PROMPTS.length / PER_DAY);
-  const round = Math.floor((dive - 1) / perRound);
-  const at = ((dive - 1) % perRound) * PER_DAY;
-  return roundOrder(round).slice(at, at + PER_DAY);
+  if (dive <= OLD_DIVES) return oldDive(dive);
+  const n = dive - OLD_DIVES;
+  const round = Math.floor((n - 1) / allSet.perRound);
+  const at = ((n - 1) % allSet.perRound) * PER_DAY;
+  return allSet.get(round).slice(at, at + PER_DAY);
 }
 
 /** 7 random prompts for PRACTICE (not today's ones) */

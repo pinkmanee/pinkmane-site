@@ -613,7 +613,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     } catch {}
     const these = isPractice ? practicePrompts(today, seen) : today;
     try {
-      const next = [...seen.filter((id) => !these.some((p) => p.id === id)), ...these.map((p) => p.id)].slice(-60);
+      const next = [...seen.filter((id) => !these.some((p) => p.id === id)), ...these.map((p) => p.id)].slice(-500);
       localStorage.setItem(SEEN_KEY, JSON.stringify(next));
     } catch {}
     setPrompts(these);

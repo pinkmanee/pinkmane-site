@@ -15,7 +15,9 @@
 // TO ADD A PROMPT: copy one, change the question and the answers. TO ADD AN ANSWER: put it in the tier that fits.
 // Every day 7 prompts are picked from this list (game/dive/daily.ts), the same for everyone.
 
-export type Cat = "ANIMALS" | "FOOD" | "MUSIC" | "EARTH" | "FILM & CARTOONS";
+import { EXTRA } from "./prompts-extra"; // the second big set of prompts (more questions, fewer repeats)
+
+export type Cat = "ANIMALS" | "FOOD" | "MUSIC" | "EARTH" | "FILM & CARTOONS" | "SPORTS & GAMES" | "STUFF";
 
 export type Prompt = { id: string; cat: Cat; q: string; t: [string, string, string, string, string] };
 
@@ -673,4 +675,9 @@ export const PROMPTS: Prompt[] = [
       "serial experiments lain|lain, texhnolyze, ergo proxy, mononoke, kaiba, the tatami galaxy, ping pong the animation, tekkonkinkreet, angel's egg, belladonna of sadness, mind game, dorohedoro, devilman crybaby, flcl, paranoia agent, boogiepop phantom, haibane renmei, now and then here and there, gankutsuou, mushishi, sonny boy, odd taxi",
     ],
   },
+  // + every prompt from prompts-extra.ts
+  ...EXTRA,
 ];
+
+// how many prompts there were before prompts-extra.ts (DIVE #1 was made from these, see daily.ts)
+export const FIRST_SET = PROMPTS.length - EXTRA.length;
