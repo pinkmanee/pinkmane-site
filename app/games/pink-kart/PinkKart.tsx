@@ -9,7 +9,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { KartGame, TRACKS } from "../../../game/kart/kart";
+import { KartGame, TRACKS, type Difficulty } from "../../../game/kart/kart";
 import GamepadBridge from "../../components/GamepadBridge"; // game controllers: A = gas, B = brake, X = item, START = pause
 import { Session, MAX_RACERS, type View } from "../../../game/kart/online";
 import { cleanCode, cleanMusicLink, cleanRacerName, musicSite } from "../../../game/kart/links";
@@ -227,8 +227,22 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
   };
 
   // ---- the solo race hides the menu; the pause menu's KART MENU row brings it back (game.onMenu)
+  // SOLO DIFFICULTY: remembered on this device
+  const [diff, setDiff] = useState<Difficulty>("MEDIUM");
+  useEffect(() => {
+    try {
+      const d = localStorage.getItem("pinkkart-difficulty");
+      if (d === "EASY" || d === "MEDIUM" || d === "HARD") setDiff(d);
+    } catch {}
+  }, []);
+  const pickDiff = (d: Difficulty) => {
+    setDiff(d);
+    try {
+      localStorage.setItem("pinkkart-difficulty", d);
+    } catch {}
+  };
   const solo = () => {
-    gameRef.current?.startSolo(track);
+    gameRef.current?.startSolo(track, diff);
     setScreen("none");
   };
 
@@ -411,6 +425,14 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
       <>
         {title("PINK KART", local ? "LOCAL TEST MODE" : undefined)}
         {maps(track, pickTrack)}
+        {/* how good the computer racers are (solo races) */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 10 }} aria-label="Difficulty">
+          {(["EASY", "MEDIUM", "HARD"] as Difficulty[]).map((d) => (
+            <span key={d} style={{ display: "grid" }}>
+              {btn(d, () => pickDiff(d), { dim: diff !== d })}
+            </span>
+          ))}
+        </div>
         <div style={{ display: "grid", gap: 10 }}>
           {btn("SOLO RACE", solo, { big: true, icon: "solo" })}
           {btn("CREATE LOBBY", () => (setError(""), setScreen("create")), { big: true, icon: "create" })}

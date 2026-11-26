@@ -52,15 +52,29 @@ type TrackData = {
 };
 type TrackPack = { track: TrackData; ground: Uint32Array; gsize: number; gs: number; types: Uint8Array; mini: HTMLCanvasElement; pal?: Pal; hillGrid?: Float32Array };
 // THE TRACKS: each is trackN.json + trackN-ground.png + trackN-map.png in public/kart/
-export const TRACKS = [
+// (Next fills this in when it builds the site: "development" on your own computer, "production" on pinkmane.site)
+declare const process: { env: { NODE_ENV?: string } };
+const ALL_TRACKS = [
   { id: "track1", name: "NIGHT FIELD", hue: 0, road: "cobble", psy: "candy" },
   { id: "track2", name: "VOID HIGHWAY", hue: -75, road: "neon", psy: "glitter" },
   { id: "track3", name: "HIGH HILLS", hue: 68, greenPlants: true, road: "cobble", psy: "lava" },
   { id: "track4", name: "GHOST SHIP BAY", hue: 0, road: "planks", psy: "ocean" },
-  { id: "track5", name: "808 TEMPLE", hue: 0, road: "tiles", psy: "gold" },
-  { id: "track6", name: "HOTBOX HIGHWAY", hue: 0, road: "cobble", psy: "smoke" },
-  { id: "track7", name: "TATRA TRIP", hue: 0, road: "cobble", psy: "alpine" },
+  { id: "track5", name: "808 TEMPLE", hue: 0, road: "tiles", psy: "gold", wip: true },
+  { id: "track6", name: "HOTBOX HIGHWAY", hue: 0, road: "cobble", psy: "smoke", wip: true },
+  { id: "track7", name: "TATRA TRIP", hue: 0, road: "cobble", psy: "alpine", wip: true },
 ];
+// NOT READY YET: maps with wip: true only show when you run the site on your own computer (npm run dev).
+// On pinkmane.site they're hidden and not even loaded. To make one public, take its "wip: true" out.
+export const TRACKS = ALL_TRACKS.filter((t) => !(t as { wip?: boolean }).wip || process.env.NODE_ENV === "development");
+
+// SOLO DIFFICULTY: how the computer racers drive. speed = their top speed, chase = how much faster they get when
+// you're ahead of them, wait = how much they ease off when they're far ahead of you, items = how soon they use an item.
+export type Difficulty = "EASY" | "MEDIUM" | "HARD";
+const DIFFICULTY: Record<Difficulty, { speed: number; chase: number; wait: number; items: number }> = {
+  EASY: { speed: 0.9, chase: 1.0, wait: 0.85, items: 1.8 },
+  MEDIUM: { speed: 1.0, chase: 1.07, wait: 0.9, items: 1.0 }, // (how it always was)
+  HARD: { speed: 1.06, chase: 1.12, wait: 0.97, items: 0.6 },
+};
 // EACH MAP HAS ITS OWN COLOURS. "hue" turns the colour wheel for that map's ground, sky and haze (in degrees):
 // 0 = the original pink and purple, -75 = cold blue, 68 = sunset orange and red. Change a number to recolour a map.
 // The karts, items, trees and the light-blue boost pads keep their own colours on every map.
@@ -1215,11 +1229,12 @@ export class KartGame {
       }
 
       // ---- speed
-      let top = MAX_SPEED * (k.player ? 1 : k.skill);
+      const df = DIFFICULTY[this.online ? "MEDIUM" : this.difficulty];
+      let top = MAX_SPEED * (k.player ? 1 : k.skill * df.speed);
       if (!k.player && !k.finished) {
         const gap = k.total - this.me.total;
-        if (gap > 55) top *= 0.9;
-        if (gap < -55) top *= 1.07;
+        if (gap > 55) top *= df.wait;
+        if (gap < -55) top *= df.chase;
         if (k.blind > 0) top *= 0.8;
       }
       if (type === 0 || type === 6) top *= 0.42; // off the road (6 = painted ground like the vinyl record: slow too, so it's no shortcut)
@@ -1316,7 +1331,7 @@ export class KartGame {
           const first = this.rank(k) === 1;
           const pool: ItemName[] = first ? ["vinyl", "wall", "bolt", "bomb", "vinyl"] : ["bolt", "bomb", "vinyl", "mic", "bass", "mute", "wall", "bolt", "mic"];
           k.item = pool[Math.floor(Math.random() * pool.length)];
-          k.useIn = 1 + Math.random() * 3.5;
+          k.useIn = (1 + Math.random() * 3.5) * DIFFICULTY[this.online ? "MEDIUM" : this.difficulty].items;
         }
       } else if (!k.item && !k.finished) {
         for (const b of this.boxes)
@@ -1577,7 +1592,9 @@ export class KartGame {
 
   // ------------------------------------------------------------ the page's menu buttons
   /** SOLO: a race against 5 bots */
-  startSolo(track = this.trackNo) {
+  difficulty: Difficulty = "MEDIUM"; // solo races only (online races are always MEDIUM)
+  startSolo(track = this.trackNo, difficulty?: Difficulty) {
+    if (difficulty) this.difficulty = difficulty;
     if (!this.ready) {
       this.pendingSolo = track; // still loading: the race starts the moment it's done
       return;

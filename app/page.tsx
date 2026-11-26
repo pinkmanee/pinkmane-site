@@ -338,7 +338,7 @@ const PICKER_GAMES: { name: string; id: GameId; preview: string; blurb: string; 
     name: "Pink Kart",
     id: "kart",
     preview: "/previews/pinkkart.webp",
-    blurb: "NEW · ONLINE. PINKMANE's own racing game: PINKMANE in a 3D kart, 7 psychedelic tracks (NIGHT FIELD, VOID HIGHWAY, HIGH HILLS where the karts grow wings, GHOST SHIP BAY with slapping tentacles, 808 TEMPLE where the speakers bounce to the beat, HOTBOX HIGHWAY through the smoke, and TATRA TRIP over the mountains). Race solo, or make a lobby code and race your friends.",
+    blurb: "NEW · ONLINE. PINKMANE's own racing game: PINKMANE in a 3D kart, 4 psychedelic tracks (NIGHT FIELD, VOID HIGHWAY, HIGH HILLS where the karts grow wings, and GHOST SHIP BAY with slapping tentacles), easy, medium or hard. Race solo, or make a lobby code and race your friends.",
     how: "arrows = drive · space = use your item · hold gas when 2 shows = rocket start",
     psp: true,
     link: "/games/pink-kart",
