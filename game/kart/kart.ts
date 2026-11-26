@@ -39,6 +39,7 @@ type TrackData = {
   beat?: { bpm: number; at: number }; // the map song's tempo and where its first beat is (s): speakers and equalizers move on it
   jumpText?: string; // what it says on a jump (default: JUMP!)
   tunnel?: number[]; // for every centre point: 1 = inside a building (808 TEMPLE): the sky turns into its walls
+  slaps?: [number, number][]; // SLAPPING TENTACLES (GHOST SHIP BAY): [centre point, which side it comes from: 1 / -1]
   outside?: number; // what's past the edge of the map (3 = void)
   alt?: number[]; // the flying part: how high the karts fly at every centre point (0 = on the ground)
   peaks?: [number, number][]; // mountain tops to dodge while flying
@@ -164,7 +165,40 @@ const CARS: Record<string, { k: number }> = {
   mane: { k: 0.25 }, // with the camera 65 behind, your own kart is drawn at exactly its drawn size
 };
 const KART_ANGLES = 16; // the 3D kart is drawn from this many angles all the way around
-const KART_DIR = -1; // which way round the 16 views go (1 or -1)
+// the slapping tentacles' rhythm (seconds): waiting, then rearing up (warning) until SLAP_DOWN, lying across the road, sliding back
+const SLAP_CYCLE = 3.4, SLAP_RISE = 1.2, SLAP_DOWN = 2.0, SLAP_BACK = 2.7;
+const KART_DIR = -1;
+function makeSlapSeg() {
+  const c = document.createElement("canvas");
+  c.width = 18;
+  c.height = 12;
+  const x = c.getContext("2d")!;
+  for (let y = 0; y < 12; y++)
+    for (let i = 0; i < 18; i++) {
+      const dx = (i - 8.5) / 9, dy = (y - 6.5) / 6;
+      const r = dx * dx + dy * dy;
+      if (r > 1) continue;
+      x.fillStyle = r > 0.72 ? "#1e0628" : dy < -0.35 ? "#ff8ce6" : "#dc3cbe";
+      x.fillRect(i, y, 1, 1);
+    }
+  x.fillStyle = "#ffd2f2"; // the suckers
+  x.fillRect(5, 8, 2, 2);
+  x.fillRect(11, 8, 2, 2);
+  return c;
+}
+function makeSlapShade() {
+  const c = document.createElement("canvas");
+  c.width = 36;
+  c.height = 6;
+  const x = c.getContext("2d")!;
+  for (const [f, a] of [[0, 0.4], [1, 0.75]]) {
+    x.fillStyle = `rgba(4,2,20,${a})`;
+    x.beginPath();
+    x.ellipse(f * 18 + 9, 3, 9, 3, 0, 0, Math.PI * 2);
+    x.fill();
+  }
+  return c;
+} // which way round the 16 views go (1 or -1)
 // THE GRASS EDGE: how tall the grass along the road stands (in world units; a kart is about 19 tall), and its colours (0xAABBGGRR)
 const GRASS_TALL = 4.5;
 const GRASS_DARK = 0xff180612, GRASS_MID = 0xff96288c, GRASS_TIP = 0xffc846ff, GRASS_BANK = 0xff10040c;
@@ -298,6 +332,9 @@ export class KartGame {
   private acc = 0;
   private dead = false;
   private ready = false;
+  // the slapping tentacles' pieces: one round piece of tentacle lying on the road, and its shadow (faint / dark)
+  private slapSeg = makeSlapSeg();
+  private slapShade = makeSlapShade();
   private pendingSolo: number | null = null; // SOLO RACE was pressed while the maps were still loading: start it when they are
   private loadError = "";
 
@@ -1345,7 +1382,45 @@ export class KartGame {
     this.online?.sendGone(t.id);
   }
 
+  // ------------------------------------------------------------ THE SLAPPING TENTACLES (GHOST SHIP BAY)
+  // Each one waits beside the road, rears up (its shadow darkens across the road: the warning), SLAMS down across the
+  // road, then slides back into the water. Caught under it = you spin out. Jumping over it or being past it = safe.
+  // Every tentacle is on its own beat of the same rhythm, so they don't all slap at once.
+  private slapPhase(n: number) {
+    const clock = this.state === "race" ? this.stateT : performance.now() / 1000;
+    return (((clock + n * 0.9) % SLAP_CYCLE) + SLAP_CYCLE) % SLAP_CYCLE;
+  }
+  private slapLine(i: number, side: number) {
+    const C = this.track.center, N = C.length;
+    const a = C[(i + N - 1) % N], b = C[(i + 1) % N], c = C[i];
+    const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    const nx = -(b[1] - a[1]) / l, ny = (b[0] - a[0]) / l;
+    const hw = this.track.halfw[i];
+    // from out in the water on its side, across the whole road
+    return { ex: c[0] + nx * side * (hw + 18), ey: c[1] + ny * side * (hw + 18), fx: c[0] - nx * side * (hw + 6), fy: c[1] - ny * side * (hw + 6) };
+  }
+  private stepSlaps() {
+    const slaps = this.track.slaps;
+    if (!slaps || this.state !== "race") return;
+    slaps.forEach(([i, side], n) => {
+      const p = this.slapPhase(n);
+      if (p < SLAP_DOWN || p > SLAP_DOWN + 0.4) return; // it only hurts right after it lands
+      const { ex, ey, fx, fy } = this.slapLine(i, side);
+      const lx = fx - ex, ly = fy - ey, ll = lx * lx + ly * ly;
+      for (const k of this.karts) {
+        if (k.fall > 0 || k.air > 0 || k.alt > 8 || k.spin > 0) continue;
+        const t = Math.max(0, Math.min(1, ((k.x - ex) * lx + (k.y - ey) * ly) / ll));
+        if (Math.hypot(k.x - (ex + lx * t), k.y - (ey + ly * t)) < 13) {
+          const before = k.spin;
+          this.hit(k, 0.8);
+          if (k.player && k.spin > before) this.say("SLAPPED!", 1);
+        }
+      }
+    });
+  }
+
   private stepThings(dt: number) {
+    this.stepSlaps();
     const C = this.track.center;
     const N = C.length;
     for (const t of this.things) {
@@ -2198,6 +2273,23 @@ export class KartGame {
         list.push({ img: this.img["eq"], sx: lvl * 32, sw: 32, sh: 64, x: d[0], y: d[1], k: d[3], lift: 0, flip: d[1] % 2 === 0, shadow: true });
       } else if (d[2] === "tentacle") list.push({ img: this.img["tentacle"], sx: (Math.floor(now / 380 + d[1]) % 2) * 24, sw: 24, sh: 64, x: d[0], y: d[1], k: d[3], lift: -6, flip: d[1] % 2 === 0, shadow: false });
     }
+    // the slapping tentacles
+    (this.track.slaps ?? []).forEach(([i, side], n) => {
+      const p = this.slapPhase(n);
+      const { ex, ey, fx, fy } = this.slapLine(i, side);
+      const wave = (Math.floor(now / 380 + n) % 2) * 24;
+      if (p < SLAP_RISE) list.push({ img: this.img["tentacle"], sx: wave, sw: 24, sh: 64, x: ex, y: ey, k: 2.1, lift: -6, flip: side < 0, shadow: false });
+      else if (p < SLAP_DOWN) {
+        // rearing up, taller and taller, while its shadow darkens across the road
+        const f = (p - SLAP_RISE) / (SLAP_DOWN - SLAP_RISE);
+        list.push({ img: this.img["tentacle"], sx: wave, sw: 24, sh: 64, x: ex, y: ey, k: 2.1 + f * 1.3, lift: -6 + f * 8, flip: side < 0, shadow: false });
+        for (let s = 0; s <= 1.001; s += 0.12) list.push({ img: this.slapShade, sx: f > 0.55 ? 18 : 0, sw: 18, sh: 6, x: ex + (fx - ex) * s, y: ey + (fy - ey) * s, k: 1.5, lift: -2, flip: false, shadow: false });
+      } else {
+        // down across the road, then sliding back into the water from the far end
+        const reach = p < SLAP_BACK ? 1 : 1 - (p - SLAP_BACK) / (SLAP_CYCLE - SLAP_BACK);
+        for (let s = 0; s <= reach + 0.001; s += 0.08) list.push({ img: this.slapSeg, sx: 0, sw: 18, sh: 12, x: ex + (fx - ex) * s, y: ey + (fy - ey) * s, k: 1.55 - s * 0.45, lift: -1, flip: false, shadow: false });
+      }
+    });
     // the flying part: mountain tops standing in the hills, and rings hanging in the air
     for (const pk of this.track.peaks ?? []) list.push({ img: this.img["peak"], sx: 0, sw: 64, sh: 100, x: pk[0], y: pk[1], k: 1.05, lift: 0, flip: false, shadow: false });
     for (const rg of this.track.rings ?? []) list.push({ img: this.img["ring"], sx: (Math.floor(now / 200) % 2) * 48, sw: 48, sh: 48, x: rg[0], y: rg[1], k: 0.9, lift: rg[2] - 12, flip: false, shadow: false });
