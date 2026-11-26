@@ -8,7 +8,7 @@
 //   - 808 TEMPLE ("gold"): black marble tiles with gold seams for the road (tilePixel)
 //   - maps over water (GHOST SHIP BAY): the animated sea (waterPixel) and wooden planks for the road (plankPixel)
 
-export type PsyTheme = "candy" | "glitter" | "lava" | "ocean" | "gold" | "smoke";
+export type PsyTheme = "candy" | "glitter" | "lava" | "ocean" | "gold" | "smoke" | "alpine";
 type RGB = [number, number, number];
 
 // ---------------------------------------------------------------- colours of each theme (change them here)
@@ -75,6 +75,16 @@ const THEMES: Record<PsyTheme, {
     skyline: [40, 28, 54], windows: [190, 255, 200], moon: [240, 236, 255],
     fog: [190, 160, 214],
     grass: [[30, 24, 40], [110, 200, 140], [200, 255, 200], [20, 16, 26]],
+  },
+  alpine: {
+    sky: [[20, 30, 70], [60, 90, 160], [170, 150, 220], [255, 190, 220]],
+    swirl: [[180, 230, 255], [255, 150, 220], [150, 255, 220], [200, 170, 255], [255, 255, 255]],
+    field: [[188, 194, 226], [228, 232, 248], [160, 170, 214], [150, 206, 226], [214, 186, 232], [180, 186, 220]],
+    sparkle: [255, 255, 255],
+    stones: [108, 102, 132], mortar: [30, 26, 46], glint: [200, 240, 255],
+    skyline: [40, 50, 100], windows: [255, 230, 140], moon: [255, 250, 230],
+    fog: [200, 210, 240],
+    grass: [[18, 40, 40], [40, 120, 90], [160, 240, 200], [12, 26, 30]],
   },
   ocean: {
     sky: [[4, 8, 30], [14, 36, 86], [70, 100, 170], [255, 150, 200]],

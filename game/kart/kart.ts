@@ -14,6 +14,7 @@ const MUSIC: Record<string, string> = {
   track3: "/music/beat-5.mp3", // HIGH HILLS
   track4: "/music/06.mp3", // GHOST SHIP BAY
   track6: "/music/09.mp3", // HOTBOX HIGHWAY
+  track7: "/music/10.mp3", // TATRA TRIP
   track5: "/music/05.mp3", // 808 TEMPLE (its speakers bounce on this song's beat: "beat" in track5.json)
 };
 
@@ -58,6 +59,7 @@ export const TRACKS = [
   { id: "track4", name: "GHOST SHIP BAY", hue: 0, road: "planks", psy: "ocean" },
   { id: "track5", name: "808 TEMPLE", hue: 0, road: "tiles", psy: "gold" },
   { id: "track6", name: "HOTBOX HIGHWAY", hue: 0, road: "cobble", psy: "smoke" },
+  { id: "track7", name: "TATRA TRIP", hue: 0, road: "cobble", psy: "alpine" },
 ];
 // EACH MAP HAS ITS OWN COLOURS. "hue" turns the colour wheel for that map's ground, sky and haze (in degrees):
 // 0 = the original pink and purple, -75 = cold blue, 68 = sunset orange and red. Change a number to recolour a map.
@@ -310,7 +312,7 @@ type Thing = {
   idx: number;
   id: string; // online: the same item has the same id on every screen
 };
-type Sprite = { img: Img; sx: number; sw: number; sh: number; x: number; y: number; k: number; lift: number; flip: boolean; shadow: boolean; squash?: number; kart?: boolean; rot?: number };
+type Sprite = { far?: boolean; img: Img; sx: number; sw: number; sh: number; x: number; y: number; k: number; lift: number; flip: boolean; shadow: boolean; squash?: number; kart?: boolean; rot?: number };
 
 const wrapAngle = (a: number) => {
   while (a > Math.PI) a -= Math.PI * 2;
@@ -529,7 +531,7 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", "smokering", "puff", ...ITEMS.map((i) => `item-${i}`)];
+    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", "smokering", "puff", "alp", "cave", "crystal", ...ITEMS.map((i) => `item-${i}`)];
     const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n)), this.loadTrip()]);
     this.packs = packs;
     for (const it of ITEMS) (this.img[`item-${it}`] as { pkRes?: number }).pkRes = this.img[`item-${it}`].width / 48;
@@ -2466,6 +2468,9 @@ export class KartGame {
       if (d[2] === "ship") list.push({ img: this.img["ghostship"], sx: 0, sw: 72, sh: 46, x: d[0], y: d[1], k: d[3], lift: -5 + Math.sin(now / 700 + d[0]) * 3, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "speaker") list.push({ img: this.img["speaker"], sx: beat < 0.2 ? 80 : 0, sw: 80, sh: 112, x: d[0], y: d[1], k: d[3] / 2, lift: 0, flip: false, shadow: true });
       // (808 TEMPLE's speakers, towers, gates and pillars are 3D renders at double detail: public/kart/speaker.png etc.)
+      else if (d[2] === "alp") list.push({ far: true, img: this.img["alp"], sx: 0, sw: 240, sh: 200, x: d[0], y: d[1], k: d[3] / 2.6, lift: -10, flip: d[0] % 2 === 0, shadow: false });
+      else if (d[2] === "cave") list.push({ img: this.img["cave"], sx: beat < 0.2 ? 240 : 0, sw: 240, sh: 192, x: d[0], y: d[1], k: d[3] * 0.7, lift: 0, flip: false, shadow: false });
+      else if (d[2] === "crystal") list.push({ img: this.img["crystal"], sx: Math.floor(now / 400 + d[0]) % 3 === 0 ? 60 : 0, sw: 60, sh: 180, x: d[0], y: d[1], k: d[3] * 0.28, lift: 0, flip: d[1] % 2 === 0, shadow: false });
       else if (d[2] === "puff") list.push({ img: this.img["puff"], sx: (Math.floor(now / 900 + d[0]) % 2) * 96, sw: 96, sh: 80, x: d[0], y: d[1], k: d[3] / 2, lift: 4 + Math.sin(now / 1100 + d[1]) * 4, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "gate") list.push({ img: this.img["gate"], sx: beat < 0.2 ? 240 : 0, sw: 240, sh: 192, x: d[0], y: d[1], k: d[3] * 0.7, lift: 0, flip: false, shadow: false });
       else if (d[2] === "pillar") list.push({ img: this.img["pillar"], sx: beat < 0.2 ? 60 : 0, sw: 60, sh: 180, x: d[0], y: d[1], k: d[3] * 0.38, lift: 0, flip: false, shadow: false });
@@ -2512,7 +2517,7 @@ export class KartGame {
     for (const s of list) {
       const ex = s.x - camX, ey = s.y - camY;
       const z = ex * dx + ey * dy;
-      if (z < 12 || z > 1500) continue;
+      if (z < 12 || z > (s.far ? 3400 : 1500)) continue; // (mountains can be seen from much further away)
       if (!s.kart && z < 58) continue; // things right in front of the camera (behind your own kart) would fill the screen
       const side = ex * rx + ey * ry;
       const sc = FOCAL / z;
