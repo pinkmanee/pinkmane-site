@@ -194,7 +194,8 @@ const WATER_RAMP = [[10, 16, 44], [16, 30, 74], [22, 50, 112], [30, 80, 150], [4
 const SMOKE_RAMP = [[40, 36, 52], [62, 58, 76], [88, 84, 104], [118, 114, 134], [150, 146, 166], [186, 182, 200], [218, 214, 230], [244, 242, 250]].map((c) => abgr(c as RGB));
 let seaH = 0;
 export function waterPixel(x: number, y: number, t: number, smoke = false): number {
-  const n = noise(x / 150 + t * 0.03, y / 150);
+  // a slow wobble that bends the waves (cheap sines instead of noise: this runs for every sea pixel, every frame)
+  const n = 0.5 + 0.22 * Math.sin(x * 0.0071 + t * 0.19 + Math.sin(y * 0.0053) * 2) + 0.22 * Math.sin(y * 0.0083 - t * 0.13 + Math.sin(x * 0.0047) * 2);
   // the big swell and a smaller cross swell (phase = how far along the wave this spot is)
   const a = (x * 0.55 + y * 0.83) / 21 - t * 1.6 + n * 5;
   const b = (x * 0.92 - y * 0.38) / 11 - t * 2.3 + n * 2.6;
@@ -203,8 +204,8 @@ export function waterPixel(x: number, y: number, t: number, smoke = false): numb
   const ca = sa > 0 ? sa * sa * (2 - sa) : sa * 0.7;
   let h = 0.44 + 0.42 * ca + 0.1 * sb;
   // smoke: soft puffs riding on the waves
-  if (smoke) h += (noise(x / 38 - t * 0.3, y / 38 + t * 0.2) - 0.5) * 0.22;
-  else h += (noise(x / 14 - t * 0.5, y / 14) - 0.5) * 0.06; // little ripples
+  if (smoke) h += Math.sin(x * 0.041 - t * 0.5 + n * 3) * Math.sin(y * 0.037 + t * 0.4) * 0.12; // soft puffs
+  else h += Math.sin(x * 0.11 - t * 1.5 + y * 0.03) * Math.sin(y * 0.13 + t) * 0.03; // little ripples
   h = h < 0 ? 0 : h > 1 ? 1 : h;
   // the side of a wave facing the light is bright (the slope of the swells, worked out from the sines)
   const lit = Math.cos(a) * (sa > 0 ? 1.4 : 0.8) * 0.9 + Math.cos(b) * 0.3;

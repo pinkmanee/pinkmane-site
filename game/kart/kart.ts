@@ -44,6 +44,8 @@ type TrackData = {
   tunnel?: number[]; // for every centre point: 1 = inside a building (808 TEMPLE): the sky turns into its walls
   fog?: [number, number]; // how thick the haze is: [where it starts, how far until it's full] (default [500, 2600])
   smokeRings?: [number, number][]; // HOTBOX HIGHWAY: smoke rings floating over the road; drive through one = a boost
+  terrain?: boolean; // A REAL MOUNTAIN (TATRA TRIP): the land has its own height map (trackN-height.png) and is drawn by the terrain renderer
+  tgrid?: number; // how many squares across that height map is
   hill?: number[]; // HILLS: how high the road is at every centre point (0 = flat; the land around follows, fading out)
   slaps?: [number, number][]; // SLAPPING TENTACLES (SMOKE OCEAN): [centre point, which side it comes from: 1 / -1]
   outside?: number; // what's past the edge of the map (3 = void)
@@ -184,6 +186,9 @@ const CAM_BACK = 65; // how far the camera sits behind your kart
 const PITCH_UP = 60; // HILLS: how far the camera may tilt down over a crest (pixels the horizon moves up)
 const MAX_ROWS = BH - HORIZON + PITCH_UP; // the most ground rows there can be on screen
 const HG = 256; // HILLS: the height map is this many squares across
+const OCC_LEVELS = 48; // THE TERRAIN RENDERER: distances at which it remembers how high the land reaches (for hiding things behind it)
+const OCC_Z = Array.from({ length: OCC_LEVELS }, (_, i) => 6 * Math.pow(1.16, i));
+const TERRAIN_FAR = 6500; // how far away a mountain can still be seen
 const LAPS = 3;
 // KARTS: every kart is 3 pictures (back, side, front) in public/kart/kart-<kart>-<view>.png, each with 3 frames side by side:
 // no flame, flame, flame (the flames only show while boosting or revving at the start).
@@ -380,6 +385,12 @@ export class KartGame {
   private seedMap = new Uint8Array(BW * MAX_ROWS);
   // HILLS: the height map of this map (null = flat), and for every screen row: how far away its ground is, and how high
   private hillGrid: Float32Array | null = null;
+  private hgN = HG; // how many squares across the height map is (HG, or a mountain map's own size)
+  // THE TERRAIN RENDERER's own full-screen picture, and for every screen column how far up the land reaches at each distance
+  private tframe = typeof document !== "undefined" ? document.createElement("canvas").getContext("2d")!.createImageData(BW, BH) : null;
+  private tframe32 = this.tframe ? new Uint32Array(this.tframe.data.buffer) : new Uint32Array(0);
+  private tcanvas: HTMLCanvasElement | null = null;
+  private occ = new Int16Array(BW * OCC_LEVELS);
   private rowZ = new Float32Array(MAX_ROWS);
   private rowH = new Float32Array(MAX_ROWS);
   private camG = 0; // the ground height under the camera (smoothed)
@@ -388,7 +399,9 @@ export class KartGame {
   private types!: Uint8Array;
   private img: Record<string, HTMLImageElement> = {};
   private kartSkins: Record<string, HTMLCanvasElement>[] = [];
-  private seaHt = new Uint8Array(0); // SMOKE OCEAN: how high the smoke stands at each pixel of the ground picture
+  private seaHt = new Uint8Array(0);
+  private seaCol = new Uint32Array(0); // SMOKE OCEAN: each sea pixel's own colour (the waves are drawn from it)
+  private seaTop = new Int16Array(BW); // SMOKE OCEAN: per column, how high the nearer waves already reach // SMOKE OCEAN: how high the smoke stands at each pixel of the ground picture
   private mini!: HTMLCanvasElement;
   private pal!: Pal;
   private boom!: HTMLCanvasElement;
@@ -552,7 +565,7 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", "smokering", "puff", "alp", "cave", "crystal", ...ITEMS.map((i) => `item-${i}`)];
+    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", "smokering", "puff", "alp", "cave", "crystal", "pine", ...ITEMS.map((i) => `item-${i}`)];
     const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n)), this.loadTrip()]);
     this.packs = packs;
     for (const it of ITEMS) (this.img[`item-${it}`] as { pkRes?: number }).pkRes = this.img[`item-${it}`].width / 48;
@@ -865,6 +878,20 @@ export class KartGame {
   private async loadTrack(id: string): Promise<TrackPack> {
     const [data] = await Promise.all([fetch(`${this.base}${id}.json`).then((r) => r.json()), this.loadImg(`${id}-ground`), this.loadImg(`${id}-map`)]);
     const track = data as TrackData;
+    // A REAL MOUNTAIN: its height map is a picture too (16 bits in red + green: height = (r * 256 + g) / 40 - 100)
+    let terrainGrid: Float32Array | undefined;
+    if (track.terrain && track.tgrid) {
+      await this.loadImg(`${id}-height`);
+      const TGN = track.tgrid;
+      const hc = document.createElement("canvas");
+      hc.width = TGN;
+      hc.height = TGN;
+      const hx = hc.getContext("2d", { willReadFrequently: true })!;
+      hx.drawImage(this.img[`${id}-height`], 0, 0);
+      const hd = hx.getImageData(0, 0, TGN, TGN).data;
+      terrainGrid = new Float32Array(TGN * TGN);
+      for (let i = 0; i < terrainGrid.length; i++) terrainGrid[i] = (hd[i * 4] * 256 + hd[i * 4 + 1]) / 40 - 100;
+    }
     const S = track.size;
     // the ground picture as raw pixels
     const gimg = this.img[`${id}-ground`];
@@ -914,7 +941,7 @@ export class KartGame {
           const t = types[row + Math.min(TH - 1, (x * k) | 0)];
           if (t === 2) continue; // boost pads stay light blue everywhere
           const o = y * GZ + x;
-          if (psy && t === 0) {
+          if (psy && t === 0 && !track.terrain) {
             ground[o] = fieldPixel(psy, x * wk, y * wk); // the glowing marble beside the road
             continue;
           }
@@ -929,7 +956,7 @@ export class KartGame {
         }
       }
     }
-    return { track, ground, gsize: GZ, gs: GZ / S, types, mini };
+    return { track, ground, gsize: GZ, gs: GZ / S, types, mini, hillGrid: terrainGrid };
   }
 
   /** the sky, haze and edge colours of one map, turned to that map's hue */
@@ -1006,7 +1033,8 @@ export class KartGame {
     const p = this.packs[clamp(Math.floor(i) || 0, 0, this.packs.length - 1)];
     this.trackNo = this.packs.indexOf(p);
     this.track = p.track;
-    this.hillGrid = p.track.hill ? (p.hillGrid ??= this.makeHillGrid(p.track)) : null;
+    this.hillGrid = p.track.terrain ? p.hillGrid ?? null : p.track.hill ? (p.hillGrid ??= this.makeHillGrid(p.track)) : null;
+    this.hgN = p.track.terrain ? p.track.tgrid ?? HG : HG;
     this.camG = 0;
     this.pitch = 0;
     this.slope = 0;
@@ -2135,12 +2163,87 @@ export class KartGame {
   private groundH(x: number, y: number) {
     const g = this.hillGrid;
     if (!g) return 0;
-    const cell = this.track.size / HG;
-    const fx = x / cell - 0.5, fy = y / cell - 0.5;
+    const n = this.hgN, cell = this.track.size / n;
+    let fx = x / cell - 0.5, fy = y / cell - 0.5;
+    if (this.track.terrain) {
+      // a mountain map carries on past its edge (the edge squares repeat), so the far peaks don't drop away
+      fx = clamp(fx, 0, n - 1.001);
+      fy = clamp(fy, 0, n - 1.001);
+    }
     const ix = Math.floor(fx), iy = Math.floor(fy);
-    if (ix < 0 || iy < 0 || ix >= HG - 1 || iy >= HG - 1) return 0;
-    const ax = fx - ix, ay = fy - iy, o = iy * HG + ix;
-    return (g[o] * (1 - ax) + g[o + 1] * ax) * (1 - ay) + (g[o + HG] * (1 - ax) + g[o + HG + 1] * ax) * ay;
+    if (ix < 0 || iy < 0 || ix >= n - 1 || iy >= n - 1) return 0;
+    const ax = fx - ix, ay = fy - iy, o = iy * n + ix;
+    return (g[o] * (1 - ax) + g[o + 1] * ax) * (1 - ay) + (g[o + n] * (1 - ax) + g[o + n + 1] * ax) * ay;
+  }
+
+  // ------------------------------------------------------------ THE TERRAIN RENDERER (A REAL MOUNTAIN: TATRA TRIP)
+  // For every column of the screen, walk away from the camera along that column's line of sight. At each step look up
+  // how high the land is there, work out where that lands on screen, and if it's higher up the screen than anything
+  // nearer, paint the column up to it in that spot's colour. So slopes rise, peaks stand up into the sky and a ridge
+  // hides whatever is behind it, just like a real mountain. Far away it all fades into the haze.
+  private drawTerrain(camX: number, camY: number, camZ: number, dx: number, dy: number, rx: number, ry: number, hz: number) {
+    const g = this.hillGrid;
+    if (!g || !this.tframe) return;
+    const out = this.tframe32;
+    out.fill(0);
+    const n = this.hgN, cell = this.track.size / n, inv = 1 / cell, top = n - 1.001;
+    const G = this.ground, S = this.gsize, gs = this.gs;
+    const fog = this.pal.fog;
+    const [fogAt, fogLen] = this.track.fog ?? [900, 4200];
+    const occ = this.occ;
+    for (let x = 0; x < BW; x++) {
+      const k = (x - BW / 2) / FOCAL;
+      const vx = dx + rx * k, vy = dy + ry * k;
+      let ybuf = BH, lv = 0, z = 4, zp = 4, syp = 1e6, hp = -1e6;
+      while (z < TERRAIN_FAR && ybuf > 0) {
+        const wx = camX + vx * z, wy = camY + vy * z;
+        // the height here (blended between the 4 nearest squares)
+        let fx = wx * inv - 0.5, fy = wy * inv - 0.5;
+        fx = fx < 0 ? 0 : fx > top ? top : fx;
+        fy = fy < 0 ? 0 : fy > top ? top : fy;
+        const ix = fx | 0, iy = fy | 0, ax = fx - ix, ay = fy - iy, o = iy * n + ix;
+        const h = (g[o] * (1 - ax) + g[o + 1] * ax) * (1 - ay) + (g[o + n] * (1 - ax) + g[o + n + 1] * ax) * ay;
+        const sy = hz + ((camZ - h) * FOCAL) / z;
+        const yi = sy < 0 ? 0 : sy | 0;
+        if (yi < ybuf) {
+          // every screen row between this step and the one before gets its own spot of ground (so flat ground near you
+          // keeps its detail); a face that rises steeply is a little darker (so cliffs read as cliffs)
+          const span = syp - sy, steep = h - hp > (z - zp) * 0.9;
+          for (let y = yi; y < ybuf; y++) {
+            let tt = span > 0.01 ? (y + 0.5 - sy) / span : 0;
+            tt = tt < 0 ? 0 : tt > 1 ? 1 : tt;
+            const zr = z + (zp - z) * tt;
+            let gx = ((camX + vx * zr) * gs) | 0, gy = ((camY + vy * zr) * gs) | 0;
+            gx = gx < 0 ? 0 : gx >= S ? S - 1 : gx;
+            gy = gy < 0 ? 0 : gy >= S ? S - 1 : gy;
+            let c = G[gy * S + gx];
+            const m = steep && y > yi ? 205 : 256;
+            let f256 = 0;
+            if (zr > fogAt) f256 = (Math.min(0.82, (zr - fogAt) / fogLen) * 256) | 0;
+            if (m !== 256 || f256) {
+              const i256 = 256 - f256;
+              const cr = (((c & 255) * m) >> 8) * i256 + fog[0] * f256, cg = ((((c >> 8) & 255) * m) >> 8) * i256 + fog[1] * f256, cb = ((((c >> 16) & 255) * m) >> 8) * i256 + fog[2] * f256;
+              c = 0xff000000 | ((cb >> 8) << 16) | ((cg >> 8) << 8) | (cr >> 8);
+            }
+            out[y * BW + x] = c;
+          }
+          ybuf = yi;
+        }
+        zp = z;
+        syp = sy;
+        hp = h;
+        while (lv < OCC_LEVELS && OCC_Z[lv] <= z) occ[x * OCC_LEVELS + lv++] = ybuf;
+        z += z < 120 ? 1.5 : z * 0.0125;
+      }
+      while (lv < OCC_LEVELS) occ[x * OCC_LEVELS + lv++] = ybuf;
+    }
+    if (!this.tcanvas) {
+      this.tcanvas = document.createElement("canvas");
+      this.tcanvas.width = BW;
+      this.tcanvas.height = BH;
+    }
+    this.tcanvas.getContext("2d")!.putImageData(this.tframe, 0, 0);
+    this.bctx.drawImage(this.tcanvas, 0, 0);
   }
 
   private drawWorld() {
@@ -2229,6 +2332,8 @@ export class KartGame {
     }
 
     // ---- ground
+    const terrain = !!this.track.terrain;
+    if (terrain) this.drawTerrain(camX, camY, camZ, dx, dy, rx, ry, hz);
     const S = this.gsize;
     const gs = this.gs;
     const out = this.frame32;
@@ -2271,8 +2376,11 @@ export class KartGame {
     if (water && this.seaHt.length !== out.length) this.seaHt = new Uint8Array(out.length);
     const seaHt = this.seaHt;
     if (water) seaHt.fill(0);
+    let seaLast = -2, seaC = 0;
+    if (water && this.seaCol.length !== out.length) this.seaCol = new Uint32Array(out.length);
+    const seaCol = this.seaCol;
     const [fogAt, fogLen] = this.track.fog ?? [500, 2600]; // (HOTBOX HIGHWAY: thick smoke, so the haze starts close)
-    for (let r = 0; r < rows; r++) {
+    for (let r = 0; r < (terrain ? 0 : rows); r++) {
       const z = rowZ[r];
       const stepX = (rx * z) / FOCAL, stepY = (ry * z) / FOCAL;
       let wx = camX + dx * z - stepX * (BW / 2), wy = camY + dy * z - stepY * (BW / 2);
@@ -2294,9 +2402,26 @@ export class KartGame {
           if (water) {
             // the sea: moving waves, fading into the haze far away
             // west: water, east: smoke (mixed pixel by pixel over a wide band, so the change is soft)
-            const sm = seaSplit ? (wx - seaSplit) / 420 + 0.5 : 1;
-            c = waterPixel(wx, wy, seaT, sm >= 1 || (sm > 0 && ((((wx | 0) * 73856093) ^ ((wy | 0) * 19349663)) & 1023) < sm * 1024));
-            seaHt[o] = (seaHeight() * 255) | 0;
+            // (worked out on every other pixel only: the one in between copies its neighbour, half the work, same look)
+            if (x & 1 && seaLast === o - 1) {
+              c = seaC;
+              seaHt[o] = seaHt[o - 1];
+            } else if (r & 1 && r > 0 && mask[o - BW] === 2 && seaHt[o - BW]) {
+              // (and every other row copies the row above, haze and all: a quarter of the work in all)
+              out[o] = seaCol[o] = seaCol[o - BW];
+              seaHt[o] = seaHt[o - BW];
+              mask[o] = field;
+              seed[o] = 0;
+              seaLast = -2;
+              wx += stepX;
+              wy += stepY;
+              continue;
+            } else {
+              const sm = seaSplit ? (wx - seaSplit) / 420 + 0.5 : 1;
+              c = seaC = waterPixel(wx, wy, seaT, sm >= 1 || (sm > 0 && ((((wx | 0) * 73856093) ^ ((wy | 0) * 19349663)) & 1023) < sm * 1024));
+              seaHt[o] = (seaHeight() * 255) | 0;
+            }
+            seaLast = o;
             if (f256) {
               const cr = ((c & 255) * inv + FOG_R * f256) >> 8;
               const cg = (((c >> 8) & 255) * inv + FOG_G * f256) >> 8;
@@ -2304,6 +2429,7 @@ export class KartGame {
               c = 0xff000000 | (cb << 16) | (cg << 8) | cr;
             }
             out[o] = c;
+            seaCol[o] = c;
             mask[o] = field;
             seed[o] = 0;
             wx += stepX;
@@ -2346,7 +2472,7 @@ export class KartGame {
     // ---- EDGES. The field sits higher than the road: a fringe of dark grass with pink tips stands up along the edge and sways.
     // Over the void the road (and the field) is a floating slab: you see its dark side wherever it ends towards you.
     const sway = performance.now() / 1000;
-    for (let r = 2; r < rows; r++) {
+    for (let r = 2; r < (terrain ? 0 : rows); r++) {
       const z = rowZ[r];
       const tall = (GRASS_TALL * FOCAL) / z; // how tall a blade is on screen at this distance
       const thick = Math.max(1, Math.round((SLAB_THICK * FOCAL) / z)); // how thick the slab looks at this distance
@@ -2375,11 +2501,14 @@ export class KartGame {
     }
     // ---- SMOKE WAVES (SMOKE OCEAN): every bit of smoke stands up out of the sea by its height, far rows first, so nearer
     // waves hide the ones (and the road) behind them. Its top edge catches the light.
-    if (water)
-      for (let r = 1; r < rows; r++) {
+    // (nearest rows first: each column remembers how high the nearer waves already reach, so every pixel is painted once)
+    if (water) {
+      const colTop = this.seaTop;
+      colTop.fill(rows);
+      for (let r = rows - 1; r >= 1; r--) {
         const z = rowZ[r];
         const scale = (SMOKE_TALL * FOCAL) / z;
-        if (scale < 0.6) continue;
+        if (scale < 0.6) break;
         const row = r * BW;
         for (let x = 0; x < BW; x++) {
           const o = row + x;
@@ -2387,17 +2516,22 @@ export class KartGame {
           if (!h) continue;
           const up = Math.min(20, Math.round((h / 255) * scale));
           if (up < 1) continue;
-          const c = out[o];
+          const top = r - up, upto = Math.min(r, colTop[x]);
+          if (top >= upto) continue;
+          const c = seaCol[o];
           const cr = c & 255, cg = (c >> 8) & 255, cb = (c >> 16) & 255;
           // the side of the wave is in shadow at the bottom and lights up towards its rounded top
-          for (let k = 1; k <= up && r - k >= 0; k++) {
+          for (let yy = Math.max(0, top); yy < upto; yy++) {
+            const k = r - yy;
             const f = k === up ? 1.18 : 0.72 + 0.3 * (k / up);
-            out[o - k * BW] = 0xff000000 | (Math.min(255, (cb * f) | 0) << 16) | (Math.min(255, (cg * f) | 0) << 8) | Math.min(255, (cr * f) | 0);
-            mask[o - k * BW] = 2;
+            out[yy * BW + x] = 0xff000000 | (Math.min(255, (cb * f) | 0) << 16) | (Math.min(255, (cg * f) | 0) << 8) | Math.min(255, (cr * f) | 0);
+            mask[yy * BW + x] = 2;
           }
+          colTop[x] = top < 0 ? 0 : top;
         }
       }
-    b.putImageData(this.frame, 0, hz, 0, 0, BW, rows);
+    }
+    if (!terrain) b.putImageData(this.frame, 0, hz, 0, 0, BW, rows);
 
     // ---- BASS DROP: a ring of dots racing outwards over the ground
     for (const t of this.things) {
@@ -2530,6 +2664,7 @@ export class KartGame {
       if (d[2] === "ship") list.push({ img: this.img["ghostship"], sx: 0, sw: 72, sh: 46, x: d[0], y: d[1], k: d[3], lift: -5 + Math.sin(now / 700 + d[0]) * 3, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "speaker") list.push({ img: this.img["speaker"], sx: beat < 0.2 ? 80 : 0, sw: 80, sh: 112, x: d[0], y: d[1], k: d[3] / 2, lift: 0, flip: false, shadow: true });
       // (808 TEMPLE's speakers, towers, gates and pillars are 3D renders at double detail: public/kart/speaker.png etc.)
+      else if (d[2] === "pine") list.push({ img: this.img["pine"], sx: 0, sw: 40, sh: 64, x: d[0], y: d[1], k: d[3] * 0.55, lift: -2, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "alp") list.push({ far: true, img: this.img["alp"], sx: 0, sw: 240, sh: 200, x: d[0], y: d[1], k: d[3] / 2.6, lift: -10, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "cave") list.push({ img: this.img["cave"], sx: beat < 0.2 ? 240 : 0, sw: 240, sh: 192, x: d[0], y: d[1], k: d[3] * 0.7, lift: 0, flip: false, shadow: false });
       else if (d[2] === "crystal") list.push({ img: this.img["crystal"], sx: Math.floor(now / 400 + d[0]) % 3 === 0 ? 60 : 0, sw: 60, sh: 180, x: d[0], y: d[1], k: d[3] * 0.28, lift: 0, flip: d[1] % 2 === 0, shadow: false });
@@ -2600,7 +2735,34 @@ export class KartGame {
       }
       // HILLS: hidden behind a crest? Only the part above the hilltop shows
       let clipped = false;
-      if (hills) {
+      if (terrain) {
+        // A REAL MOUNTAIN: every screen column knows how high the land in front of this thing reaches: hide what's below that
+        let lv = 0;
+        while (lv < OCC_LEVELS - 1 && OCC_Z[lv + 1] <= p.z * 0.96) lv++;
+        const x0 = Math.max(0, x), x1 = Math.min(BW - 1, x + Math.round(w));
+        let anyShow = false, anyHide = false;
+        for (let cx = x0; cx <= x1; cx++) {
+          const cy = this.occ[cx * OCC_LEVELS + lv];
+          if (cy > y) anyShow = true;
+          if (cy < p.py) anyHide = true;
+        }
+        if (!anyShow) continue;
+        if (anyHide) {
+          clipped = true;
+          b.save();
+          b.beginPath();
+          let runX = x0, runY = this.occ[x0 * OCC_LEVELS + lv];
+          for (let cx = x0 + 1; cx <= x1 + 1; cx++) {
+            const cy = cx <= x1 ? this.occ[cx * OCC_LEVELS + lv] : -999;
+            if (cy !== runY) {
+              if (runY > 0) b.rect(runX, 0, cx - runX, runY);
+              runX = cx;
+              runY = cy;
+            }
+          }
+          b.clip();
+        }
+      } else if (hills) {
         let cr = Math.min(rows - 1, Math.floor(p.py - hz));
         while (cr >= 0 && rowZ[cr] < p.z * 0.97) cr--;
         const clipY = hz + cr + 1;

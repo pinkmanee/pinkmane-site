@@ -19,6 +19,7 @@ import { buzz } from "../../../game/buzz"; // the phone buzz on a hit (game/buzz
 const PINK = "#ff5fd2";
 const INK = "#0b0614";
 const SAVE_KEY = "pinkdive-save";
+const SEEN_KEY = "pinkdive-seen"; // the prompts you've had lately (practice picks ones you haven't)
 const SOUND_KEY = "pinkmane-dive-sound";
 const DEVICE_KEY = "pinkrun-device"; // the same "you" as the scoreboards
 
@@ -568,7 +569,18 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     setDive(d);
     setPractice(isPractice);
     const today = promptsForDive(d);
-    setPrompts(isPractice ? practicePrompts(today) : today);
+    // practice remembers the prompts you've had (today's dive counts too), so they don't keep coming back
+    let seen: string[] = [];
+    try {
+      seen = JSON.parse(localStorage.getItem(SEEN_KEY) || "[]");
+      if (!Array.isArray(seen)) seen = [];
+    } catch {}
+    const these = isPractice ? practicePrompts(today, seen) : today;
+    try {
+      const next = [...seen.filter((id) => !these.some((p) => p.id === id)), ...these.map((p) => p.id)].slice(-60);
+      localStorage.setItem(SEEN_KEY, JSON.stringify(next));
+    } catch {}
+    setPrompts(these);
     setSlots([]);
     setAt(0);
     setTyped("");

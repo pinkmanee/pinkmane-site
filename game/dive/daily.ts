@@ -44,18 +44,47 @@ function order(round: number): Prompt[] {
   return out;
 }
 
+// each new round: the prompts of the last 2 days of the round before go to the end, so nothing comes back the next day
+const rounds: Prompt[][] = [];
+function roundOrder(round: number): Prompt[] {
+  const perRound = Math.floor(PROMPTS.length / PER_DAY);
+  for (let r = rounds.length; r <= round; r++) {
+    let o = order(r);
+    if (r > 0) {
+      const recent = new Set(rounds[r - 1].slice((perRound - 2) * PER_DAY, perRound * PER_DAY).map((p) => p.id));
+      o = [...o.filter((p) => !recent.has(p.id)), ...o.filter((p) => recent.has(p.id))];
+    }
+    rounds.push(o);
+  }
+  return rounds[round];
+}
+
 /** the 7 prompts of a dive (the same for everyone) */
 export function promptsForDive(dive: number): Prompt[] {
   const perRound = Math.floor(PROMPTS.length / PER_DAY);
   const round = Math.floor((dive - 1) / perRound);
   const at = ((dive - 1) % perRound) * PER_DAY;
-  return order(round).slice(at, at + PER_DAY);
+  return roundOrder(round).slice(at, at + PER_DAY);
 }
 
 /** 7 random prompts for PRACTICE (not today's ones) */
-export function practicePrompts(notThese: Prompt[], seed = Date.now()): Prompt[] {
+/**
+ * 7 prompts for PRACTICE (never today's ones). `seen` = the prompts you've had lately, oldest first: the ones you haven't
+ * had come first, so you go through all of them before any comes back; and no two of the same category in a row.
+ */
+export function practicePrompts(notThese: Prompt[], seen: string[] = [], seed = Date.now()): Prompt[] {
   const skip = new Set(notThese.map((p) => p.id));
-  return shuffled(PROMPTS.filter((p) => !skip.has(p.id)), seed).slice(0, PER_DAY);
+  const pool = shuffled(PROMPTS.filter((p) => !skip.has(p.id)), seed);
+  const when = new Map(seen.map((id, i) => [id, i])); // (later = seen more recently)
+  pool.sort((a, b) => (when.get(a.id) ?? -1) - (when.get(b.id) ?? -1)); // never seen first, then the longest ago
+  const out: Prompt[] = [];
+  const left = pool.slice(0, PER_DAY * 2);
+  while (out.length < PER_DAY && left.length) {
+    const last = out[out.length - 1]?.cat;
+    const i = left.findIndex((p) => p.cat !== last);
+    out.push(left.splice(i < 0 ? 0 : i, 1)[0]);
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------ checking an answer
