@@ -39,13 +39,14 @@ type TrackData = {
   beat?: { bpm: number; at: number }; // the map song's tempo and where its first beat is (s): speakers and equalizers move on it
   jumpText?: string; // what it says on a jump (default: JUMP!)
   tunnel?: number[]; // for every centre point: 1 = inside a building (808 TEMPLE): the sky turns into its walls
+  hill?: number[]; // HILLS: how high the road is at every centre point (0 = flat; the land around follows, fading out)
   slaps?: [number, number][]; // SLAPPING TENTACLES (GHOST SHIP BAY): [centre point, which side it comes from: 1 / -1]
   outside?: number; // what's past the edge of the map (3 = void)
   alt?: number[]; // the flying part: how high the karts fly at every centre point (0 = on the ground)
   peaks?: [number, number][]; // mountain tops to dodge while flying
   rings?: [number, number, number][]; // rings to fly through for a boost: x, y, height
 };
-type TrackPack = { track: TrackData; ground: Uint32Array; gsize: number; gs: number; types: Uint8Array; mini: HTMLCanvasElement; pal?: Pal };
+type TrackPack = { track: TrackData; ground: Uint32Array; gsize: number; gs: number; types: Uint8Array; mini: HTMLCanvasElement; pal?: Pal; hillGrid?: Float32Array };
 // THE TRACKS: each is trackN.json + trackN-ground.png + trackN-map.png in public/kart/
 export const TRACKS = [
   { id: "track1", name: "NIGHT FIELD", hue: 0, road: "cobble", psy: "candy" },
@@ -133,7 +134,7 @@ function roadPixel(style: string, c: number, x: number, y: number, psy?: PsyThem
   return 0;
 }
 
-type Pal = { fog: number[]; vfog: number[]; vdeep: number[]; farLine: number; farDark: number; lip: number; side: number; rib: number; gDark: number; gMid: number; gTip: number; gBank: number; sky: HTMLCanvasElement; skyVoid: HTMLCanvasElement; props: Img };
+type Pal = { fog: number[]; vfog: number[]; vdeep: number[]; farLine: number; farDark: number; lip: number; side: number; rib: number; gDark: number; gMid: number; gTip: number; gBank: number; sky: HTMLCanvasElement; skyVoid: HTMLCanvasElement; skyTop?: string; props: Img };
 const rgbOf = (c: number) => [c & 255, (c >> 8) & 255, (c >> 16) & 255];
 const abgr = (r: number, g: number, b: number) => (0xff000000 | (b << 16) | (g << 8) | r) >>> 0;
 const BOLD = 0.07; // how much fatter the game's letters are drawn (0 = normal)
@@ -156,6 +157,9 @@ const HORIZON = 100;
 const FOCAL = 260;
 const CAM_H = 34;
 const CAM_BACK = 65; // how far the camera sits behind your kart
+const PITCH_UP = 34; // HILLS: how far the camera may tilt down over a crest (pixels the horizon moves up)
+const MAX_ROWS = BH - HORIZON + PITCH_UP; // the most ground rows there can be on screen
+const HG = 256; // HILLS: the height map is this many squares across
 const LAPS = 3;
 // KARTS: every kart is 3 pictures (back, side, front) in public/kart/kart-<kart>-<view>.png, each with 3 frames side by side:
 // no flame, flame, flame (the flames only show while boosting or revving at the start).
@@ -346,8 +350,14 @@ export class KartGame {
   private ground!: Uint32Array;
   private gsize = 0; // the ground picture's size in pixels
   private gs = 1; // ground pixels per world unit
-  private mask = new Uint8Array(BW * (BH - HORIZON)); // this frame: which screen pixels are field (1) and which are road (0)
-  private seedMap = new Uint8Array(BW * (BH - HORIZON));
+  private mask = new Uint8Array(BW * MAX_ROWS); // this frame: which screen pixels are field (1) and which are road (0)
+  private seedMap = new Uint8Array(BW * MAX_ROWS);
+  // HILLS: the height map of this map (null = flat), and for every screen row: how far away its ground is, and how high
+  private hillGrid: Float32Array | null = null;
+  private rowZ = new Float32Array(MAX_ROWS);
+  private rowH = new Float32Array(MAX_ROWS);
+  private camG = 0; // the ground height under the camera (smoothed)
+  private pitch = 0; // how far the camera is tilted (pixels the horizon moves down)
   private types!: Uint8Array;
   private img: Record<string, HTMLImageElement> = {};
   private kartSkins: Record<string, HTMLCanvasElement>[] = [];
@@ -412,7 +422,7 @@ export class KartGame {
     this.buf.height = BH;
     this.bctx = this.buf.getContext("2d")!;
     this.bctx.imageSmoothingEnabled = false;
-    this.frame = this.bctx.createImageData(BW, BH - HORIZON);
+    this.frame = this.bctx.createImageData(BW, MAX_ROWS);
     this.frame32 = new Uint32Array(this.frame.data.buffer);
     // the on-screen buttons are for phones and tablets only: a device whose MAIN input is a finger and that has no mouse.
     // (A laptop with a touch screen still counts as a computer.) Touching the screen turns them on, pressing a key turns them off.
@@ -891,7 +901,7 @@ export class KartGame {
         farLine: A(P.field[2].map((v) => v * 0.45)), farDark: A(P.field[0]),
         lip: t(SLAB_LIP), side: t(SLAB_SIDE), rib: t(SLAB_RIB),
         gDark: A(P.grass[0]), gMid: A(P.grass[1]), gTip: A(P.grass[2]), gBank: A(P.grass[3]),
-        sky: psySky, skyVoid: inside,
+        sky: psySky, skyVoid: inside, skyTop: `rgb(${P.sky[0].join(",")})`,
         props: makePsyProps(psy, this.img["props"], greenPlants),
       };
     }
@@ -932,6 +942,9 @@ export class KartGame {
     const p = this.packs[clamp(Math.floor(i) || 0, 0, this.packs.length - 1)];
     this.trackNo = this.packs.indexOf(p);
     this.track = p.track;
+    this.hillGrid = p.track.hill ? (p.hillGrid ??= this.makeHillGrid(p.track)) : null;
+    this.camG = 0;
+    this.pitch = 0;
     this.ground = p.ground;
     this.gsize = p.gsize;
     this.gs = p.gs;
@@ -1999,6 +2012,50 @@ export class KartGame {
     ctx.restore();
   }
 
+  // ------------------------------------------------------------ HILLS
+  // The height map: every square gets the height of the nearest bit of road, fading back down to flat land further away
+  // (so the road runs along a ridge with slopes on both sides). Then it's smoothed so there are no steps.
+  private makeHillGrid(t: TrackData): Float32Array {
+    const hill = t.hill!, C = t.center, HW = t.halfw, N = C.length, cell = t.size / HG;
+    const g = new Float32Array(HG * HG);
+    for (let gy = 0; gy < HG; gy++)
+      for (let gx = 0; gx < HG; gx++) {
+        const x = (gx + 0.5) * cell, y = (gy + 0.5) * cell;
+        let best = 1e12, bi = 0;
+        for (let i = 0; i < N; i += 2) {
+          const d = (C[i][0] - x) ** 2 + (C[i][1] - y) ** 2;
+          if (d < best) {
+            best = d;
+            bi = i;
+          }
+        }
+        const e = Math.sqrt(best) - HW[bi]; // how far past the road's edge
+        const f = e < 40 ? 1 : e > 420 ? 0 : 1 - (e - 40) / 380;
+        g[gy * HG + gx] = (hill[bi] ?? 0) * f * f * (3 - 2 * f);
+      }
+    for (let pass = 0; pass < 2; pass++) {
+      const s = g.slice();
+      for (let gy = 1; gy < HG - 1; gy++)
+        for (let gx = 1; gx < HG - 1; gx++) {
+          let sum = 0;
+          for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) sum += s[(gy + j) * HG + gx + i];
+          g[gy * HG + gx] = sum / 9;
+        }
+    }
+    return g;
+  }
+  /** how high the ground is at a world position (0 on flat maps) */
+  private groundH(x: number, y: number) {
+    const g = this.hillGrid;
+    if (!g) return 0;
+    const cell = this.track.size / HG;
+    const fx = x / cell - 0.5, fy = y / cell - 0.5;
+    const ix = Math.floor(fx), iy = Math.floor(fy);
+    if (ix < 0 || iy < 0 || ix >= HG - 1 || iy >= HG - 1) return 0;
+    const ax = fx - ix, ay = fy - iy, o = iy * HG + ix;
+    return (g[o] * (1 - ax) + g[o + 1] * ax) * (1 - ay) + (g[o + HG] * (1 - ax) + g[o + HG + 1] * ax) * ay;
+  }
+
   private drawWorld() {
     const me = this.me;
     const camH = CAM_H + me.alt * 0.92; // when you fly, the camera goes up with you and the ground drops away
@@ -2013,6 +2070,19 @@ export class KartGame {
     this.fallCam += ((me.fall > 0 ? 1 : 0) - this.fallCam) * 0.1;
     const back = CAM_BACK + 190 * this.fallCam;
     const camX = me.x - dx * back, camY = me.y - dy * back;
+    // HILLS: the camera rides at the height of the ground under your kart, and tilts with the slope ahead:
+    // up a climb the horizon moves down (you look up the hill), over a crest it moves up (you look down the other side)
+    const hills = !!this.hillGrid;
+    const gh = (x: number, y: number) => (hills ? this.groundH(x, y) : 0);
+    if (hills) {
+      const g0 = gh(me.x, me.y);
+      this.camG += (g0 - this.camG) * 0.35;
+      this.camG = Math.max(this.camG, gh(camX, camY), g0 - 6); // never inside the hill
+      const slope = (gh(me.x + dx * 140, me.y + dy * 140) - g0) / 140;
+      this.pitch += (clamp(slope * FOCAL * 0.85, -PITCH_UP, 40) - this.pitch) * 0.12;
+    }
+    const camZ = this.camG + camH; // how high the camera is
+    const hz = HORIZON + Math.round(this.pitch); // where the horizon is on screen this frame
 
     // ---- which zone you're in (0 = the field, 1 = the void): the sky and the haze fade from one to the other
     const zoneNow = this.track.tunnel ? this.track.tunnel[me.idx] ?? 0 : this.track.zone ? this.track.zone[me.idx] ?? 0 : 0;
@@ -2025,15 +2095,20 @@ export class KartGame {
     const sky = pal.sky;
     let off = (((ca / (Math.PI * 2)) * sky.width) % sky.width + sky.width) % sky.width;
     off = Math.round(off);
-    const skyY = HORIZON + 4 - sky.height;
+    const skyY = hz + 4 - sky.height;
     b.fillStyle = zf > 0.5 ? "#060210" : "#100628";
-    b.fillRect(0, 0, BW, HORIZON);
+    b.fillRect(0, 0, BW, hz);
     b.drawImage(sky, -off, skyY);
     b.drawImage(sky, sky.width - off, skyY);
+    if (skyY > 0) {
+      // HILLS: looking up a climb shows more sky than the picture has: fill it with the sky's own top colour
+      b.fillStyle = pal.skyTop ?? "#100628";
+      b.fillRect(0, 0, BW, skyY);
+    }
     if (zf > 0) {
       const vs = pal.skyVoid;
       b.globalAlpha = zf;
-      b.fillRect(0, 0, BW, HORIZON);
+      b.fillRect(0, 0, BW, hz);
       b.drawImage(vs, -off, skyY);
       b.drawImage(vs, vs.width - off, skyY);
       b.globalAlpha = 1;
@@ -2044,7 +2119,34 @@ export class KartGame {
     const gs = this.gs;
     const out = this.frame32;
     const G = this.ground;
-    const rows = BH - HORIZON;
+    const rows = BH - hz;
+    // which distance every screen row shows. Flat: the closer to the bottom, the nearer. With HILLS: walk away from the
+    // camera along the view and see which row each bit of ground lands on; a crest hides the ground behind it.
+    const rowZ = this.rowZ, rowH = this.rowH;
+    if (!hills) for (let r = 0; r < rows; r++) rowZ[r] = (camH * FOCAL) / (r + 0.5);
+    else {
+      let next = rows - 1;
+      let lastH = 0, pd = 5, prr = 1e9, ph = 0;
+      for (let d = 5; d < 6000 && next >= 0; d += 1.5 + d * 0.012) {
+        const h = gh(camX + dx * d, camY + dy * d);
+        lastH = h;
+        const rr = ((camZ - h) * FOCAL) / d - 0.5;
+        while (next >= 0 && rr <= next) {
+          // (blend between this sample and the one before, so the rows in between don't repeat)
+          const t = prr > rr && prr < 1e8 ? clamp((next - rr) / (prr - rr), 0, 1) : 0;
+          rowZ[next] = d + (pd - d) * t;
+          rowH[next] = h + (ph - h) * t;
+          next--;
+        }
+        pd = d;
+        prr = rr;
+        ph = h;
+      }
+      for (; next >= 0; next--) {
+        rowZ[next] = camZ - lastH > 1 ? ((camZ - lastH) * FOCAL) / (next + 0.5) : 6000;
+        rowH[next] = lastH;
+      }
+    }
     const types = this.types, TH = this.track.size / 2;
     const mask = this.mask, seed = this.seedMap;
     const outside = this.track.outside ?? 0; // what's past the edge of the map: more field (0) or the void (3)
@@ -2052,7 +2154,7 @@ export class KartGame {
     const FOG_R = Math.round(pal.fog[0] + (pal.vfog[0] - pal.fog[0]) * zf), FOG_G = Math.round(pal.fog[1] + (pal.vfog[1] - pal.fog[1]) * zf), FOG_B = Math.round(pal.fog[2] + (pal.vfog[2] - pal.fog[2]) * zf);
     const water = !!this.track.water, seaT = performance.now() / 1000;
     for (let r = 0; r < rows; r++) {
-      const z = (camH * FOCAL) / (r + 0.5);
+      const z = rowZ[r];
       const stepX = (rx * z) / FOCAL, stepY = (ry * z) / FOCAL;
       let wx = camX + dx * z - stepX * (BW / 2), wy = camY + dy * z - stepY * (BW / 2);
       const fog = z > 500 ? Math.min(0.85, (z - 500) / 2600) : 0;
@@ -2108,12 +2210,22 @@ export class KartGame {
         wx += stepX;
         wy += stepY;
       }
+      // HILLS: slopes facing you are lit, slopes facing away are in shade
+      if (hills && r > 0) {
+        const sl = (rowH[r - 1] - rowH[r]) / Math.max(1, rowZ[r - 1] - rowZ[r]);
+        const f = Math.round(clamp(1 + sl * 2.4, 0.6, 1.35) * 256);
+        if (f !== 256)
+          for (let o2 = r * BW, end = o2 + BW; o2 < end; o2++) {
+            const c = out[o2];
+            out[o2] = 0xff000000 | (Math.min(255, (((c >> 16) & 255) * f) >> 8) << 16) | (Math.min(255, (((c >> 8) & 255) * f) >> 8) << 8) | Math.min(255, ((c & 255) * f) >> 8);
+          }
+      }
     }
     // ---- EDGES. The field sits higher than the road: a fringe of dark grass with pink tips stands up along the edge and sways.
     // Over the void the road (and the field) is a floating slab: you see its dark side wherever it ends towards you.
     const sway = performance.now() / 1000;
     for (let r = 2; r < rows; r++) {
-      const z = (camH * FOCAL) / (r + 0.5);
+      const z = rowZ[r];
       const tall = (GRASS_TALL * FOCAL) / z; // how tall a blade is on screen at this distance
       const thick = Math.max(1, Math.round((SLAB_THICK * FOCAL) / z)); // how thick the slab looks at this distance
       const row = r * BW;
@@ -2139,7 +2251,7 @@ export class KartGame {
         for (let k = 1; k <= h && r - k >= 0; k++) out[o - k * BW] = k >= h ? pal.gTip : k >= h - 1 && h > 3 ? pal.gMid : pal.gDark;
       }
     }
-    b.putImageData(this.frame, 0, HORIZON);
+    b.putImageData(this.frame, 0, hz, 0, 0, BW, rows);
 
     // ---- BASS DROP: a ring of dots racing outwards over the ground
     for (const t of this.things) {
@@ -2154,7 +2266,7 @@ export class KartGame {
         const sc = FOCAL / z;
         const size = Math.max(1, Math.round(5 * sc * (1 - g * 0.5)));
         b.fillStyle = i % 2 ? "#ff46c8" : "#ffffff";
-        b.fillRect(Math.round(BW / 2 + (ex * rx + ey * ry) * sc - size / 2), Math.round(HORIZON + camH * sc - size), size, size);
+        b.fillRect(Math.round(BW / 2 + (ex * rx + ey * ry) * sc - size / 2), Math.round(hz + camZ * sc - size), size, size);
       }
     }
 
@@ -2172,7 +2284,7 @@ export class KartGame {
         const sc = FOCAL / z;
         const size = Math.max(1, Math.round(big * sc));
         b.fillStyle = col;
-        b.fillRect(Math.round(BW / 2 + (ex * rx + ey * ry) * sc - size / 2), Math.round(HORIZON + (camH - h) * sc - size / 2), size, size);
+        b.fillRect(Math.round(BW / 2 + (ex * rx + ey * ry) * sc - size / 2), Math.round(hz + (camZ - h) * sc - size / 2), size, size);
       };
       for (let i = 0; i < NC; i++) {
         const h = altOf[i] || 0;
@@ -2213,7 +2325,7 @@ export class KartGame {
         if (z > 30 && z < 420) {
           const sc = FOCAL / z;
           const px = BW / 2 + (ex * rx + ey * ry) * sc;
-          const top = HORIZON + camH * sc - (78 * CARS[k.car].k + k.alt) * sc;
+          const top = hz + (camZ - gh(k.x, k.y)) * sc - (78 * CARS[k.car].k + k.alt) * sc;
           // drawn on the menu grid (480 x 270), which matches the race screen here
           this.tags.push({ x: (px * UW) / BW, y: ((top - 8) * UH) / BH, name: k.name, col: skinColor(k.skin) });
         }
@@ -2314,7 +2426,7 @@ export class KartGame {
       const sc = FOCAL / z;
       const px = BW / 2 + side * sc;
       if (px < -200 || px > BW + 200) continue;
-      proj.push({ s, z, px, py: HORIZON + camH * sc, sc });
+      proj.push({ s, z, px, py: hz + (camZ - gh(s.x, s.y)) * sc, sc });
     }
     proj.sort((a, c) => c.z - a.z);
     for (const p of proj) {
@@ -2326,6 +2438,21 @@ export class KartGame {
       if (s.shadow) {
         b.fillStyle = "rgba(10,2,16,0.4)";
         b.fillRect(Math.round(p.px - fullW * 0.42), Math.round(p.py - Math.max(1, h * 0.05)), Math.round(fullW * 0.84), Math.max(1, Math.round(h * 0.1)));
+      }
+      // HILLS: hidden behind a crest? Only the part above the hilltop shows
+      let clipped = false;
+      if (hills) {
+        let cr = Math.min(rows - 1, Math.floor(p.py - hz));
+        while (cr >= 0 && rowZ[cr] < p.z * 0.97) cr--;
+        const clipY = hz + cr + 1;
+        if (clipY <= y) continue;
+        if (clipY < p.py) {
+          clipped = true;
+          b.save();
+          b.beginPath();
+          b.rect(0, 0, BW, clipY);
+          b.clip();
+        }
       }
       if (p.z > 500) b.globalAlpha = Math.max(0.25, 1 - (p.z - 500) / 1300);
       if (s.rot) {
@@ -2343,6 +2470,7 @@ export class KartGame {
         b.restore();
       } else b.drawImage(s.img, s.sx * resOf(s.img), 0, s.sw * resOf(s.img), s.sh * resOf(s.img), x, y, Math.round(w), Math.round(h));
       b.globalAlpha = 1;
+      if (clipped) b.restore();
     }
     // ---- the pixel burst at the bottom of a fall: a white flash, then squares flying apart
     for (const bu of bursts) {
@@ -2350,7 +2478,7 @@ export class KartGame {
       const z = ex * dx + ey * dy;
       if (z < 12 || z > 1200) continue;
       const sc = FOCAL / z;
-      const cx = BW / 2 + (ex * rx + ey * ry) * sc, cy = HORIZON + camH * sc + (FALL_DEPTH - 4) * sc;
+      const cx = BW / 2 + (ex * rx + ey * ry) * sc, cy = hz + (camZ - gh(bu.x, bu.y)) * sc + (FALL_DEPTH - 4) * sc;
       const cols = ["#ff46c8", "#ffffff", `rgb(${bu.col[0]},${bu.col[1]},${bu.col[2]})`, "#7a3ce0", "#ffe23c"];
       if (bu.t < 0.12) {
         const f = Math.max(4, Math.round(40 * sc));
