@@ -565,7 +565,7 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", "smokering", "puff", "alp", "cave", "crystal", "pine", ...ITEMS.map((i) => `item-${i}`)];
+    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", "smokering", "puff", "alp", "cave", "crystal", "pine", "goat", "bear", "cabin", ...ITEMS.map((i) => `item-${i}`)];
     const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n)), this.loadTrip()]);
     this.packs = packs;
     for (const it of ITEMS) (this.img[`item-${it}`] as { pkRes?: number }).pkRes = this.img[`item-${it}`].width / 48;
@@ -2664,6 +2664,11 @@ export class KartGame {
       if (d[2] === "ship") list.push({ img: this.img["ghostship"], sx: 0, sw: 72, sh: 46, x: d[0], y: d[1], k: d[3], lift: -5 + Math.sin(now / 700 + d[0]) * 3, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "speaker") list.push({ img: this.img["speaker"], sx: beat < 0.2 ? 80 : 0, sw: 80, sh: 112, x: d[0], y: d[1], k: d[3] / 2, lift: 0, flip: false, shadow: true });
       // (808 TEMPLE's speakers, towers, gates and pillars are 3D renders at double detail: public/kart/speaker.png etc.)
+      // TATRA TRIP: mountain goats up on the rock (now and then one looks up from grazing), a bear sitting at the forest edge
+      // (sniffing the air), and the log cabin with smoke coming out of its chimney
+      else if (d[2] === "goat") list.push({ far: true, img: this.img["goat"], sx: Math.floor(now / 2600 + d[0] * 0.37) % 3 === 0 ? 0 : 24, sw: 24, sh: 20, x: d[0], y: d[1], k: 1.8, lift: -1, flip: d[1] % 2 === 0, shadow: false });
+      else if (d[2] === "bear") list.push({ img: this.img["bear"], sx: Math.floor(now / 900 + d[0]) % 4 === 0 ? 30 : 0, sw: 30, sh: 30, x: d[0], y: d[1], k: 0.95, lift: -1, flip: false, shadow: true });
+      else if (d[2] === "cabin") list.push({ far: true, img: this.img["cabin"], sx: Math.floor(now / 500) % 2 ? 120 : 0, sw: 120, sh: 100, x: d[0], y: d[1], k: d[3], lift: -3, flip: false, shadow: false });
       else if (d[2] === "pine") list.push({ img: this.img["pine"], sx: 0, sw: 40, sh: 64, x: d[0], y: d[1], k: d[3] * 0.55, lift: -2, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "alp") list.push({ far: true, img: this.img["alp"], sx: 0, sw: 240, sh: 200, x: d[0], y: d[1], k: d[3] / 2.6, lift: -10, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "cave") list.push({ img: this.img["cave"], sx: beat < 0.2 ? 240 : 0, sw: 240, sh: 192, x: d[0], y: d[1], k: d[3] * 0.7, lift: 0, flip: false, shadow: false });
