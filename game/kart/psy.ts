@@ -8,7 +8,7 @@
 //   - 808 TEMPLE ("gold"): black marble tiles with gold seams for the road (tilePixel)
 //   - SMOKE OCEAN: the rolling sea, half water and half smoke (waterPixel) and wooden planks for the road (plankPixel)
 
-export type PsyTheme = "candy" | "glitter" | "lava" | "ocean" | "gold" | "smoke" | "alpine";
+export type PsyTheme = "candy" | "glitter" | "lava" | "ocean" | "gold" | "smoke" | "alpine" | "acid" | "ice";
 type RGB = [number, number, number];
 
 // ---------------------------------------------------------------- colours of each theme (change them here)
@@ -85,6 +85,28 @@ const THEMES: Record<PsyTheme, {
     skyline: [40, 50, 100], windows: [255, 230, 140], moon: [255, 250, 230],
     fog: [200, 210, 240],
     grass: [[18, 40, 40], [40, 120, 90], [160, 240, 200], [12, 26, 30]],
+  },
+  ice: {
+    // FROZEN FREQUENCY: an icy night, ultraviolet up high, glacier cyan at the horizon (the aurora is drawn on top)
+    sky: [[6, 6, 30], [34, 20, 96], [70, 110, 200], [170, 240, 255]],
+    swirl: [[150, 255, 200], [170, 120, 255], [80, 230, 255], [230, 245, 255], [120, 90, 255]],
+    field: [[214, 226, 255], [240, 246, 255], [180, 200, 250], [150, 220, 250], [200, 180, 255], [226, 236, 255]],
+    sparkle: [255, 255, 255],
+    stones: [104, 116, 160], mortar: [24, 26, 60], glint: [200, 250, 255],
+    skyline: [30, 30, 90], windows: [150, 255, 210], moon: [240, 250, 255],
+    fog: [170, 200, 250],
+    grass: [[60, 70, 130], [150, 200, 255], [240, 250, 255], [30, 34, 80]],
+  },
+  acid: {
+    // ACID CANYON: a never-ending sunset, deep teal up high, burning lime and magenta at the horizon
+    sky: [[8, 40, 48], [20, 96, 104], [255, 90, 170], [210, 255, 90]],
+    swirl: [[190, 255, 60], [255, 60, 190], [255, 150, 40], [40, 220, 200], [255, 250, 200]],
+    field: [[230, 150, 90], [255, 60, 190], [190, 255, 60], [255, 140, 40], [30, 110, 120], [250, 210, 150]],
+    sparkle: [255, 255, 200],
+    stones: [150, 96, 96], mortar: [40, 20, 30], glint: [210, 255, 120],
+    skyline: [40, 24, 52], windows: [210, 255, 90], moon: [255, 240, 150],
+    fog: [255, 140, 120],
+    grass: [[70, 40, 30], [170, 190, 40], [235, 255, 110], [40, 22, 18]],
   },
   ocean: {
     // SMOKE OCEAN: a smoky dusk over a sea of grey smoke
@@ -247,6 +269,37 @@ export function tilePixel(key: string, x: number, y: number): number {
 }
 
 // ---------------------------------------------------------------- inside 808 TEMPLE: instead of the sky, walls of speakers
+// FROZEN FREQUENCY: what you see above you inside the crystal cave (it takes the sky's place, like the temple walls):
+// dark violet rock with crystals hanging down from the ceiling, glowing cyan, violet and white
+export function makeIceCave(W: number, H: number): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const x = c.getContext("2d")!;
+  const g = x.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#0a0620");
+  g.addColorStop(0.7, "#1c1250");
+  g.addColorStop(1, "#2c2a80");
+  x.fillStyle = g;
+  x.fillRect(0, 0, W, H);
+  const cols = ["#50e6ff", "#9a5aff", "#e6f4ff", "#6ab0ff"];
+  for (let i = 0; i < W / 7; i++) {
+    const h = hash(i, 4242);
+    const cx = (i * 7 + (h % 5)) % W, len = 10 + ((h >>> 6) % Math.floor(H * 0.55)), w = 2 + ((h >>> 3) % 4);
+    const col = cols[(h >>> 9) % 4];
+    for (let y = 0; y < len; y++) {
+      const hw = Math.max(0, Math.round(w * (1 - y / len)));
+      x.fillStyle = col;
+      x.fillRect(cx - hw, y, hw * 2 + 1, 1);
+      if (hw > 1) {
+        x.fillStyle = "rgba(255,255,255,0.55)";
+        x.fillRect(cx, y, 1, 1); // the bright edge
+      }
+    }
+  }
+  return c;
+}
+
 export function makeTempleWall(W: number, H: number): HTMLCanvasElement {
   const c = document.createElement("canvas");
   c.width = W;
@@ -340,9 +393,59 @@ export function makePsySky(theme: PsyTheme, W: number, H: number): HTMLCanvasEle
       x.fillRect(sx - 1, sy - 1, 3, 3);
     } else x.fillRect(sx, sy, 1, 1);
   }
+  // FROZEN FREQUENCY: the northern lights, curtains of mint and violet hanging over the sky
+  if (theme === "ice") {
+    for (let xx = 0; xx < W; xx++) {
+      const a = (xx / W) * Math.PI * 2;
+      const top = 6 + Math.round((Math.sin(a * 3) * 0.5 + Math.sin(a * 7 + 1) * 0.3 + 0.8) * 10);
+      const len = 24 + Math.round((Math.sin(a * 5 + 2) * 0.5 + 0.5) * 26);
+      for (let yy = 0; yy < len; yy++) {
+        const f = yy / len;
+        const k = Math.sin(a * 40 + yy * 0.05) * 0.5 + 0.5; // the vertical folds of the curtain
+        const al = (1 - f) * (0.25 + 0.5 * k) * (f < 0.12 ? f / 0.12 : 1);
+        if (al < 0.08) continue;
+        const mint = Math.sin(a * 2 + f * 2) > -0.2;
+        x.fillStyle = mint ? `rgba(140,255,200,${al.toFixed(2)})` : `rgba(180,120,255,${al.toFixed(2)})`;
+        x.fillRect(xx, top + yy, 1, 1);
+      }
+    }
+  }
   // the moon (a crescent), or on the lava map a big low sun with stripes
   const mx = Math.round(W * 0.37);
-  if (theme === "lava") {
+  if (theme === "acid") {
+    // ACID CANYON: a huge cracked sun sitting on the horizon, with a rainbow halo round it
+    const sy0 = H - 6, R = 30;
+    const halo = [[255, 60, 190], [255, 150, 40], [255, 240, 80], [150, 255, 60], [40, 220, 220], [150, 90, 255]];
+    for (let dy = -R - 12; dy <= 0; dy++)
+      for (let dx = -R - 12; dx <= R + 12; dx++) {
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d > R && d <= R + 12) {
+          const band = Math.floor((d - R) / 2);
+          if ((dx + dy * 3 + band) % 3 === 0) continue; // (the halo shimmers: a dotted rainbow)
+          x.fillStyle = `rgb(${halo[Math.min(5, band)].join(",")})`;
+          x.fillRect(mx + dx, sy0 + dy, 1, 1);
+        } else if (d <= R) {
+          const g2 = (dy + R) / R; // top -> bottom of the sun
+          x.fillStyle = g2 < 0.5 ? "#fff8b0" : g2 < 0.8 ? "#ffd060" : "#ff8a40";
+          x.fillRect(mx + dx, sy0 + dy, 1, 1);
+        }
+      }
+    // the cracks across it
+    x.fillStyle = "#a02860";
+    let cx = mx - 18, cy = sy0 - 20;
+    for (let i = 0; i < 40; i++) {
+      x.fillRect(cx, cy, 1, 1);
+      cx += 1;
+      cy += (hash(i, 5) % 3) - 1 + (i % 9 === 0 ? 1 : 0);
+    }
+    cx = mx + 4;
+    cy = sy0 - 28;
+    for (let i = 0; i < 22; i++) {
+      x.fillRect(cx, cy, 1, 1);
+      cy += 1;
+      cx += (hash(i, 9) % 3) - 1;
+    }
+  } else if (theme === "lava") {
     for (let dy = 0; dy < 26; dy++) {
       const hw = Math.round(Math.sqrt(26 * 26 - dy * dy));
       if (dy % 5 === 3 && dy < 14) continue; // the stripes through the sun

@@ -3,7 +3,7 @@
 // Everything you see comes from the pictures in public/kart/ : swap a picture, the game changes.
 
 import { KartSound } from "./sound";
-import { cobblePixel, fieldPixel, makePsyProps, makePsySky, makeTempleWall, plankPixel, psyColours, seaHeight, tilePixel, waterPixel, type PsyTheme } from "./psy"; // the psychedelic look
+import { cobblePixel, fieldPixel, makeIceCave, makePsyProps, makePsySky, makeTempleWall, plankPixel, psyColours, seaHeight, tilePixel, waterPixel, type PsyTheme } from "./psy"; // the psychedelic look
 import { buzz } from "../buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 // THE MUSIC IN PINK KART: which of your beats plays where (files in public/music). Change a file name to change the song.
@@ -42,6 +42,8 @@ type TrackData = {
   beat?: { bpm: number; at: number }; // the map song's tempo and where its first beat is (s): speakers and equalizers move on it
   jumpText?: string; // what it says on a jump (default: JUMP!)
   tunnel?: number[]; // for every centre point: 1 = inside a building (808 TEMPLE): the sky turns into its walls
+  ice?: [number, number][]; // stretches of the lap (from centre point, to centre point) on slippery ice (FROZEN FREQUENCY)
+  snow?: boolean; // snowflakes falling over the picture
   fog?: [number, number]; // how thick the haze is: [where it starts, how far until it's full] (default [500, 2600])
   smokeRings?: [number, number][]; // HOTBOX HIGHWAY: smoke rings floating over the road; drive through one = a boost
   terrain?: boolean; // A REAL MOUNTAIN (TATRA TRIP): the land has its own height map (trackN-height.png) and is drawn by the terrain renderer
@@ -67,6 +69,8 @@ const ALL_TRACKS = [
   { id: "track5", name: "808 TEMPLE", hue: 0, road: "tiles", psy: "gold" },
   { id: "track6", name: "HOTBOX HIGHWAY", hue: 0, road: "cobble", psy: "smoke" },
   { id: "track7", name: "TATRA TRIP", hue: 0, road: "cobble", psy: "alpine" },
+  { id: "track8", name: "ACID CANYON", hue: 0, road: "cobble", psy: "acid", wip: true },
+  { id: "track9", name: "FROZEN FREQUENCY", hue: 0, road: "cobble", psy: "ice", wip: true },
 ];
 // NOT READY YET: maps with wip: true only show when you run the site on your own computer (npm run dev).
 // On pinkmane.site they're hidden and not even loaded. To make one public, take its "wip: true" out.
@@ -583,7 +587,7 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", "smokering", "puff", "alp", "cave", "crystal", "pine", "goat", "bear", "cabin", "kart3d-tomb", "kart3d-bmp", "kart3d-bobo", ...ITEMS.map((i) => `item-${i}`)];
+    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", "smokering", "puff", "alp", "cave", "crystal", "pine", "goat", "bear", "cabin", "kart3d-tomb", "kart3d-bmp", "kart3d-bobo", "cactus", "skull", "devil", "icecrystal", "icewave", ...ITEMS.map((i) => `item-${i}`)];
     const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n)), this.loadTrip()]);
     this.packs = packs;
     for (const it of ITEMS) (this.img[`item-${it}`] as { pkRes?: number }).pkRes = this.img[`item-${it}`].width / 48;
@@ -1029,8 +1033,9 @@ export class KartGame {
       const sk = this.img["sky"];
       const psySky = makePsySky(psy, sk.width, sk.height); // (the void parts of a map use the same sky)
       // a map with a building (808 TEMPLE): inside, the sky turns into the trippy picture (wobbling, see drawWorld)
-      const tripSky = indoors ? this.makeTripSky(sk.width, sk.height) : null;
-      const inside = tripSky ?? (indoors ? makeTempleWall(sk.width, sk.height) : psySky);
+      // (FROZEN FREQUENCY's crystal cave: the glowing cave ceiling instead)
+      const tripSky = indoors && psy !== "ice" ? this.makeTripSky(sk.width, sk.height) : null;
+      const inside = tripSky ?? (indoors ? (psy === "ice" ? makeIceCave(sk.width, sk.height) : makeTempleWall(sk.width, sk.height)) : psySky);
       return {
         fog: P.fog, vfog: rgbOf(t(abgr(52, 14, 84))), vdeep: rgbOf(t(abgr(6, 2, 14))),
         farLine: A(P.field[2].map((v) => v * 0.45)), farDark: A(P.field[0]),
@@ -1337,9 +1342,10 @@ export class KartGame {
         const grip = clamp(k.speed / 80, -1, 1);
         k.a += steer * (2.5 - 0.7 * Math.min(1, Math.abs(k.speed) / MAX_SPEED)) * grip * dt;
       }
-      // a little slide: the kart keeps some of where it was going
+      // a little slide: the kart keeps some of where it was going (on ICE a lot more: it drifts, but you still steer)
       const wx = Math.cos(k.a) * k.speed, wy = Math.sin(k.a) * k.speed;
-      const g = Math.min(1, 9 * dt);
+      const onIce = !!this.track.ice && k.air <= 0 && k.alt <= 1 && this.track.ice.some(([a, b]) => k.idx >= a && k.idx <= b);
+      const g = Math.min(1, (onIce ? 1.7 : 9) * dt);
       k.vx += (wx - k.vx) * g;
       k.vy += (wy - k.vy) * g;
       k.x += k.vx * dt;
@@ -2778,7 +2784,18 @@ export class KartGame {
         }
       }
       else if (d[2] === "cabin") list.push({ far: true, img: this.img["cabin"], sx: Math.floor(now / 500) % 2 ? 120 : 0, sw: 120, sh: 100, x: d[0], y: d[1], k: d[3], lift: -3, flip: false, shadow: false });
-      else if (d[2] === "pine") list.push({ img: this.img["pine"], sx: 0, sw: 40, sh: 64, x: d[0], y: d[1], k: d[3] * 0.55, lift: -2, flip: d[0] % 2 === 0, shadow: false });
+      // FROZEN FREQUENCY: the ice crystals glow brighter on the beat; the frozen sound waves shimmer
+      else if (d[2] === "icecrystal") {
+        const lvl = Math.max(0, Math.min(3, Math.round(3 * Math.pow(1 - beat, 1.6)) - (d[0] % 2)));
+        list.push({ img: this.img["icecrystal"], sx: lvl * 48, sw: 48, sh: 96, x: d[0], y: d[1], k: d[3] * 0.55, lift: -1, flip: d[1] % 2 === 0, shadow: false });
+      } else if (d[2] === "icewave") list.push({ img: this.img["icewave"], sx: (Math.floor(now / 450 + d[0]) % 2) * 96, sw: 96, sh: 48, x: d[0], y: d[1], k: d[3], lift: -2, flip: d[1] % 2 === 0, shadow: false });
+      // ACID CANYON: the glowing cacti breathe in and out, the bleached skulls lie in the sand, the dust devils wander
+      else if (d[2] === "cactus") list.push({ img: this.img["cactus"], sx: Math.floor(now / 1100 + d[0] * 0.01) % 2 ? 40 : 0, sw: 40, sh: 72, x: d[0], y: d[1], k: d[3] * 0.5, lift: -2, flip: d[0] % 2 === 0, shadow: false });
+      else if (d[2] === "skull") list.push({ img: this.img["skull"], sx: 0, sw: 32, sh: 20, x: d[0], y: d[1], k: d[3] * 0.8, lift: -1, flip: d[1] % 2 === 0, shadow: false });
+      else if (d[2] === "devil") {
+        const ang = now / 5200 + d[3];
+        list.push({ img: this.img["devil"], sx: (Math.floor(now / 110) % 3) * 48, sw: 48, sh: 80, x: d[0] + Math.cos(ang) * 160, y: d[1] + Math.sin(ang * 1.3) * 110, k: 1.15, lift: 0, flip: false, shadow: false });
+      } else if (d[2] === "pine") list.push({ img: this.img["pine"], sx: 0, sw: 40, sh: 64, x: d[0], y: d[1], k: d[3] * 0.55, lift: -2, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "alp") list.push({ far: true, img: this.img["alp"], sx: 0, sw: 240, sh: 200, x: d[0], y: d[1], k: d[3] / 2.6, lift: -10, flip: d[0] % 2 === 0, shadow: false });
       else if (d[2] === "cave") list.push({ img: this.img["cave"], sx: beat < 0.2 ? 240 : 0, sw: 240, sh: 192, x: d[0], y: d[1], k: d[3] * 0.7, lift: 0, flip: false, shadow: false });
       else if (d[2] === "crystal") list.push({ img: this.img["crystal"], sx: Math.floor(now / 400 + d[0]) % 3 === 0 ? 60 : 0, sw: 60, sh: 180, x: d[0], y: d[1], k: d[3] * 0.28, lift: 0, flip: d[1] % 2 === 0, shadow: false });
@@ -2907,6 +2924,16 @@ export class KartGame {
       } else b.drawImage(s.img, s.sx * resOf(s.img), 0, s.sw * resOf(s.img), s.sh * resOf(s.img), x, y, Math.round(w), Math.round(h));
       b.globalAlpha = 1;
       if (clipped) b.restore();
+    }
+    // ---- SNOW (FROZEN FREQUENCY): flakes drifting down over the picture, swaying, a few big ones near the camera
+    if (this.track.snow && !(this.track.tunnel?.[me.idx])) {
+      for (let i = 0; i < 90; i++) {
+        const sp = 18 + (i % 5) * 9, big = i % 11 === 0;
+        const fx = ((i * 137.5 + Math.sin(now / 900 + i) * 10 - ca * 120) % BW + BW) % BW;
+        const fy = ((i * 61 + (now / 1000) * sp) % BH + BH) % BH;
+        b.fillStyle = i % 3 ? "rgba(255,255,255,0.85)" : "rgba(200,230,255,0.75)";
+        b.fillRect(Math.round(fx), Math.round(fy), big ? 2 : 1, big ? 2 : 1);
+      }
     }
     // ---- the pixel burst at the bottom of a fall: a white flash, then squares flying apart
     for (const bu of bursts) {
