@@ -358,6 +358,23 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
       )}
     </button>
   );
+  // a heading box over a group of buttons (not a button: you can't press it)
+  const group = (label: string) => (
+    <div
+      style={{
+        fontFamily: font,
+        fontSize: 9,
+        padding: "5px 10px",
+        textAlign: "center",
+        color: INK,
+        background: "#3ce8f0",
+        border: "2px solid #3ce8f0",
+        letterSpacing: 2,
+      }}
+    >
+      {label}
+    </div>
+  );
   const field = (label: string, value: string, set: (v: string) => void, opts: { place?: string; max?: number; upper?: boolean; type?: string } = {}) => (
     <label style={{ display: "block", marginTop: 12 }}>
       <div style={{ fontSize: 8, color: PALE, marginBottom: 6, opacity: 0.85 }}>{label}</div>
@@ -501,21 +518,14 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
             </span>
           ))}
         </div>
+        {/* SINGLE PLAYER and MULTIPLAYER: a turquoise heading over each group of buttons (half as high as a button) */}
         <div style={{ display: "grid", gap: 10 }}>
+          {group("SINGLE PLAYER")}
           {btn("SOLO RACE", solo, { big: true, icon: "solo" })}
+          <div style={{ height: 6 }} />
+          {group("MULTIPLAYER")}
           {btn("CREATE LOBBY", () => (setError(""), setScreen("create")), { big: true, icon: "create" })}
           {btn("JOIN LOBBY", () => (setError(""), setScreen("join")), { big: true, icon: "join" })}
-        </div>
-        {/* the keys on a computer, the thumbs on a phone */}
-        <div className="pk-keys" style={{ fontSize: 7, marginTop: 16, lineHeight: 1.9, opacity: 0.75, textAlign: "center" }}>
-          W A S D + ENTER: MENU · BACKSPACE: BACK<br />ARROWS / WASD DRIVE · SPACE ITEM · R BACK ON THE ROAD
-          <br />
-          HOLD GAS WHEN 2 SHOWS = ROCKET START · M: SOUND ON / OFF
-        </div>
-        <div className="pk-thumbs" style={{ fontSize: 7, marginTop: 16, lineHeight: 1.9, opacity: 0.75, textAlign: "center" }}>
-          LEFT THUMB STEERS · RIGHT: ITEM AND BRAKE
-          <br />
-          THE KART DRIVES BY ITSELF · HOLD THE SCREEN WHEN 2 SHOWS = ROCKET START
         </div>
       </>,
       true,
