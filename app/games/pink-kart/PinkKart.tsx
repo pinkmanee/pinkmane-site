@@ -262,10 +262,12 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
   const PORTRAIT: Record<string, { file: string; w: number; h: number }> = {
     mane: { file: "/kart/kart3d-mane.png", w: 864, h: 1344 },
     tomb: { file: "/kart/kart3d-tomb.png", w: 864, h: 1600 },
+    bmp: { file: "/kart/kart3d-bmp.png", w: 864, h: 1600 },
+    bobo: { file: "/kart/kart3d-bobo.png", w: 864, h: 1600 },
   };
   const portrait = (id: string) => {
     const p = PORTRAIT[id];
-    const fw = p.w / 9, fh = p.h / 16, k = 0.62;
+    const fw = p.w / 9, fh = p.h / 16, k = 0.44;
     return (
       <span
         aria-hidden="true"
@@ -485,7 +487,7 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
         {title("PINK KART", local ? "LOCAL TEST MODE" : undefined)}
         {maps(track, pickTrack)}
         {/* who you drive as */}
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${DRIVERS.length}, 1fr)`, gap: 8, marginBottom: 8 }} aria-label="Driver">
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${DRIVERS.length}, 1fr)`, gap: 6, marginBottom: 8 }} aria-label="Driver">
           {DRIVERS.map((d) => (
             <button
               key={d.id}
@@ -493,8 +495,10 @@ export default function PinkKart({ pixelFont }: { pixelFont: string }) {
               aria-pressed={driver === d.id}
               style={{
                 fontFamily: font,
-                fontSize: 10,
-                padding: "6px 6px 8px",
+                fontSize: 7,
+                padding: "4px 2px 6px",
+                letterSpacing: 0,
+                whiteSpace: "nowrap",
                 display: "flex",
                 flexDirection: "column",
                 justifyContent: "flex-end",

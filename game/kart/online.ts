@@ -19,7 +19,7 @@ export const MIN_GRID = 6; // with BOTS on, empty seats are filled with bots up 
 const MAX_LOBBY = 60; // people in a lobby at once (the rest get "LOBBY FULL")
 const BOT_NAMES = ["808", "SERUM", "VOID", "HEX", "KONG", "JUNGLE", "BOMBER"];
 // the drivers a player can pick (the same ids as DRIVERS in kart.ts); yours is remembered on this device
-const DRIVER_IDS = ["mane", "tomb"];
+const DRIVER_IDS = ["mane", "tomb", "bmp", "bobo"];
 const cleanCar = (c: unknown) => (typeof c === "string" && DRIVER_IDS.includes(c) ? c : "mane");
 const myDriver = () => {
   try {

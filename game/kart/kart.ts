@@ -199,12 +199,16 @@ const LAPS = 3;
 const CARS: Record<string, { k: number }> = {
   mane: { k: 0.25 }, // with the camera 65 behind, your own kart is drawn at exactly its drawn size
   tomb: { k: 0.25 }, // TOMBFELL the backwood wizard (kart3d-tomb.png), in his own colours
+  bmp: { k: 0.25 }, // BEARMANPIG from PINK JUNGLE (kart3d-bmp.png)
+  bobo: { k: 0.25 }, // BOBO the dog from PINKMANE VOID (kart3d-bobo.png)
 };
 // THE DRIVERS you can pick (the kart menu). "mane" comes in a colour per racer; the others always look like themselves.
 // To add one: render its 3D kart sheet into public/kart/kart3d-<id>.png, add it to CARS and here.
 export const DRIVERS: { id: string; name: string }[] = [
   { id: "mane", name: "PINKMANE" },
   { id: "tomb", name: "TOMBFELL" },
+  { id: "bmp", name: "BEARMANPIG" },
+  { id: "bobo", name: "BOBO" },
 ];
 export const isDriver = (id: unknown): id is string => typeof id === "string" && DRIVERS.some((d) => d.id === id);
 const KART_ANGLES = 16; // the 3D kart is drawn from this many angles all the way around
@@ -578,7 +582,7 @@ export class KartGame {
   }
 
   private async load() {
-    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", "smokering", "puff", "alp", "cave", "crystal", "pine", "goat", "bear", "cabin", "kart3d-tomb", ...ITEMS.map((i) => `item-${i}`)];
+    const names = ["sky", "sky-void", "props", "itembox", "peak", "ring", "wings", "kart3d-mane", "ghostship", "tentacle", "speaker", "eq", "gate", "pillar", "smokering", "puff", "alp", "cave", "crystal", "pine", "goat", "bear", "cabin", "kart3d-tomb", "kart3d-bmp", "kart3d-bobo", ...ITEMS.map((i) => `item-${i}`)];
     const [packs] = await Promise.all([Promise.all(TRACKS.map((t) => this.loadTrack(t.id))), ...names.map((n) => this.loadImg(n)), this.loadTrip()]);
     this.packs = packs;
     for (const it of ITEMS) (this.img[`item-${it}`] as { pkRes?: number }).pkRes = this.img[`item-${it}`].width / 48;
@@ -851,10 +855,11 @@ export class KartGame {
       const a = Math.atan2(ny - cy, nx - cx);
       const side = (i % 2 ? 1 : -1) * 16;
       const player = i === 5;
-      // when you drive as PINKMANE, the first computer racer is TOMBFELL (and when you're TOMBFELL, he's you)
-      const tombBot = !player && i === 0 && this.driver !== "tomb";
+      // the first computer racers are the other drivers (TOMBFELL, BEARMANPIG, BOBO), apart from the one you picked
+      const others = DRIVERS.filter((d) => d.id !== "mane" && d.id !== this.driver);
+      const special = !player && i < others.length ? others[i] : null;
       this.karts.push({
-        name: player ? "YOU" : tombBot ? "TOMBFELL" : BOTS[i].name,
+        name: player ? "YOU" : special ? special.name : BOTS[i].name,
         player,
         id: "",
         ctl: player ? "me" : "bot",
@@ -862,7 +867,7 @@ export class KartGame {
         left: false,
         buf: [],
         skin: player ? 0 : i + 1,
-        car: player ? (CARS[this.driver] ? this.driver : "mane") : tombBot ? "tomb" : BOTS[i].car,
+        car: player ? (CARS[this.driver] ? this.driver : "mane") : special ? special.id : BOTS[i].car,
         rev: -1,
         stall: 0,
         x: cx - Math.sin(a) * side,
