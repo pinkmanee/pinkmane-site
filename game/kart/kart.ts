@@ -266,14 +266,15 @@ const ITEM_LABEL: Record<ItemName, string> = {
   wall: "REVERB WALL",
 };
 // kart colours: the player keeps the drawn pink, the bots get these instead of pink
-const BOTS: { name: string; car: string; color: [number, number, number] }[] = [
+// fire: "orange" = this racer's exhaust flames are orange (everyone else's are turquoise, as drawn in the kart sheets)
+const BOTS: { name: string; car: string; color: [number, number, number]; fire?: "orange" }[] = [
   { name: "808", car: "mane", color: [60, 220, 255] },
   { name: "SERUM", car: "mane", color: [150, 255, 80] },
-  { name: "VOID", car: "mane", color: [255, 150, 40] },
+  { name: "VOID", car: "mane", color: [255, 150, 40], fire: "orange" },
   { name: "HEX", car: "mane", color: [150, 100, 255] },
-  { name: "KONG", car: "mane", color: [255, 70, 90] },
+  { name: "KONG", car: "mane", color: [255, 70, 90], fire: "orange" },
   { name: "JUNGLE", car: "mane", color: [80, 255, 200] },
-  { name: "BOMBER", car: "mane", color: [255, 230, 60] },
+  { name: "BOMBER", car: "mane", color: [255, 230, 60], fire: "orange" },
 ];
 // a racer's colour (skin 0 = the pink of the drawing)
 const skinColor = (skin: number): [number, number, number] => (skin === 0 ? [255, 70, 200] : BOTS[(skin - 1) % BOTS.length].color);
@@ -594,7 +595,7 @@ export class KartGame {
     // 4 = from his right, 8 = from the front, 12 = from his left) and 3 pictures per view (plain, flames, bigger flames).
     // It was rendered from a low-poly 3D model; each racer gets it in their own colour.
     this.kartSkins = [{ car: "mane", color: null }, ...BOTS].map((b) => {
-      const sheet = this.tint(this.img["kart3d-mane"], b.color as [number, number, number] | null);
+      const sheet = this.tint(this.img["kart3d-mane"], b.color as [number, number, number] | null, "fire" in b && b.fire === "orange");
       const fh = sheet.height / KART_ANGLES;
       const set: Record<string, HTMLCanvasElement> = {};
       for (let i = 0; i < KART_ANGLES; i++) {
@@ -643,16 +644,24 @@ export class KartGame {
   }
 
   // swap the pink in a kart picture for another colour (and tint the white body a little)
-  private tint(src: HTMLImageElement, col: [number, number, number] | null) {
+  // (orange = turn the turquoise exhaust flames orange: swapping red and blue makes turquoise into orange / yellow)
+  private tint(src: HTMLImageElement, col: [number, number, number] | null, orange = false) {
     const c = document.createElement("canvas");
     c.width = src.width;
     c.height = src.height;
     const x = c.getContext("2d")!;
     x.drawImage(src, 0, 0);
-    if (!col) return c;
+    if (!col && !orange) return c;
     const d = x.getImageData(0, 0, c.width, c.height);
     const p = d.data;
     for (let i = 0; i < p.length; i += 4) {
+      if (orange && p[i + 2] > 110 && p[i + 1] > p[i] * 1.35 && p[i + 2] >= p[i + 1] * 0.9) {
+        const t = p[i];
+        p[i] = p[i + 2];
+        p[i + 2] = t;
+        continue;
+      }
+      if (!col) continue;
       const r = p[i], g = p[i + 1], b = p[i + 2];
       if (r > 80 && r > g * 1.8 && b > g * 1.35) {
         const f = r / 255;
