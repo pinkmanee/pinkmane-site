@@ -13,7 +13,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TIERS, type Prompt } from "../../../game/dive/prompts";
-import { BANDS, PER_DAY, SECONDS, bandOf, check, diveNumber, norm, practicePrompts, promptsForDive, suggest, type Hit } from "../../../game/dive/daily";
+import { BANDS, PER_DAY, SECONDS, bandOf, check, diveNumber, isMusicFriday, norm, practicePrompts, promptsForDive, suggest, type Hit } from "../../../game/dive/daily";
 import { buzz } from "../../../game/buzz"; // the phone buzz on a hit (game/buzz.ts)
 
 const PINK = "#ff5fd2";
@@ -48,6 +48,66 @@ const SKINS: Skin[] = [
   { id: "ghost", name: "GHOST SHIP", price: 650, hull: "#d6ccf0", light: "#ffffff", dark: "#8a7cb0", prop: "#ffffff", ghost: true },
 ];
 const skinOf = (id: string) => SKINS.find((k) => k.id === id) ?? SKINS[0];
+
+// MORE SHOP THINGS: what streams out behind your sub (TRAILS), the colour of its headlight in the dark (LIGHTS),
+// and something on top of the dome (TOPPERS). The free ones (price 0) everyone has.
+type Gear = { id: string; kind: "trail" | "light" | "top"; name: string; price: number };
+const GEAR: Gear[] = [
+  { id: "t-bubbles", kind: "trail", name: "BUBBLES", price: 0 },
+  { id: "t-glitter", kind: "trail", name: "GLITTER", price: 80 },
+  { id: "t-smoke", kind: "trail", name: "SMOKE", price: 110 },
+  { id: "t-notes", kind: "trail", name: "MUSIC NOTES", price: 150 },
+  { id: "t-hearts", kind: "trail", name: "HEARTS", price: 150 },
+  { id: "l-warm", kind: "light", name: "WARM LIGHT", price: 0 },
+  { id: "l-pink", kind: "light", name: "PINK LIGHT", price: 70 },
+  { id: "l-uv", kind: "light", name: "UV LIGHT", price: 120 },
+  { id: "l-rainbow", kind: "light", name: "RAINBOW LIGHT", price: 300 },
+  { id: "x-none", kind: "top", name: "NOTHING ON TOP", price: 0 },
+  { id: "x-horns", kind: "top", name: "DEVIL HORNS", price: 100 },
+  { id: "x-crown", kind: "top", name: "CROWN", price: 200 },
+  { id: "x-halo", kind: "top", name: "HALO", price: 250 },
+];
+type GearOn = { trail: string; light: string; top: string };
+const GEAR_KEY = "pinkdive-gear";
+const GEAR_START: GearOn = { trail: "t-bubbles", light: "l-warm", top: "x-none" };
+
+// STREAKS: dive the daily dive on days in a row. These streaks pay a bonus (on top of the dive's own leaves).
+const STREAK_KEY = "pinkdive-streak";
+const STREAK_BONUS: Record<number, number> = { 3: 15, 7: 40, 14: 80, 30: 150, 60: 300 };
+
+// BADGES: little trophies you collect (each new one pays 10 leaves). Kept in this browser.
+const BADGES_KEY = "pinkdive-badges";
+const BADGES: { id: string; name: string; how: string; icon: string }[] = [
+  { id: "first", name: "FIRST DIVE", how: "finish a daily dive", icon: "🌊" },
+  { id: "million", name: "ONE IN A MILLION", how: "give a ONE IN A MILLION answer", icon: "💎" },
+  { id: "deep3", name: "DEEP CUTTER", how: "3 DEEP CUT or rarer answers in one dive", icon: "🔪" },
+  { id: "perfect", name: "NO SKIPS", how: "answer all 7 in a daily dive", icon: "✅" },
+  { id: "abyss", name: "THE ABYSS", how: "reach 5,000 m in a daily dive", icon: "🕳" },
+  { id: "top", name: "DEEPER THAN 90%", how: "beat 90% of the day's divers (5 or more)", icon: "👑" },
+  { id: "streak7", name: "7 DAYS IN A ROW", how: "a 7 day streak", icon: "🔥" },
+  { id: "streak30", name: "30 DAYS IN A ROW", how: "a 30 day streak", icon: "☄" },
+  { id: "friday", name: "MUSIC HEAD", how: "finish a MUSIC FRIDAY dive", icon: "🎧" },
+  { id: "collector", name: "COLLECTOR", how: "own 6 things from the shop", icon: "🛍" },
+  { id: "beatfriend", name: "FRIEND BEATER", how: "beat a friend's challenge", icon: "⚔" },
+  { id: "leviathan", name: "I SAW IT", how: "meet the thing in the deep", icon: "👁" },
+];
+
+// MUSIC: every depth zone plays a different PINKMANE track (from the site's own music), muffled more and more the
+// deeper you are, with sonar pings from the MIDNIGHT ZONE down. index 0 = at the surface, then one per zone (ZONES).
+const ZONE_SONGS: { title: string; file: string }[] = [
+  { title: "ender pearls", file: "/music/ender-pearls.mp3" },
+  { title: "wet socks (w/ o1m4de)", file: "/music/06.mp3" },
+  { title: "cat piss kenny", file: "/music/10.mp3" },
+  { title: "hurricane of blades", file: "/music/07.mp3" },
+  { title: "gaf (ft. TOMBFELL)", file: "/music/05.mp3" },
+  { title: "vomit trap", file: "/music/08.mp3" },
+  { title: "gods psp (ft. TOMBFELL)", file: "/music/09.mp3" },
+  { title: "pinkmane's random ass beat 2", file: "/music/beat-2.mp3" },
+  { title: "pinkmane's random ass beat 3", file: "/music/beat-3.mp3" },
+  { title: "pinkmane's random ass beat 4", file: "/music/beat-4.mp3" },
+  { title: "pinkmane's random ass beat 5", file: "/music/beat-5.mp3" },
+];
+const SOUNDCLOUD = "https://soundcloud.com/pinkmanee";
 
 // a little pixel weed leaf (7 leaflets) for the WEED LEAVES counter
 function Leaf({ size = 12 }: { size?: number }) {
@@ -219,9 +279,15 @@ const ZONES: [number, string][] = [
 // a GHOST SUB: another diver from today, at the depth they had reached at the same point of the dive
 type GhostSub = { name: string | null; depth: number };
 
-function Sea({ depth, font, ghosts = [], skin = SKINS[0] }: { depth: number; font: string; ghosts?: GhostSub[]; skin?: Skin }) {
+function Sea({ depth, font, ghosts = [], skin = SKINS[0], vibe = true, gear = GEAR_START, onSee }: { depth: number; font: string; ghosts?: GhostSub[]; skin?: Skin; vibe?: boolean; gear?: GearOn; onSee?: () => void }) {
+  const gearRef = useRef(gear);
+  gearRef.current = gear;
+  const seeRef = useRef(onSee);
+  seeRef.current = onSee;
   const skinRef = useRef(skin);
   skinRef.current = skin;
+  const vibeRef = useRef(vibe);
+  vibeRef.current = vibe;
   const ref = useRef<HTMLCanvasElement>(null);
   const target = useRef(depth);
   target.current = depth;
@@ -270,7 +336,9 @@ function Sea({ depth, font, ghosts = [], skin = SKINS[0] }: { depth: number; fon
       const x = Math.sin(n * 127.1) * 43758.5453;
       return x - Math.floor(x);
     };
-    const fish = Array.from({ length: 40 }, (_, i) => ({ y: 40 + rnd(i) * 2300, x: rnd(i + 50) * W, s: rnd(i + 99) < 0.5 ? -1 : 1, v: 4 + rnd(i + 7) * 10, kind: Math.floor(rnd(i + 3) * 3) }));
+    // (fo / fl / dir: a fish darting away when your sub crashes past it)
+    const fish = Array.from({ length: 40 }, (_, i) => ({ y: 40 + rnd(i) * 2300, x: rnd(i + 50) * W, s: rnd(i + 99) < 0.5 ? -1 : 1, v: 4 + rnd(i + 7) * 10, kind: Math.floor(rnd(i + 3) * 3), fo: 0, fl: 0, dir: 1 }));
+    let seenIt = false; // (the thing in the deep, once)
     const specks = Array.from({ length: 60 }, (_, i) => ({ y: rnd(i + 200) * 2400, x: rnd(i + 300) * W, v: 0.5 + rnd(i + 400) }));
     const weeds = Array.from({ length: 16 }, (_, i) => ({ y: 330 + i * 40 + rnd(i + 500) * 20, left: i % 2 === 0, pic: 3 + (i % 3), off: rnd(i + 600), back: i % 4 === 3 }));
     const skels = Array.from({ length: 7 }, (_, i) => ({ y: 760 + i * 80 + rnd(i + 700) * 40, x: rnd(i + 710), v: 3 + rnd(i + 720) * 5, s: i % 2 ? 1 : -1 }));
@@ -287,6 +355,11 @@ function Sea({ depth, font, ghosts = [], skin = SKINS[0] }: { depth: number; fon
       });
     };
     let lastZone = -1, flashName = "", flashAt = -10;
+    // THE DIVE FEEL: while the sub sinks to its new depth it rumbles (the picture shakes a little, bubbles stream up, the
+    // phone buzzes), and when it gets there it lands with a bump: it dips and bounces back, a ring of bubbles bursts
+    // out, the picture jolts and the phone gives a thud. The deeper the drop, the bigger the landing.
+    let sinking = false, diveFrom = 0, landT = -10, landPow = 0, lastNow = 0, shakeWas = "";
+    const bubbles: { x: number; y: number; vx: number; vy: number; life: number; r: number; k?: string }[] = [];
     const rect = (x: number, y: number, w: number, h: number, col: string) => {
       c.fillStyle = col;
       c.fillRect(Math.round(x), Math.round(y), w, h);
@@ -294,10 +367,37 @@ function Sea({ depth, font, ghosts = [], skin = SKINS[0] }: { depth: number; fon
     const lerp = (a: number[], b: number[], t: number) => `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(",")})`;
     const draw = (now: number) => {
       const t = (now - start) / 1000;
+      const dt = Math.min(0.05, lastNow ? (now - lastNow) / 1000 : 0.016);
+      lastNow = now;
       cam += (target.current - cam) * 0.045;
+      const fall = target.current - cam; // how far the sub still has to sink
+      if (!sinking && fall > 4) {
+        sinking = true;
+        diveFrom = cam;
+        if (vibeRef.current) buzz("dive");
+      } else if (sinking && fall < 0.7) {
+        sinking = false;
+        landT = t;
+        landPow = Math.min(1, Math.max(0.35, (cam - diveFrom) / 90));
+        if (vibeRef.current) buzz("land");
+      }
       // The picture is cut to fit the screen (sides on a phone held upright, top/bottom on a wide screen): "seenW" is the part
       // you can see. On a wide screen the sub floats on the LEFT, next to the card; upright it floats BELOW the card.
       const box = cv.getBoundingClientRect();
+      // the shake: a clear rumble the whole way down, then a big jolt on landing that settles out.
+      // It's measured against the screen size, so it feels the same on a phone and on a big monitor.
+      const px = Math.max(1, Math.min(box.width, box.height) / 380);
+      let amp = sinking ? (1.6 + Math.min(2.4, fall / 18)) * px : 0;
+      if (t - landT < 0.55) {
+        const k = 1 - (t - landT) / 0.55;
+        amp += k * k * 9 * landPow * px;
+      }
+      const tilt = sinking ? Math.sin(t * 38) * 0.25 : 0;
+      const shake = amp > 0.3 ? `translate(${((Math.random() * 2 - 1) * amp).toFixed(1)}px, ${((Math.random() * 2 - 1) * amp).toFixed(1)}px) rotate(${tilt.toFixed(2)}deg) scale(1.03)` : "";
+      if (shake !== shakeWas) {
+        cv.style.transform = shake;
+        shakeWas = shake;
+      }
       const upright = box.height > box.width * 1.1;
       const seenW = Math.min(W, Math.max(40, (H * box.width) / Math.max(1, box.height)));
       const seenX = (W - seenW) / 2;
@@ -359,10 +459,57 @@ function Sea({ depth, font, ghosts = [], skin = SKINS[0] }: { depth: number; fon
       };
       weed(true);
       // ---- fish ----
+      // ---- THE THING IN THE DEEP: from THE ABYSS down, now and then a giant anglerfish glides past far behind you,
+      // its lure glowing pink (most divers never get deep enough to see it)
+      if (cam >= 520) {
+        const ph = ((t + 6) % 34) / 34;
+        if (ph < 0.75) {
+          const lx = -240 + (ph / 0.75) * (W + 480), ly = subY + 44 + Math.sin(t * 0.6) * 8;
+          c.globalAlpha = 0.85;
+          for (let yy = -26; yy <= 26; yy++) {
+            const hw = Math.round(Math.sqrt(Math.max(0, 1 - (yy / 26) ** 2)) * 92);
+            rect(lx - hw, ly + yy, hw * 2, 1, yy > 6 ? "#1e0a2c" : "#2c1240");
+            if (yy < 0) rect(lx - hw, ly + yy, 2, 1, "#7a3a8c"); // a faint pink rim, so you can make out its shape
+            if (yy < 0) rect(lx + hw - 2, ly + yy, 2, 1, "#7a3a8c");
+          }
+          for (let xx = -88; xx < 88; xx += 2) {
+            const yy = -Math.round(Math.sqrt(Math.max(0, 1 - (xx / 92) ** 2)) * 26);
+            rect(lx + xx, ly + yy, 2, 1, "#8a4a9c");
+          }
+          for (let i = 0; i < 9; i++) rect(lx + 54 + i * 4, ly + 4 + (i % 2), 2, 6, "#e8e0f0"); // teeth
+          rect(lx + 50, ly + 10, 40, 2, "#05020a"); // the jaw
+          rect(lx + 60, ly - 10, 5, 5, "#ff5fd2"); // its eye
+          rect(lx + 61, ly - 9, 2, 2, "#ffffff");
+          for (let i = 0; i < 14; i++) rect(lx + 62 + i * 2, ly - 26 - Math.round(Math.sin(i / 4) * 10), 1, 1, "#3a1a4a"); // the lure's stalk
+          const glow = 0.6 + Math.sin(t * 4) * 0.25;
+          c.globalAlpha = glow * 0.35;
+          rect(lx + 84, ly - 34, 14, 14, "#ff5fd2");
+          c.globalAlpha = glow;
+          rect(lx + 88, ly - 30, 6, 6, "#ffd0f2");
+          // the fins and the tail
+          c.globalAlpha = 0.85;
+          for (let i = 0; i < 24; i++) rect(lx - 92 - i, ly - i / 2, 1, i + 1, "#12061c");
+          for (let i = 0; i < 16; i++) rect(lx - 20 + i * 2, ly - 26 - (16 - i), 2, 16 - i, "#1c0a2a");
+          c.globalAlpha = 1;
+          if (!seenIt && lx > seenX && lx < seenX + seenW) {
+            seenIt = true;
+            seeRef.current?.();
+          }
+        }
+      }
+      const subCX = (upright ? W / 2 - 21 : seenX + seenW * 0.08) + 20;
       for (const f of fish) {
         const sy = at(f.y);
         if (!wet(sy, 4)) continue;
-        const x = ((((f.x + t * f.v * f.s) % (W + 30)) + W + 30) % (W + 30)) - 15;
+        let x = ((((f.x + t * f.v * f.s) % (W + 30)) + W + 30) % (W + 30)) - 15;
+        // SCATTER: the sub crashing down past a fish makes it dart away (and drift back later)
+        if (sinking && Math.abs(sy - subY) < 34 && Math.abs(x + f.fo - subCX) < 70) {
+          f.fl = 1;
+          f.dir = x + f.fo >= subCX ? 1 : -1;
+        }
+        f.fo = (f.fo + f.dir * 170 * f.fl * dt) * 0.995;
+        f.fl *= 0.95;
+        x += f.fo;
         const col = f.y > 1200 ? "rgba(255,95,210,0.5)" : "rgba(20,6,32,0.55)";
         const rows = FISH[f.kind];
         rows.forEach((row, ry) => {
@@ -472,7 +619,19 @@ function Sea({ depth, font, ghosts = [], skin = SKINS[0] }: { depth: number; fon
       }
       // ---- PINKMANE in the pink sub ----
       const bob = Math.round(Math.sin(t * 2) * 1.5);
-      const sx = Math.round(upright ? W / 2 - 21 : seenX + seenW * 0.08), sy2 = subY - 6 + bob;
+      // (sinking: a little jitter; landing: it dips down and bounces back)
+      const sinceLand = t - landT;
+      const dip = sinceLand < 0.9 ? landPow * 6 * Math.exp(-sinceLand * 5) * Math.sin(sinceLand * 16) : 0;
+      const jit = sinking ? Math.floor(t * 30) % 2 : 0;
+      const sx = Math.round(upright ? W / 2 - 21 : seenX + seenW * 0.08) + jit, sy2 = subY - 6 + bob + Math.round(dip);
+      // the bubbles: a stream from the sub while it sinks, and the ring that bursts out when it lands
+      if (sinking && Math.random() < 0.9)
+        for (let k = 0; k < 2; k++) bubbles.push({ x: sx + 6 + Math.random() * 30, y: camY + sy2 - subY + 4, vx: (Math.random() - 0.5) * 6, vy: -(10 + Math.random() * 20), life: 1, r: Math.random() < 0.3 ? 2 : 1, k: gearRef.current.trail });
+      if (sinceLand < dt * 1.5 && landT > 0)
+        for (let k = 0; k < 26; k++) {
+          const a = (k / 26) * Math.PI * 2;
+          bubbles.push({ x: sx + 20, y: camY + sy2 - subY + 14, vx: Math.cos(a) * (30 + Math.random() * 30) * landPow, vy: Math.sin(a) * 22 * landPow - 18, life: 1, r: k % 3 === 0 ? 2 : 1 });
+        }
       // ---- THE SOULS (today's other divers): each one's ghost floats on the line where their dive ended, wiggling and
       // waving, with their name (or "DIVER" for one without a name). You see them as you sink past them.
       const gs = ghostRef.current;
@@ -530,7 +689,9 @@ function Sea({ depth, font, ghosts = [], skin = SKINS[0] }: { depth: number; fon
       if (cam > 250) {
         // the headlight once it's dark
         c.globalAlpha = 0.14;
-        for (let i = 0; i < 28; i++) rect(sx + 44 + i * 3, sy2 + 11 - i * 0.5, 3, 4 + i, "#fff0a8");
+        const lg = gearRef.current.light;
+        const lc = lg === "l-pink" ? "#ff8ce0" : lg === "l-uv" ? "#b48cff" : "#fff0a8";
+        for (let i = 0; i < 28; i++) rect(sx + 44 + i * 3, sy2 + 11 - i * 0.5, 3, 4 + i, lg === "l-rainbow" ? `hsl(${(i * 13 + t * 90) % 360}, 90%, 70%)` : lc);
         c.globalAlpha = 1;
       }
       // the glass dome: a half circle (radius 11) sitting on the hull. Everything inside it is cut to its exact shape.
@@ -592,6 +753,69 @@ function Sea({ depth, font, ghosts = [], skin = SKINS[0] }: { depth: number; fon
       const spin = Math.floor(t * 12) % 2;
       rect(sx - 5, sy2 + (spin ? 9 : 12), 3, spin ? 10 : 4, sk.prop); // propeller
       c.globalAlpha = 1;
+      // the bubbles (in the sea, so they stream up past you as you sink)
+      for (let i = bubbles.length - 1; i >= 0; i--) {
+        const q = bubbles[i];
+        q.x += q.vx * dt;
+        q.y += q.vy * dt;
+        q.vx *= 0.96;
+        q.vy -= 14 * dt;
+        q.life -= dt * 0.9;
+        const by = q.y - camY + subY;
+        if (q.life <= 0 || by < -10 || by > H + 10) {
+          bubbles.splice(i, 1);
+          continue;
+        }
+        c.globalAlpha = Math.min(1, q.life * 1.4) * 0.8;
+        const bx = q.x + Math.sin(t * 6 + i) * 0.8;
+        // (the TRAIL from the shop)
+        if (q.k === "t-glitter") rect(bx, by, 1, 1, `hsl(${(i * 47 + t * 400) % 360}, 100%, ${Math.floor(t * 20 + i) % 3 ? 70 : 95}%)`);
+        else if (q.k === "t-smoke") {
+          c.globalAlpha *= 0.5;
+          rect(bx - 1, by - 1, q.r + 2, q.r + 2, "#d8d0e4");
+        } else if (q.k === "t-notes" && i % 3 === 0) {
+          rect(bx, by, 2, 2, "#ff8ce0");
+          rect(bx + 1, by - 4, 1, 4, "#ff8ce0");
+          rect(bx + 2, by - 4, 1, 1, "#ff8ce0");
+        } else if (q.k === "t-hearts" && i % 3 === 0) {
+          rect(bx, by, 1, 1, "#ff5f9a");
+          rect(bx + 2, by, 1, 1, "#ff5f9a");
+          rect(bx, by + 1, 3, 1, "#ff5f9a");
+          rect(bx + 1, by + 2, 1, 1, "#ff5f9a");
+        } else rect(bx, by, q.r, q.r, "#e6faff");
+        c.globalAlpha = 1;
+      }
+      if (bubbles.length > 220) bubbles.splice(0, bubbles.length - 220);
+      // the TOPPER from the shop, on top of the dome
+      const tp = gearRef.current.top, tx = sx + 18, ty = sy2 - 3;
+      if (tp === "x-horns")
+        for (let i = 0; i < 4; i++) {
+          rect(tx - 8 + i, ty - 1 - i, 2, 1, "#e8202c");
+          rect(tx + 6 - i, ty - 1 - i, 2, 1, "#e8202c");
+        }
+      else if (tp === "x-crown") {
+        rect(tx - 5, ty - 2, 11, 2, "#ffd02c");
+        for (const k of [-5, 0, 5]) rect(tx + k, ty - 5, 1, 3, "#ffd02c");
+        rect(tx, ty - 6, 1, 1, "#ff3c78");
+      } else if (tp === "x-halo") {
+        c.globalAlpha = 0.85 + Math.sin(t * 3) * 0.15;
+        rect(tx - 6, ty - 6, 13, 1, "#fff26a");
+        rect(tx - 7, ty - 5, 1, 1, "#fff26a");
+        rect(tx + 7, ty - 5, 1, 1, "#fff26a");
+        rect(tx - 6, ty - 4, 13, 1, "#fff26a");
+        c.globalAlpha = 1;
+      }
+      // the landing flash: a quick bright ring round the sub
+      if (sinceLand < 0.3 && landT > 0) {
+        const rr = 10 + sinceLand * 120 * landPow;
+        c.globalAlpha = (1 - sinceLand / 0.3) * 0.6;
+        c.strokeStyle = "#ffffff";
+        c.lineWidth = 1;
+        c.beginPath();
+        c.ellipse(sx + 20, sy2 + 14, rr, rr * 0.45, 0, 0, Math.PI * 2);
+        c.stroke();
+        c.globalAlpha = 1;
+      }
       for (let i = 0; i < 5; i++) {
         const bt = (t * 1.2 + i * 0.2) % 1;
         rect(sx - 8 - bt * 14, sy2 + 13 - bt * 16 + Math.sin(i + t * 3) * 2, 2, 2, `rgba(255,255,255,${0.7 * (1 - bt)})`);
@@ -604,7 +828,10 @@ function Sea({ depth, font, ghosts = [], skin = SKINS[0] }: { depth: number; fon
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      cv.style.transform = "";
+    };
   }, []);
   return <canvas ref={ref} className="pd-sea" aria-hidden="true" />;
 }
@@ -666,6 +893,16 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   const [owned, setOwned] = useState<string[]>(["pink"]);
   const [skinId, setSkinId] = useState("pink");
   const [shop, setShop] = useState(false);
+  const [shopTab, setShopTab] = useState<"subs" | "trail" | "light" | "top" | "badges">("subs");
+  const [gear, setGear] = useState<GearOn>(GEAR_START);
+  const [streak, setStreak] = useState(0);
+  const [badges, setBadges] = useState<string[]>([]);
+  const [newBadges, setNewBadges] = useState<string[]>([]); // won on this screen
+  const [earnNotes, setEarnNotes] = useState<string[]>([]); // why this dive paid what it paid
+  // A FRIEND'S CHALLENGE (from a link: ?vs=...): their name, which dive, their depth and their 7 depths
+  const [challenge, setChallenge] = useState<{ name: string; dive: number; total: number; depths: number[] } | null>(null);
+  const [challengeMsg, setChallengeMsg] = useState("");
+  const [nowPlaying, setNowPlaying] = useState("");
   const [shareMsg, setShareMsg] = useState("");
   // TODAY'S BOARD + THE GHOST SUBS (other divers of the day, from app/api/dive)
   const [board, setBoard] = useState<{ top: { name: string; score: number }[]; ghosts: { name: string | null; depths: number[] }[] } | null>(null);
@@ -698,7 +935,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   const [row, setRow] = useState(0);
   const [help, setHelp] = useState(false); // HOW TO PLAY shown inside the menu
   const [confirmQuit, setConfirmQuit] = useState(false);
-  const [opts, setOpts] = useState({ spellHelp: true, bigText: false, clockBeeps: true });
+  const [opts, setOpts] = useState({ spellHelp: true, bigText: false, clockBeeps: true, vibration: true, music: true });
   const pausedLeft = useRef(-1); // seconds that were left on the clock when the menu opened
   useEffect(() => {
     try {
@@ -742,6 +979,20 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
       if (Array.isArray(o)) setOwned(["pink", ...o.filter((x: unknown) => typeof x === "string" && x !== "pink")]);
       const k = localStorage.getItem(SKIN_KEY);
       if (k) setSkinId(k);
+      const ge = JSON.parse(localStorage.getItem(GEAR_KEY) || "null");
+      if (ge && typeof ge === "object") setGear((g) => ({ ...g, ...ge }));
+      const st = JSON.parse(localStorage.getItem(STREAK_KEY) || "null") as { last: number; count: number } | null;
+      setStreak(st && st.last >= diveNumber() - 1 ? st.count : 0); // (a missed day breaks it)
+      const bd = JSON.parse(localStorage.getItem(BADGES_KEY) || "[]");
+      if (Array.isArray(bd)) setBadges(bd.filter((x: unknown) => typeof x === "string"));
+    } catch {}
+    try {
+      const vs = new URLSearchParams(window.location.search).get("vs");
+      if (vs) {
+        const j = JSON.parse(decodeURIComponent(escape(atob(vs.replace(/-/g, "+").replace(/_/g, "/")))));
+        if (j && typeof j.n === "string" && Number.isFinite(j.d) && Number.isFinite(j.t) && Array.isArray(j.p))
+          setChallenge({ name: j.n.toUpperCase().replace(/[^A-Z0-9 _.\-]/g, "").slice(0, 12) || "A FRIEND", dive: Math.round(j.d), total: Math.max(0, Math.round(j.t)), depths: j.p.slice(0, PER_DAY).map((x: unknown) => Math.max(0, Number(x) || 0)) });
+      }
     } catch {}
     try {
       setMyName(localStorage.getItem(NAME_KEY) || "");
@@ -841,6 +1092,10 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     setCopied(false);
     setEarned(0);
     setShareMsg("");
+    setEarnNotes([]);
+    setNewBadges([]);
+    setChallengeMsg("");
+    startMusic();
     lockedAt.current = -1;
     deadline.current = Date.now() + SECONDS * 1000;
     setLeft(SECONDS);
@@ -850,6 +1105,28 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   };
 
   // the dive is over: save it, and ask the server for the live depths + today's curve
+  // BADGES: add the ones not won yet; each new one pays 10 leaves (pay = false: the caller adds them to its own payout)
+  const giveBadges = (ids: string[], pay = true): string[] => {
+    try {
+      const have = JSON.parse(localStorage.getItem(BADGES_KEY) || "[]") as string[];
+      const fresh = ids.filter((id) => !have.includes(id) && BADGES.some((b) => b.id === id));
+      if (!fresh.length) return [];
+      const all = [...have, ...fresh];
+      localStorage.setItem(BADGES_KEY, JSON.stringify(all));
+      setBadges(all);
+      setNewBadges((n) => [...n, ...fresh]);
+      if (pay) {
+        const now = Math.max(0, Number(localStorage.getItem(LEAVES_KEY)) || 0) + fresh.length * 10;
+        localStorage.setItem(LEAVES_KEY, String(now));
+        setLeaves(now);
+      }
+      [784, 988, 1318].forEach((f, i) => beep(f, f, 0.09, "square", 0.07, 0.5 + i * 0.08));
+      return fresh;
+    } catch {
+      return [];
+    }
+  };
+
   const finish = (all: Slot[], isPractice: boolean, d: number) => {
     const base: Result = { dive: d, slots: all, total: all.reduce((a, s) => a + s.depth, 0), players: 0, hist: {}, better: null, live: false };
     setResult(base);
@@ -858,15 +1135,43 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     if (isPractice) return;
     setRealTotal(base.total);
     setRealAnswers(all.map((x) => x.answer));
-    // WEED LEAVES: today's dive pays once
+    // WEED LEAVES (today's dive pays once; double on MUSIC FRIDAY), the STREAK, and the BADGES
     try {
       if (Number(localStorage.getItem(PAID_KEY)) !== d) {
-        const pay = leavesFor(base.total);
+        const notes: string[] = [];
+        let pay = leavesFor(base.total);
+        if (isMusicFriday(d)) {
+          pay *= 2;
+          notes.push("MUSIC FRIDAY x2");
+        }
+        const st = JSON.parse(localStorage.getItem(STREAK_KEY) || "null") as { last: number; count: number } | null;
+        const count = st && st.last === d - 1 ? st.count + 1 : st && st.last === d ? st.count : 1;
+        localStorage.setItem(STREAK_KEY, JSON.stringify({ last: d, count }));
+        setStreak(count);
+        const bonus = STREAK_BONUS[count] ?? 0;
+        if (bonus) {
+          pay += bonus;
+          notes.push(`${count} DAY STREAK +${bonus}`);
+        }
+        const got = ["first"];
+        if (all.some((x) => x.tier === 4)) got.push("million");
+        if (all.filter((x) => x.tier >= 3).length >= 3) got.push("deep3");
+        if (all.every((x) => x.tier >= 0)) got.push("perfect");
+        if (base.total >= 500) got.push("abyss");
+        if (count >= 7) got.push("streak7");
+        if (count >= 30) got.push("streak30");
+        if (isMusicFriday(d)) got.push("friday");
+        const fresh = giveBadges(got, false);
+        if (fresh.length) {
+          pay += fresh.length * 10;
+          notes.push(`${fresh.length} NEW BADGE${fresh.length > 1 ? "S" : ""} +${fresh.length * 10}`);
+        }
         const now = Math.max(0, Number(localStorage.getItem(LEAVES_KEY)) || 0) + pay;
         localStorage.setItem(LEAVES_KEY, String(now));
         localStorage.setItem(PAID_KEY, String(d));
         setLeaves(now);
         setEarned(pay);
+        setEarnNotes(notes);
       }
     } catch {}
     try {
@@ -992,7 +1297,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     // THE REPLAY: an answer you already gave in today's real dive doesn't count again
     const usedBefore = (h: Hit | null) => !!h && replay && !!realAnswers[at] && norm(realAnswers[at] ?? "") === norm(h.answer);
     if (hit && usedBefore(hit)) {
-      buzz("soft");
+      if (opts.vibration) buzz("soft");
       setSugg([]);
       setNote({ text: `YOU ALREADY USED ${hit.answer.toUpperCase()} IN TODAY'S DIVE - PICK ANOTHER`, bad: true });
       beep(160, 110, 0.18, "square", 0.08);
@@ -1003,7 +1308,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     if (hit) lock(hit);
     else {
       // didn't count: keep what was typed (so a typo is quick to fix) and offer the closest answers to tap
-      buzz("soft");
+      if (opts.vibration) buzz("soft");
       const close = (opts.spellHelp ? suggest(p, typed) : []).filter((h) => !usedBefore(h));
       setSugg(close);
       setNote({ text: close.length ? "NOT QUITE - DID YOU MEAN:" : `"${typed.trim().toUpperCase().slice(0, 24)}" ISN'T ON THE LIST - FIX IT OR TRY ANOTHER`, bad: true });
@@ -1075,6 +1380,91 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     setSaving(false);
   };
 
+  const musicDepth = screen === "intro" ? 0 : screen === "play" ? slots.reduce((a, x) => a + x.depth, 0) : (result?.total ?? 0);
+  const musicZone = ZONES.filter((z) => musicDepth >= z[0]).length; // 0 = the surface, then one per zone
+  const musicOn = opts.music && soundOn && screen !== "intro";
+  useEffect(() => {
+    const m = musicRef.current;
+    if (!m) return;
+    const now = m.ctx.currentTime;
+    m.master.gain.setTargetAtTime(musicOn ? 0.5 * level : 0, now, 0.4);
+    m.filter.frequency.setTargetAtTime(Math.max(260, 16000 * Math.exp(-musicDepth / 110)), now, 0.8); // deeper = more muffled
+    if (!musicOn || m.zone === musicZone) return;
+    // a new zone: its song fades in, the last one fades out
+    const song = ZONE_SONGS[Math.min(ZONE_SONGS.length - 1, musicZone)];
+    try {
+      const el = new Audio(song.file);
+      el.loop = true;
+      const src = m.ctx.createMediaElementSource(el);
+      const g = m.ctx.createGain();
+      g.gain.value = 0;
+      src.connect(g);
+      g.connect(m.filter);
+      void el.play().catch(() => {});
+      g.gain.setTargetAtTime(1, now, 0.7);
+      const old = m.cur;
+      if (old) {
+        old.g.gain.setTargetAtTime(0, now, 0.5);
+        window.setTimeout(() => {
+          old.el.pause();
+          try {
+            old.g.disconnect();
+          } catch {}
+        }, 2600);
+      }
+      m.cur = { el, g };
+      m.zone = musicZone;
+      setNowPlaying(song.title);
+    } catch {}
+  }, [musicOn, musicZone, musicDepth, level, screen]);
+  // the sonar: a ping every few seconds from the MIDNIGHT ZONE down (with its echo)
+  useEffect(() => {
+    if (!musicOn || musicDepth < 460) return;
+    const id = window.setInterval(() => {
+      const m = musicRef.current;
+      if (!m) return;
+      const t0 = m.ctx.currentTime, o = m.ctx.createOscillator(), g = m.ctx.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(1500, t0);
+      o.frequency.exponentialRampToValueAtTime(1380, t0 + 0.6);
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.16, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.9);
+      o.connect(g);
+      g.connect(m.master);
+      g.connect(m.echo);
+      o.start(t0);
+      o.stop(t0 + 1);
+    }, 3400);
+    return () => window.clearInterval(id);
+  }, [musicOn, musicDepth]);
+  // the music stops when you leave the page
+  useEffect(
+    () => () => {
+      const m = musicRef.current;
+      if (!m) return;
+      m.cur?.el.pause();
+      void m.ctx.close().catch(() => {});
+    },
+    [],
+  );
+  // (a saved result on the screen: the music starts on the first tap, browsers don't allow it sooner)
+  useEffect(() => {
+    if (screen !== "results") return;
+    const go = () => startMusic();
+    window.addEventListener("pointerdown", go, { once: true });
+    return () => window.removeEventListener("pointerdown", go);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
+  // badges from the results: deeper than 90% of today's divers, beating a friend
+  const vsToday = challenge && result && challenge.dive === result.dive;
+  useEffect(() => {
+    if (!result || practice) return;
+    if (result.live && result.players >= 5 && (result.better ?? 0) >= 90) giveBadges(["top"]);
+    if (vsToday && challenge && result.total > challenge.total) giveBadges(["beatfriend"]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, practice]);
+
   // ---------------- the ESC menu
   const openMenu = () => {
     if (screen === "play" && !reveal) pausedLeft.current = Math.max(0, (deadline.current - Date.now()) / 1000);
@@ -1126,6 +1516,8 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
     { label: "SPELL HELP", value: opts.spellHelp ? "ON" : "OFF", act: () => setOpt("spellHelp"), side: () => setOpt("spellHelp") },
     { label: "CLOCK BEEPS", value: opts.clockBeeps ? "ON" : "OFF", act: () => setOpt("clockBeeps"), side: () => setOpt("clockBeeps") },
     { label: "BIG TEXT", value: opts.bigText ? "ON" : "OFF", act: () => setOpt("bigText"), side: () => setOpt("bigText") },
+    { label: "VIBRATION", value: opts.vibration ? "ON" : "OFF", act: () => setOpt("vibration"), side: () => setOpt("vibration") },
+    { label: "MUSIC", value: opts.music ? "ON" : "OFF", act: () => setOpt("music"), side: () => setOpt("music") },
     { label: "HOW TO PLAY", act: () => setHelp((h) => !h) },
     ...(screen === "play" ? [] : [
           {
@@ -1201,6 +1593,32 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   }, [menu, shop, screen, reveal, practice, slots, dive, beep]);
 
   // ---------------- THE SUB SHOP
+  const ownsCount = (list: string[]) => list.filter((id) => SKINS.some((k) => k.id === id && k.price > 0) || GEAR.some((g) => g.id === id && g.price > 0)).length;
+  const buyGear = (g: Gear) => {
+    const has = g.price === 0 || owned.includes(g.id);
+    if (!has && leaves < g.price) {
+      beep(160, 110, 0.15, "square", 0.06);
+      return;
+    }
+    let list = owned;
+    if (!has) {
+      const left = leaves - g.price;
+      list = [...owned, g.id];
+      setLeaves(left);
+      setOwned(list);
+      try {
+        localStorage.setItem(LEAVES_KEY, String(left));
+        localStorage.setItem(OWNED_KEY, JSON.stringify(list));
+      } catch {}
+      [523, 784, 1046].forEach((f, i) => beep(f, f, 0.1, "square", 0.08, i * 0.08));
+      if (ownsCount(list) >= 6) giveBadges(["collector"]);
+    } else beep(700, 900, 0.08, "square", 0.06);
+    const on = { ...gear, [g.kind]: g.id };
+    setGear(on);
+    try {
+      localStorage.setItem(GEAR_KEY, JSON.stringify(on));
+    } catch {}
+  };
   const buySkin = (k: Skin) => {
     if (owned.includes(k.id)) {
       setSkinId(k.id);
@@ -1225,7 +1643,64 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
       localStorage.setItem(SKIN_KEY, k.id);
     } catch {}
     [523, 784, 1046].forEach((f, i) => beep(f, f, 0.1, "square", 0.08, i * 0.08));
+    if (ownsCount(now) >= 6) giveBadges(["collector"]);
   };
+
+  // ---------------- CHALLENGE A FRIEND: a link with your depth in it. Your friend plays the same daily dive, sees
+  // your soul in the sea where you ended, and at the end finds out who went deeper.
+  const challengeFriend = async () => {
+    if (!result) return;
+    const name = named?.name || myName.toUpperCase().slice(0, 12) || "A FRIEND";
+    const data = JSON.stringify({ n: name, d: result.dive, t: result.total, p: result.slots.map((x) => x.depth) });
+    const code = btoa(unescape(encodeURIComponent(data))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const url = `${window.location.origin}/games/pink-dive?vs=${code}`;
+    const text = `I dove ${metres(result.total)} on PINK DIVE #${result.dive}. Can you go deeper?`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ text, url });
+        return;
+      }
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") return;
+    }
+    try {
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      setChallengeMsg("CHALLENGE LINK COPIED - SEND IT TO A FRIEND");
+    } catch {
+      setChallengeMsg(url);
+    }
+  };
+
+  // ---------------- MUSIC: the zone's PINKMANE track, muffled by the depth (a low-pass filter), sonar pings deep down
+  type Music = { ctx: AudioContext; master: GainNode; filter: BiquadFilterNode; echo: DelayNode; cur: { el: HTMLAudioElement; g: GainNode } | null; zone: number };
+  const musicRef = useRef<Music | null>(null);
+  function startMusic() {
+    if (musicRef.current) {
+      void musicRef.current.ctx.resume().catch(() => {});
+      return;
+    }
+    try {
+      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AC();
+      const master = ctx.createGain();
+      master.gain.value = 0;
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 16000;
+      filter.Q.value = 0.8;
+      filter.connect(master);
+      // the sonar's echo
+      const echo = ctx.createDelay(1);
+      echo.delayTime.value = 0.42;
+      const fb = ctx.createGain();
+      fb.gain.value = 0.35;
+      echo.connect(fb);
+      fb.connect(echo);
+      echo.connect(master);
+      master.connect(ctx.destination);
+      musicRef.current = { ctx, master, filter, echo, cur: null, zone: -1 };
+    } catch {}
+  }
 
   // ---------------- SHARE TO INSTAGRAM: a story-sized picture (1080 x 1920) of the sea right now (your sub and the souls
   // around it) with your score on top. On a phone it opens the share menu (pick Instagram), on a computer it downloads.
@@ -1343,12 +1818,20 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
   // where the camera is: the depth so far while playing, your total on the results, the surface on the first screen
   const camDepth = screen === "intro" ? 0 : screen === "play" ? total : (result?.total ?? 0);
   // the souls: each other diver's ghost floats where their dive ended
-  const ghostSubs: GhostSub[] =
-    ghostsOn && board && screen !== "intro" ? board.ghosts.map((g) => ({ name: g.name, depth: g.depths.slice(0, PER_DAY).reduce((a, b) => a + b, 0) })) : [];
+  const ghostSubs: GhostSub[] = [
+    ...(ghostsOn && board && screen !== "intro" ? board.ghosts.map((g) => ({ name: g.name, depth: g.depths.slice(0, PER_DAY).reduce((a, b) => a + b, 0) })) : []),
+    // (the friend who challenged you, on today's dive: their soul waits where they ended)
+    ...(challenge && ghostsOn && screen !== "intro" && challenge.dive === dive ? [{ name: `VS ${challenge.name}`, depth: challenge.depths.reduce((a, b) => a + b, 0) }] : []),
+  ];
 
   return (
     <div className={`pd-root ${opts.bigText ? "pd-bigtext" : ""}`} style={{ fontFamily: pixelFont }}>
-      <Sea depth={camDepth} font={pixelFont} ghosts={ghostSubs} skin={skinOf(skinId)} />
+      <Sea depth={camDepth} font={pixelFont} ghosts={ghostSubs} skin={skinOf(skinId)} vibe={opts.vibration} gear={gear} onSee={() => giveBadges(["leviathan"])} />
+      {musicOn && nowPlaying && (
+        <a className="pd-np" href={SOUNDCLOUD} target="_blank" rel="noreferrer">
+          ♪ {nowPlaying.toUpperCase()} · PINKMANE
+        </a>
+      )}
 
       <Link
         href="/"
@@ -1409,6 +1892,56 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
             <div className="pd-menu-sub">
               <Leaf /> {leaves} WEED LEAVES · every daily dive pays 5, +1 for every 100 m
             </div>
+            <div className="pd-shop-tabs">
+              {(
+                [
+                  ["subs", "SUBS"],
+                  ["trail", "TRAILS"],
+                  ["light", "LIGHTS"],
+                  ["top", "TOPPERS"],
+                  ["badges", `BADGES ${badges.length}/${BADGES.length}`],
+                ] as const
+              ).map(([id, label]) => (
+                <button key={id} className={`pd-shop-tab ${shopTab === id ? "pd-shop-tab-on" : ""}`} onClick={() => setShopTab(id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {shopTab === "badges" && (
+              <div className="pd-badge-grid">
+                {BADGES.map((b) => {
+                  const has = badges.includes(b.id);
+                  return (
+                    <div key={b.id} className={`pd-badge ${has ? "pd-badge-has" : ""}`}>
+                      <span className="pd-badge-icon">{has ? b.icon : "?"}</span>
+                      <span className="pd-shop-name">{b.name}</span>
+                      <span className="pd-badge-how">{b.how}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {(shopTab === "trail" || shopTab === "light" || shopTab === "top") && (
+              <div className="pd-shop-grid">
+                {GEAR.filter((g) => g.kind === shopTab).map((g) => {
+                  const has = g.price === 0 || owned.includes(g.id), on = gear[g.kind] === g.id, can = leaves >= g.price;
+                  return (
+                    <button key={g.id} className={`pd-shop-item ${on ? "pd-shop-on" : ""}`} onClick={() => buyGear(g)} disabled={!has && !can}>
+                      <span className="pd-gear-icon">{g.kind === "trail" ? "≋" : g.kind === "light" ? "◐" : "♛"}</span>
+                      <span className="pd-shop-name">{g.name}</span>
+                      <span className="pd-shop-price">
+                        {on ? "ON" : has ? "USE" : (
+                          <>
+                            <Leaf size={10} /> {g.price}
+                          </>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {shopTab === "subs" && (
             <div className="pd-shop-grid">
               {SKINS.map((k) => {
                 const has = owned.includes(k.id), on = skinId === k.id, can = leaves >= k.price;
@@ -1427,6 +1960,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
                 );
               })}
             </div>
+            )}
             <button className="pd-btn" style={{ marginTop: 14 }} onClick={() => setShop(false)}>
               BACK
             </button>
@@ -1444,10 +1978,19 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
             <br />
             the rarer your answer, the deeper you sink
           </p>
+          {isMusicFriday(dive) && <div className="pd-banner pd-banner-friday">🎧 MUSIC FRIDAY · ALL MUSIC QUESTIONS · DOUBLE LEAVES</div>}
+          {challenge && (
+            <div className="pd-banner pd-banner-vs">
+              {challenge.dive === dive
+                ? `⚔ ${challenge.name} DOVE ${metres(challenge.total)} TODAY · CAN YOU GO DEEPER?`
+                : `⚔ ${challenge.name}'S CHALLENGE WAS FOR DIVE #${challenge.dive} · TODAY'S DIVE IS A NEW ONE`}
+            </div>
+          )}
           <button className="pd-btn pd-big" onClick={() => begin(false)}>
             DIVE
           </button>
           <div className="pd-shop-row">
+            {streak > 0 && <span className="pd-streak">🔥 {streak} DAY{streak > 1 ? "S" : ""}</span>}
             <span className="pd-leaves">
               <Leaf /> {leaves}
             </span>
@@ -1654,12 +2197,36 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
             </div>
           )}
 
+          {vsToday && challenge && (
+            <div className={`pd-banner ${result.total > challenge.total ? "pd-banner-win" : "pd-banner-vs"}`}>
+              {result.total > challenge.total
+                ? `⚔ YOU BEAT ${challenge.name} BY ${metres(result.total - challenge.total).replace("-", "")}!`
+                : result.total === challenge.total
+                  ? `⚔ A DRAW WITH ${challenge.name}`
+                  : `⚔ ${challenge.name} WINS BY ${metres(challenge.total - result.total).replace("-", "")}`}
+            </div>
+          )}
+
           {earned > 0 && (
             <div className="pd-earned">
               +{earned} <Leaf size={14} /> WEED LEAVES · YOU HAVE {leaves} ·{" "}
               <button className="pd-link" onClick={() => setShop(true)}>
                 SUB SHOP
               </button>
+              {earnNotes.length > 0 && <div className="pd-earn-notes">{earnNotes.join(" · ")}</div>}
+            </div>
+          )}
+          {!practice && streak > 0 && <div className="pd-streak-line">🔥 {streak} DAY STREAK · COME BACK TOMORROW TO KEEP IT</div>}
+          {newBadges.length > 0 && (
+            <div className="pd-newbadges">
+              {newBadges.map((id) => {
+                const b = BADGES.find((x) => x.id === id)!;
+                return (
+                  <div key={id} className="pd-badge-new">
+                    <span className="pd-badge-icon">{b.icon}</span> NEW BADGE: {b.name}
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -1667,6 +2234,11 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
             {!testDive && (
               <button className="pd-btn pd-insta" onClick={() => void shareStory()}>
                 SHARE TO INSTAGRAM
+              </button>
+            )}
+            {!practice && !testDive && (
+              <button className="pd-btn pd-vs-btn" onClick={() => void challengeFriend()}>
+                ⚔ CHALLENGE A FRIEND
               </button>
             )}
             {!practice && (
@@ -1692,6 +2264,7 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
             </button>
           </div>
           {shareMsg && <div className="pd-better" style={{ textAlign: "center" }}>{shareMsg}</div>}
+          {challengeMsg && <div className="pd-better" style={{ textAlign: "center", wordBreak: "break-all" }}>{challengeMsg}</div>}
           {realTotal !== null && !testDive ? (
             <div className="pd-tomorrow">
               <div className="pd-tomorrow-big">✓ TODAY&apos;S DIVE IS DONE</div>
@@ -1796,6 +2369,27 @@ export default function PinkDive({ pixelFont }: { pixelFont: string }) {
         .pd-shop-on { border-color: #ffd84a; background: #4a1c5e; box-shadow: 3px 3px 0 #000; }
         .pd-shop-name { font-size: 8px; }
         .pd-shop-price { font-size: 8px; color: #b4ff8c; }
+        .pd-banner { margin: 10px 0 4px; padding: 8px; font-size: 7px; line-height: 1.8; border: 2px solid; }
+        .pd-banner-friday { color: #9fe8ff; border-color: #9fe8ff; }
+        .pd-banner-vs { color: #ffb07a; border-color: #ffb07a; }
+        .pd-banner-win { color: #b4ff8c; border-color: #b4ff8c; font-size: 9px; }
+        .pd-streak { font-size: 9px; color: #ffb07a; }
+        .pd-streak-line { margin-top: 6px; font-size: 7px; color: #ffb07a; text-align: left; }
+        .pd-earn-notes { font-size: 7px; color: rgba(255, 255, 255, 0.7); }
+        .pd-newbadges { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+        .pd-badge-new { font-size: 8px; color: #ffd84a; text-align: left; animation: pd-pop 0.5s ease-out; }
+        @keyframes pd-pop { from { transform: scale(1.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        .pd-vs-btn { background: #7a2c14; }
+        .pd-np { position: fixed; left: 10px; bottom: max(10px, env(safe-area-inset-bottom)); z-index: 6; font-size: 7px; color: #ffe6f7; background: rgba(11, 6, 20, 0.7); padding: 5px 8px; text-decoration: none; border: 1px solid rgba(255, 255, 255, 0.25); }
+        .pd-shop-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
+        .pd-shop-tab { font-family: inherit; font-size: 7px; color: #fff; background: #2a1438; border: 2px solid rgba(255, 255, 255, 0.3); padding: 6px 8px; cursor: pointer; }
+        .pd-shop-tab-on { background: ${PINK}; border-color: #fff; color: #12041c; }
+        .pd-gear-icon { font-size: 22px; line-height: 32px; }
+        .pd-badge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 14px; }
+        .pd-badge { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 6px; border: 2px dashed rgba(255, 255, 255, 0.25); opacity: 0.55; text-align: center; }
+        .pd-badge-has { opacity: 1; border-style: solid; border-color: #ffd84a; }
+        .pd-badge-icon { font-size: 18px; }
+        .pd-badge-how { font-size: 6px; color: rgba(255, 255, 255, 0.65); line-height: 1.6; }
         .pd-tomorrow { margin-top: 14px; padding: 12px 10px; border: 2px dashed #ffd84a; font-size: 8px; line-height: 2; color: #fff; }
         .pd-tomorrow-big { font-size: 11px; color: #ffd84a; }
         .pd-tomorrow-clock { margin-top: 2px; font-size: 13px; color: #9fe8ff; letter-spacing: 1px; }

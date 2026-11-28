@@ -8,6 +8,8 @@ const PATTERNS = {
   hit: 35, // took a hit / lost a life / crashed
   end: [45, 50, 110], // the run is over
   soft: 15, // a wrong answer, a small bump
+  dive: [14, 26, 14, 26, 14, 26, 14, 26, 14, 26, 14, 26, 14, 26, 14], // PINK DIVE: the rumble while your sub sinks
+  land: [40, 50, 90], // PINK DIVE: thud, the sub stops at its new depth
 };
 
 let last = 0;

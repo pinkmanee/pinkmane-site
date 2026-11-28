@@ -74,13 +74,44 @@ const oldDive = (dive: number) => {
 };
 const allSet = makeRounds(PROMPTS, Array.from({ length: OLD_DIVES }, (_, i) => oldDive(i + 1).map((p) => p.id)).flat());
 
-/** the 7 prompts of a dive (the same for everyone) */
-export function promptsForDive(dive: number): Prompt[] {
+// MUSIC FRIDAY: every Friday (from 4 Dec 2026, DIVE #9) the 7 prompts are all MUSIC ones, and the dive pays double
+// weed leaves (PinkDive.tsx). The music prompts take turns in their own shuffled order, skipping any from the days around it.
+const FIRST_MUSIC_FRIDAY = 9;
+export const isMusicFriday = (dive: number) => dive >= FIRST_MUSIC_FRIDAY && (dive - FIRST_MUSIC_FRIDAY) % 7 === 0;
+const musicSet = makeRounds(PROMPTS.filter((p) => p.cat === "MUSIC"));
+
+function normalDive(dive: number): Prompt[] {
   if (dive <= OLD_DIVES) return oldDive(dive);
   const n = dive - OLD_DIVES;
   const round = Math.floor((n - 1) / allSet.perRound);
   const at = ((n - 1) % allSet.perRound) * PER_DAY;
   return allSet.get(round).slice(at, at + PER_DAY);
+}
+
+/** the 7 prompts of a dive (the same for everyone) */
+export function promptsForDive(dive: number): Prompt[] {
+  if (!isMusicFriday(dive)) return normalDive(dive);
+  const k = (dive - FIRST_MUSIC_FRIDAY) / 7; // the how-manyth MUSIC FRIDAY this is
+  const recent = new Set<string>();
+  // (none from the 6 days before or the 6 days after, so nothing comes back within a week)
+  const gap = new Map<string, number>(); // how many days away the nearest other use of each prompt is
+  for (let d = dive - 6; d <= dive + 6; d++)
+    if (d >= 1 && d !== dive && !isMusicFriday(d))
+      for (const p of normalDive(d)) {
+        recent.add(p.id);
+        gap.set(p.id, Math.min(gap.get(p.id) ?? 99, Math.abs(d - dive)));
+      }
+  const order = musicSet.get(Math.floor(k / Math.max(1, musicSet.perRound)));
+  const start = (k * PER_DAY) % Math.max(1, order.length);
+  const out: Prompt[] = [];
+  for (let i = 0; i < order.length && out.length < PER_DAY; i++) {
+    const p = order[(start + i) % order.length];
+    if (!recent.has(p.id) && !out.includes(p)) out.push(p);
+  }
+  // (if too few are free: the ones whose other use is the furthest away)
+  const spare = order.filter((p) => !out.includes(p)).sort((a, b) => (gap.get(b.id) ?? 99) - (gap.get(a.id) ?? 99));
+  while (out.length < PER_DAY && spare.length) out.push(spare.shift()!);
+  return out;
 }
 
 /** 7 random prompts for PRACTICE (not today's ones) */
